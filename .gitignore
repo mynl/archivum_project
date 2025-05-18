@@ -1,0 +1,57 @@
+# === Python bytecode ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# === Virtual environments ===
+venv/
+.env/
+.venv/
+
+# === Editor and OS files ===
+*.swp          # Vim swap files
+file-database.sublime-project
+file-database.sublime-workspace
+Thumbs.db      # Windows
+
+# === Jupyter / Quarto / Notebook junk ===
+.ipynb_checkpoints/
+*.nbconvert.*
+*.qmd~
+
+# === Logs and temp files ===
+*.log
+*.tmp
+*.bak
+
+# === Python packaging ===
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# === Test and coverage ===
+.coverage
+htmlcov/
+.tox/
+pytest_cache/
+.cache/
+
+# === VSCode and PyCharm settings ===
+.vscode/
+.idea/
+
+# === User config ===
+*.env
+*.toml.local
+config.yaml
+secrets.yaml
+
+# === Data artifacts (optional) ===
+data/
+*.feather
+*.sqlite
+*.db
+
+*.sublime-workspace
+*.sublime-project
