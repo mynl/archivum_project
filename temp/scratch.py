@@ -1,12 +1,21 @@
 """Script experiments."""
 
 from pathlib import Path
-import pandas as pd
 import re
+
+import pandas as pd
+# import latexcodec
 
 
 class Bib2df():
     """Bibtex file to dataframe."""
+
+    _r_brace1 = re.compile(r'{(.)}')
+    _r_brace2 = re.compile(r'{{(.)}}')
+    _r_initials1 = re.compile(r'([A-Z])(?:\.| )?([A-Z])(?:\.| )?([A-Z])\.?')   # for A.B.C. -> A. B. C.
+    _r_initials2 = re.compile(r'([A-Z])(?:\.| )?([A-Z])(\.|$)')   # for AH -> A. H.
+    _r_initials3 = re.compile(r' ([A-Z])$')            # for A  -> A.
+
 
     def __init__(self, p, fillna=True):
         """
@@ -41,7 +50,9 @@ class Bib2df():
         result = {}
 
         # Step 1: Extract type and tag
-        header_match = re.match(r'(\w+)\{([^,]+),', entry)
+        # windows GS bibtex pastes come in with \r\n
+        entry = entry.replace('\r\n  ', '\n')
+        header_match = re.match(r'@?(\w+)\{([^,]+),', entry)
         if not header_match:
             print("Error: Unable to parse entry header.")
             return None
@@ -60,6 +71,36 @@ class Bib2df():
                 print('going slow')
                 return Bib2df.parse_line_slow(entry)
         return result
+
+    @staticmethod
+    def parse_gs(entry):
+        """Parse a Google Scholar Bibtex entry, copied and pasted."""
+        result = {}
+
+        # Step 1: Extract type and tag
+        # windows GS bibtex pastes come in with \r\n
+        entry = entry.replace('\r\n  ', '\n')
+        header_match = re.match(r'@?(\w+)\{([^,]+),', entry)
+        if not header_match:
+            print("Error: Unable to parse entry header.")
+            return None
+        result['type'], result['tag'] = header_match.groups()
+
+        # Step 2: Remove header and final trailing '}'
+        body = entry[header_match.end():].strip()
+        if body.endswith('}'):
+            body = body[:-1].strip() + ",\n"
+
+        # GS has no spaces around equals
+        for m in re.finditer(r'([a-zA-Z\-]+)={(.*?)},\n', body, flags=re.DOTALL):
+            try:
+                k, v = m.groups()
+                result[k] = v
+            except ValueError:
+                print('going slow')
+                return Bib2df.parse_line_slow(entry)
+        return result
+
 
     @staticmethod
     def parse_line_slow(entry):
@@ -112,7 +153,8 @@ class Bib2df():
                         self._file_errs.append([i, x[1:]])
             except AttributeError:
                 self._file_errs.append([i, 'Attribute', f.file])
-        self._file_field_df = pd.DataFrame(ans, columns=['i', 'drive', 'file', 'type']).set_index('i', drop=False)
+        self._file_field_df = pd.DataFrame(ans, columns=['idx', 'drive', 'file', 'type']).set_index('idx', drop=False)
+        self._file_field_df.index.name = 'i'
 
     def contents(self, verbose=False):
         """Contents info on df - distinct values, fields etc."""
@@ -131,6 +173,23 @@ class Bib2df():
         cdf = pd.DataFrame(ans, columns=['column', 'nonna', 'distinct'])
         return cdf
 
+    def author_map_df(self):
+        """DataFrame of author name showing a transition to a normalized form."""
+        df = pd.DataFrame({'original': self.distinct('author')})
+        self.last_decode = []
+        df['unicoded'] = df.original.map(self.tex_to_unicode)
+        df['initials'] = df.unicoded.map(self.normalize_initials)
+        df['proposed'] = df.initials
+        print(f'Decode errors: {len(self.last_decode) = }')
+        return df
+
+    def journal_map_df(self):
+        df = pd.DataFrame({'original': self.distinct('journal')})
+        self.last_decode = []
+        df['unicoded'] = df.original.map(self.tex_to_unicode)
+        print(f'Decode errors: {len(self.last_decode) = }')
+        return df
+
     def distinct(self, c):
         """Return distinct occurrences of col c."""
         if c == 'author':
@@ -140,3 +199,30 @@ class Bib2df():
         else:
             return sorted(set([i for i in self.df[c] if i != '']))
 
+    def tex_to_unicode(self, s: str) -> str:
+        """Tex codes to Unicode for a string and removing braces with single character."""
+        try:
+            s = self._r_brace2.sub(r'\1', s.encode('latin1').decode('latex'))
+            s= self._r_brace1.sub(r'\1', s)
+            if s.find(',') > 0 and s == s.upper():
+                s = s.title()
+            return s
+        except ValueError as e:
+            self.last_decode.append(f'tex_to_unicode DECODE ERR | {s:<25s} | {e}')
+            return s
+
+    _r_filter = re.compile(r'^[A-Z]{,5}$')
+
+    def normalize_initials(self, s: str) -> str:
+        """Ensure initials all have periods."""
+
+        try:
+            if  self._r_filter.match(s):
+                return s
+            s1 = self._r_initials1.sub(r'\1. \2. \3.', s)
+            s2 = self._r_initials2.sub(r'\1. \2.', s1)
+            s3 = self._r_initials3.sub(r' \1.', s2)
+            return s3
+        except ValueError as e:
+            self.last_decode.append(f'normalize_initials INITIALS ERR: {s:<25s}\t{e}')
+            return s
