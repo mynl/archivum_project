@@ -1,11 +1,87 @@
 """Script experiments."""
 
 from collections import namedtuple
+from collections import defaultdict
+
 from pathlib import Path
 import re
+import unicodedata
 
+import numpy as np
 import pandas as pd
-# import latexcodec
+import latexcodec
+
+
+def remove_accents(s: str) -> str:
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', s)
+        if unicodedata.category(c) != 'Mn'
+    )
+
+
+def safeyear(s):
+    """Safe format of s as a year."""
+    try:
+        return f'{int(s)}'
+    except:
+        return s
+
+
+def suggest_tag(df):
+    """Suggest a tag from a row of df."""
+    a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(r' |\.|\{|\}|\-', '', regex=True)
+    e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(r' |\.|\{|\}|\-', '', regex=True)
+    y = df['year'].map(safeyear)
+    return np.where(a != '', a + y, np.where(e!='', e + y, 'NOTAG'))
+    # a, e, y = row[['author', 'editor', 'year']]
+    # a = remove_accents(a.split(',')[0])
+    # e = remove_accents(e.split(',')[0])
+    # y = safeyear(y)
+    # if a != '':
+    #     return f'{a}{y}'
+    # elif e != '':
+    #     return f'{e}{y}'
+    # else:
+    #     print(row.index, 'NO A OR E')
+
+def suggest_filename(s):
+    """Clean file name for windows."""
+    pass
+
+
+class KeyAllocator:
+    def __init__(self, existing: set[str]):
+        self.existing = set(existing)
+        self.pattern = re.compile(r'^([A-Z][^0-9]+)(\d{4})([a-z]?)$')
+        self.allocators = defaultdict(self._make_iter)
+
+    def _make_iter(self):
+        def gen():
+            yield ''  # first without suffix
+            for c in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':
+                yield c
+        return gen()
+
+    def next_key(self, tag) -> str:
+        # name: str, year: int
+        m = self.pattern.match(tag)
+        try:
+            name = m[1]
+            year = m[2]
+        except TypeError:
+            # m - none, no match found
+            return tag
+        else:
+            base = f"{name}{year}"
+            it = self.allocators[(name, year)]
+            while True:
+                suffix = next(it)
+                candidate = base + suffix
+                if candidate not in self.existing:
+                    self.existing.add(candidate)
+                    return candidate
+
+    __call__ = next_key
 
 
 class Bib2df():
@@ -46,6 +122,7 @@ class Bib2df():
     }
     _re_subs_compiled = re.compile('|'.join(map(re.escape, _re_subs)))
 
+    base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
 
     def __init__(self, p, fillna=True):
         """
@@ -191,12 +268,16 @@ class Bib2df():
         self._file_field_df = pd.DataFrame(ans, columns=['idx', 'drive', 'file', 'type']).set_index('idx', drop=False)
         self._file_field_df.index.name = 'i'
 
-    def contents(self, verbose=False):
+    def contents(self, ported=False, verbose=False):
         """Contents info on df - distinct values, fields etc."""
         ans = []
-        for c in self.df.columns:
-            vc = self.df[c].value_counts()
-            nonna = len(self.df) - sum(self.df[c].isna())
+        if ported:
+            df = self.ported_df
+        else:
+            df = self.df
+        for c in df.columns:
+            vc = df[c].value_counts()
+            nonna = len(df) - sum(df[c].isna())
             ans.append([c, nonna, len(vc)])
             if verbose:
                 print(c)
@@ -221,13 +302,6 @@ class Bib2df():
             self._author_map_df = df
         return self._author_map_df
 
-    def journal_map_df(self):
-        df = pd.DataFrame({'original': self.distinct('journal')})
-        self.last_decode = []
-        df['unicoded'] = df.original.map(self.tex_to_unicode)
-        print(f'Decode errors: {len(self.last_decode) = }')
-        return df
-
     def distinct(self, c):
         """Return distinct occurrences of col c."""
         if c == 'author':
@@ -237,6 +311,7 @@ class Bib2df():
         else:
             return sorted(set([i for i in self.df[c] if i != '']))
 
+    # special unicode errors
     _errors_mapper = {'Caicedo, Andr´es Eduardo': 'Caicedo, Andrés Eduardo',
  'Cerreia‐Vioglio, Simone': 'Cerreia‐Vioglio, Simone',
  'Cerreia–Vioglio, S.': 'Cerreia–Vioglio, S.',
@@ -362,6 +437,10 @@ class Bib2df():
         # mendeley-tags
 
         # ============================================================================================
+        # citations
+
+
+        # ============================================================================================
         # edition
 
         # ============================================================================================
@@ -382,3 +461,11 @@ class Bib2df():
         for k, v in self.all_unicode_errors.items():
             ans = ans.union(set([c for l in v for c in l if len(c.encode('utf-8')) > 1]))
         return ans
+
+    def no_file(self):
+        """Entries with no files listed."""
+        return self.df.loc[self.df.file == '', self.base_cols]
+
+    def suggested_tag(self):
+        df = self.ported_df.copy().sort_values(['author', 'year'])
+

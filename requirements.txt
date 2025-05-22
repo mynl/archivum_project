@@ -1,0 +1,5 @@
+click==8.1.7
+greater_tables==1.0.0
+prompt_toolkit==3.0.45
+PyYAML==6.0.1
+PyYAML==6.0.2
