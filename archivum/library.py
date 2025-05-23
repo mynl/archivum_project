@@ -20,7 +20,6 @@ import pandas as pd
 
 from . import BASE_DIR, APP_SUFFIX
 from . querier import query_ex, query_help as query_help_work
-from . disk_info import DriveInfo
 from . hasher import hash_many
 
 
