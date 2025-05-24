@@ -37,3 +37,6 @@ PDF reference manager.
 | isbn        | Maybe    | Occasionally used for books                         |
 | issn        | Drop     | Rarely shown in citation styles                     |
 | language    | Drop     | Not typically cited                                 |
+
+
+## Porting an Existing Mendeley Library

@@ -23,3 +23,4 @@ class Reference:
 
     def open(self):
         # open pdf
+        pass

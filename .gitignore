@@ -30,6 +30,9 @@ dist/
 build/
 .eggs/
 
+# === docs ===
+docs/_build
+
 # === Test and coverage ===
 .coverage
 htmlcov/

@@ -11,7 +11,6 @@ Querying uses a file-database project-like combo regex-sql (querex) querier.
 from datetime import datetime
 from pathlib import Path
 import re
-import socket
 import subprocess
 import time
 import yaml
@@ -42,11 +41,6 @@ class Library():
         # print(self.config_path)
         with self.config_path.open() as f:
             self._config = yaml.safe_load(f)
-            self.hostname = socket.gethostname()
-            if self.hostname.lower() != self._config['hostname'].lower():
-                print(
-                    f"WARNING: Host name {self.hostname} of machine does not match config file {cfg['hostname']}."
-                )
         self._database = pd.DataFrame([])
         self._config_df = None
         self._last_query = None
@@ -170,7 +164,7 @@ class Library():
         """Dataframe of all projects in default location."""
         # not sure what the best "way around" is for this...
         df = pd.concat(
-            [ProjectManager(p).config_df for p in ProjectManager.list()],
+            [Library(p).config_df for p in Library.list()],
             axis=1).T.fillna('')
-        df = df.set_index('project').T
+        df = df.set_index('library').T
         return df

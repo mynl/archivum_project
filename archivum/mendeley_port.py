@@ -10,8 +10,9 @@ import latexcodec
 import numpy as np
 import pandas as pd
 
+from . import BASE_DIR
 from . trie import Trie
-from . utilities import remove_accents, accent_mapper_dict
+from . utilities import remove_accents, accent_mapper_dict, safeyear, KeyAllocator
 
 
 def suggest_tag(df):
@@ -25,9 +26,16 @@ def suggest_tag(df):
 class Bib2df():
     """Bibtex file to dataframe."""
 
+    # for de-texing single characters in braces
     _r_brace1 = re.compile(r'{(.)}')
     _r_brace2 = re.compile(r'{{(.)}}')
 
+    # base columns used by the app for quick output displays
+    base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
+
+    # =====================================================================================================
+    # user defined mappers: these should be customized for each import
+    # _char_map is less likely to be changed: it is applied to the raw text read from the bibtex file
     _char_unicode_dict = {
         '“': '"',    # left double quote
         '”': '"',    # right double quote
@@ -50,21 +58,73 @@ class Bib2df():
 
     _char_map = str.maketrans(_char_unicode_dict)
 
-    # for regexp based fixes
+    # _re_subs is also applied to raw text to adjust en and em dashes.
     _re_subs = {
         '–': '--',    # en dash → hyphen
         '—': '---',    # em dash → hyphen
     }
     _re_subs_compiled = re.compile('|'.join(map(re.escape, _re_subs)))
 
-    base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
+    # special unicode errors used by tex_to_unicode
+    errors_mapper = {'Caicedo, Andr´es Eduardo': 'Caicedo, Andrés Eduardo',
+                     'Cerreia‐Vioglio, Simone': 'Cerreia‐Vioglio, Simone',
+                     'Cerreia–Vioglio, S.': 'Cerreia–Vioglio, S.',
+                     'Cireşan, Dan': 'Cireșan, Dan',
+                     'J.B., SEOANE-SEP´ULVEDA': 'J.B., Seoane-Sepúlveda',
+                     'JIM´ENEZ-RODR´IGUEZ, P.': 'Jiménez-Rodríguez, P.',
+                     'Joldeş, Mioara': 'Joldeș, Mioara',
+                     'Lesne, Jean‐Philippe ‐P': 'Lesne, Jean‐Philippe ‐P',
+                     'MU˜NOZ-FERN´ANDEZ, G.A.': 'Muñoz-Fernández, G.A.',
+                     'Naneş, Ana Maria': 'Naneș, Ana Maria',
+                     'Paradıs, J': 'Paradís, J',
+                     "P{\\'{a}}stor, Ľ": 'Pástor, Ľ',
+                     'Uludağ, Muhammed': 'Uludağ, Muhammed',
+                     'Ulug{\\"{u}}lyaǧci, Abdurrahman': 'Ulugülyaǧci, Abdurrahman',
+                     'Zitikis, Riċardas': 'Zitikis, Riċardas',
+                     'de la Pen̄a, Victor H.': 'de la Peña, Victor H.',
+                     "{L{\\'{o}}pez\xa0de\xa0Vergara}, Jorge E.": 'López\xa0de\xa0Vergara, Jorge E.'}
+
+    # for mapping the edition bibtex field, used in port_mendeley_file
+    edition_mapper = {
+        "10": "Tenth",
+        "2": "Second",
+        "2nd": "Second",
+        "2nd Editio": "Second",
+        "3": "Third",
+        "3rd": "Third",
+        "5": "Fifth",
+        "Enlarged": "Enlarged",
+        "Fifth": "Fifth",
+        "First": "First",
+        "Fourth": "Fourth",
+        "Ninth": "Ninth",
+        "Second": "Second",
+        "Second Edi": "Second",
+        "Seventh": "Seventh",
+        "Sixth": "Sixth",
+        "Third": "Third",
+        "fourth": "Fourth",
+    }
+
+    # used by port_mendeley_file to drop fields from input bibtex file
+    omitted_menedely_fields = ['abstract', 'annote', 'issn', 'isbn', 'archivePrefix', 'arxivId', 'eprint', 'pmid',
+                               'primaryClass', 'series', 'chapter', 'school',
+                               'organization', 'howpublished', 'keywords'
+                               ]
+
+    # end customizable mappers
+    # =====================================================================================================
 
     def __init__(self, p, fillna=True):
         """
         Read Path p into bibtex df.
 
-        Use fillna=False to use contents.
+        Use fillna=False to use the contents functions (see missing fields).
+
+        Note: this function is "bibtex" file based and creates a dataframe, whereas
+        the Library class is dataframe based and creates a bibtex file.
         """
+        self.bibtex_file_path = p
         self.txt = p.read_text(encoding='utf-8').translate(self._char_map)
         self.txt, n = self._re_subs_compiled.subn(lambda m: self._re_subs[m.group()], self.txt)
         print(f'uber regex sub found {n = } replacements')
@@ -268,27 +328,14 @@ class Bib2df():
         else:
             return sorted(set([i for i in self.df[c] if i != '']))
 
-    # special unicode errors
-    _errors_mapper = {'Caicedo, Andr´es Eduardo': 'Caicedo, Andrés Eduardo',
-                      'Cerreia‐Vioglio, Simone': 'Cerreia‐Vioglio, Simone',
-                      'Cerreia–Vioglio, S.': 'Cerreia–Vioglio, S.',
-                      'Cireşan, Dan': 'Cireșan, Dan',
-                      'J.B., SEOANE-SEP´ULVEDA': 'J.B., Seoane-Sepúlveda',
-                      'JIM´ENEZ-RODR´IGUEZ, P.': 'Jiménez-Rodríguez, P.',
-                      'Joldeş, Mioara': 'Joldeș, Mioara',
-                      'Lesne, Jean‐Philippe ‐P': 'Lesne, Jean‐Philippe ‐P',
-                      'MU˜NOZ-FERN´ANDEZ, G.A.': 'Muñoz-Fernández, G.A.',
-                      'Naneş, Ana Maria': 'Naneș, Ana Maria',
-                      'Paradıs, J': 'Paradís, J',
-                      "P{\\'{a}}stor, Ľ": 'Pástor, Ľ',
-                      'Uludağ, Muhammed': 'Uludağ, Muhammed',
-                      'Ulug{\\"{u}}lyaǧci, Abdurrahman': 'Ulugülyaǧci, Abdurrahman',
-                      'Zitikis, Riċardas': 'Zitikis, Riċardas',
-                      'de la Pen̄a, Victor H.': 'de la Peña, Victor H.',
-                      "{L{\\'{o}}pez\xa0de\xa0Vergara}, Jorge E.": 'López\xa0de\xa0Vergara, Jorge E.'}
-
     def tex_to_unicode(self, s_in: str) -> str:
-        """Tex codes to Unicode for a string and removing braces with single character."""
+        """
+        Tex codes to Unicode for a string and removing braces with single character.
+
+        Errors are added to self.last_decode and looked up in the dictionary
+        self.errors_mapper. Work iteratively: run, look at errors, add or update
+        entries in self.errors_mapper.
+        """
         if pd.isna(s_in):
             return s_in
         try:
@@ -298,8 +345,8 @@ class Bib2df():
                 s = s.title()
             return s
         except ValueError as e:
-            s = self._errors_mapper.get(s_in, s_in)
-            if s_in not in self._errors_mapper:
+            s = self.errors_mapper.get(s_in, s_in)
+            if s_in not in self.errors_mapper:
                 self.last_decode.append(s_in)
             # (f'tex_to_unicode DECODE ERR | {s:<25s} | {e}')
             return s
@@ -335,37 +382,34 @@ class Bib2df():
         mapper.update(manual_updates)
         return mapper
 
-    def map_authors(self, df_name='ported_df', debug=True):
+    def map_authors(self, df_name='ported_df'):
         """Actually apply the author mapper to the author column."""
         df = getattr(self, df_name)
-        if debug:
-            df['author_original'] = df.author.copy()
-            am = self.author_mapper()
+        am = self.author_mapper()
 
-            def f(x):
-                sx = x.split(' and ')
-                msx = map(lambda x: am.get(x, x), sx)
-                return ' and '.join(msx)
+        def f(x):
+            sx = x.split(' and ')
+            msx = map(lambda x: am.get(x, x), sx)
+            return ' and '.join(msx)
 
-            df.author = df.author.map(f)
+        df.author = df.author.map(f)
+        # audit
+        amdf = pd.DataFrame(am.items(), columns=['key', 'value'])
+        self.save_audit_file(amdf, '.author-mapping')
 
-    def port_mendeley_file(self, debug=True):
+    def port_mendeley_file(self):
         """
         Normalize each text-based field.
 
         Runs through each task in turn, see comments.
         """
-        dropped_fields = ['abstract', 'annote', 'issn', 'isbn', 'archivePrefix', 'arxivId', 'eprint', 'pmid',
-                          'primaryClass', 'series', 'chapter', 'school',
-                          'organization', 'howpublished', 'keywords'
-                          ]
-        kept_fields = [i for i in self.df.columns if i not in dropped_fields]
+        kept_fields = [i for i in self.df.columns if i not in self.omitted_menedely_fields]
 
         self.ported_df = self.df[kept_fields].copy()
 
         # ============================================================================================
-        # author
-        self.map_authors('ported_df', debug)
+        # author: initials, extend, accents
+        self.map_authors('ported_df')
 
         # ============================================================================================
         # de-tex other text fields
@@ -375,56 +419,84 @@ class Bib2df():
             self.last_decode = []
             self.ported_df[f] = self.ported_df[f].map(self.tex_to_unicode)
             if len(self.last_decode):
-                print(f'Field: {f}\n{len(self.last_decode) = }')
+                print(f'\tField: {f}\t{len(self.last_decode) = }')
                 self.all_unicode_errors[f] = self.last_decode.copy()
             print(f'Fixed {f}')
-
+        # audit unicode errors
+        ans = []
+        for k, v in self.all_unicode_errors.items():
+            for mc in v:
+                ans.append([k, mc])
+        temp = pd.DataFrame(ans, columns=['field', 'miscode'])
+        self.save_audit_file(temp, '.tex-unicode-errors')
         # ============================================================================================
         # keywords
-        # paper's key words - never used this... adding to list of ommitted fields
+        # paper's key words - never used these, they are included in omitted_menedely_fields
+        # add code here for alternative treatment
 
         # ============================================================================================
         # mendeley-tags: these are things like my WangR or Delbaen or PMM
-        # nothing to do here - just carry over
+        # nothing to do here --- just carry over
 
         # ============================================================================================
-        # citations: figure number of citiations from my notes in the abstract
+        # citations: figure number of citations from my notes in the abstract
+        # dict index -> number of citations, default = 0
+        citation_mapper = self.extract_citations()
+        self.ported_df['arc-citations'] = [citation_mapper.get(i, 0) for i in self.ported_df.index]
 
         # ============================================================================================
         # edition: normalize edition field
         # discover using
         # for v in sorted(b.distinct('edition')):
         #     print(f'"{v}": "{v.title()}",')
-        ed_map = {
-            "10": "Tenth",
-            "2": "Second",
-            "2nd": "Second",
-            "2nd Editio": "Second",
-            "3": "Third",
-            "3rd": "Third",
-            "5": "Fifth",
-            "Enlarged": "Enlarged",
-            "Fifth": "Fifth",
-            "First": "First",
-            "Fourth": "Fourth",
-            "Ninth": "Ninth",
-            "Second": "Second",
-            "Second Edi": "Second",
-            "Seventh": "Seventh",
-            "Sixth": "Sixth",
-            "Third": "Third",
-            "fourth": "Fourth",
-            }
-        self.ported_df.edition = self.ported_df.replace(ed_map)
+        # and set edition_mapper accordingly
+        self.ported_df.edition = self.ported_df.edition.replace(self.edition_mapper)
 
         # ============================================================================================
-        # files(!)
+        # tags: normalize and resolve duplicate TAGS
+        # duplicated entries will be handled separately
+        self.map_tags()
 
         # ============================================================================================
-        # tags: normalize and resolve duplicates
+        # files: files are entirely separately managed, field just pulled over
+        # see code in file_field_df
 
         # ============================================================================================
-        # final checks and balances
+        # final checks and balances, and write out info
+        self.save_audit_file(self.df, '.raw-df')
+        self.save_audit_file(self.ported_df, '.ported-df')
+        import_info = pd.DataFrame({
+            'created': str(pd.Timestamp.now()),
+            'bibtex_file': self.bibtex_file_path.resolve(),
+            'raw_entries': len(self.df),
+            'ported_entries': len(self.ported_df)
+        }.items(), columns=['key', 'value'])
+        self.save_audit_file(import_info, '.audit-info')
+        # for posterity and auditability
+        p_ = (BASE_DIR / 'imports' / self.bibtex_file_path.name)
+        if p_.exists():
+            p_.unlink()
+        p_.hardlink_to(self.bibtex_file_path.name)
+
+    def extract_citations(self):
+        """Extract citations from abstract field."""
+        # regex to extract group like 1000, 2K, 1,000, 1K-2K etc.
+        # checked against just [Cc]itation and finds all material answers
+        pat = r'(?:(?P<number>[\d]+)\+?|(?P<numberK>[\dKk]+)\+?||(?P<dashed>\d[\dKk\- ]+)\+?) +(?:Google|GS)? ?[Cc]itations?'
+        # all matches in dataframe cols number, numberK, dashed
+        m = self.df.abstract.str.extract(pat, expand=True).dropna(how='all')
+        # number -> convert to int
+        m.number = m.number.fillna(0).astype(int)
+        # number 000 -> int
+        m.numberK = m.numberK.str.replace('K', '000').fillna(0).astype(int)
+        # number - number, first convert K
+        m.dashed = m.dashed.str.replace('K', '000')
+        # split, convert, mean, convert
+        m['dashed'] = m.dashed.str.split('-', expand=True).astype(float).mean(axis=1).fillna(0).astype(int)
+        # three mutually exclusive options default zero, so sum to get citations
+        m['citations'] = m.sum(axis=1)
+        # return series to use as a mapper
+        return m.citations
 
     def show_unicode_errors(self):
         """Accumulated unicode errors."""
@@ -439,10 +511,56 @@ class Bib2df():
         """Entries with no files listed."""
         return self.df.loc[self.df.file == '', self.base_cols]
 
-    def suggested_tag(self):
-        df = self.ported_df.copy().sort_values(['author', 'year'])
+    def map_tags(self, df_name='ported_df'):
+        """
+        Remap the tags into standard AuthorYYYY[a-z] format for named df.
+
+        Saves a dataframe showing what was done as part of import.
+        """
+        # pattern to remove non-bibtex like characters
+        df = getattr(self, df_name)[['author', 'editor', 'year', 'tag', 'title']].copy()
+        # figure out what the tag "should be"
+        pat = r" |\.|\{|\}|\-|'"
+        a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
+        e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(pat, '', regex=True)
+        y = df['year'].map(safeyear)
+        # the standardized tag, standard_tag (stem)
+        df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
+
+        noans = df.standard_tag[df.standard_tag == 'NOTAG']
+        if len(noans):
+            print(f'WARNING: Suggested tags failed for {len(noans)} items')
+            print(noans)
+
+        # make the proposed tags, build lists as you go with no duplicates
+        ka = KeyAllocator([])
+        df['proposed_tag'] = df.standard_tag.map(ka)
+        df = df.sort_values('proposed_tag')
+
+        # check all unique
+        assert len(df.loc[df.proposed_tag.duplicated(keep=False)]) == 0, 'ERROR: map tags produced non-unqiue tags'
+
+        # save for audit purposes
+        self.save_audit_file(df, '.tag-mapping')
+
+        # actually make the change
+        working_df = getattr(self, df_name)
+        working_df['tag'] = df['proposed_tag']
+
+    def save_audit_file(self, df, suffix):
+        """Save df audit file with a standard filename."""
+        fn = self.bibtex_file_path.name + suffix  + '.utf-8-sig.csv'
+        p = BASE_DIR / 'imports' / fn
+        # TODO ENCODING??
+        df.to_csv(p, encoding='utf-8-sig')
+        print(f'Audit DataFrame {len(df) = } saved to {p}')
 
     def querex(self, field, regex):
         """Apply regex filter to field."""
         return self.df.loc[self.df[field].str.contains(regex, case=False, regex=True),
                            self.base_cols]
+
+    @staticmethod
+    def to_windows_csv(df, file_name):
+        """Save to CSV in windows-compatible format. Can be read into Excel."""
+        df.to_csv(file_name, encoding='utf-8-sig')

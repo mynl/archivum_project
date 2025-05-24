@@ -1,18 +1,40 @@
 """Various utilities for archivum."""
 
 from collections import defaultdict
+from functools import partial
 import re
 import unicodedata
 
 import pandas as pd
 
+from greater_tables import GT
+
+
+def safeyear(s):
+    """
+    Safe format of s as a year for greater_tables.
+
+    By default s may be interpreted as a float so str(x) give 2015.0
+    which is not wanted. Hence this function is needed.
+    """
+    try:
+        return f'{int(s)}'
+    except ValueError:
+        if s == '':
+            return '9999'
+        else:
+            return s
+
+
+fGT = partial(GT, large_ok=True, formatters={'index': str, 'year': safeyear})
+
 
 def rinfo(ob):
     """
     Generically export all reasonable data from ob
-    store in DataFrame as a ROW and set reasonable data types
+    store in DataFrame as a ROW and set reasonable data types.
 
-    non-callable items only
+    Non-callable items only. From great2.
     :param ob:
     :param index_attribute:
     :param timestamp: add a timestamp column
@@ -65,12 +87,12 @@ def suggest_filename(s):
     pass
 
 
-class KeyAllocator:
+class KeyAllocator:    # noqa
 
     def __init__(self, existing: set[str]):
         """Class to determine the next key (@AuthorYYYY) given a list of existing keys."""
         self.existing = set(existing)
-        self.pattern = re.compile(r'^([A-Z][^0-9]+)(\d{4})([a-z]?)$')
+        self.pattern = re.compile(r'^([A-Za-z][^0-9]+)(\d{4})([a-z]?)$')
         self.allocators = defaultdict(self._make_iter)
 
     def _make_iter(self):
@@ -81,6 +103,7 @@ class KeyAllocator:
         return gen()
 
     def next_key(self, tag) -> str:
+        """Return the next available tag matching the input tag = NameYYYY format."""
         # name: str, year: int
         m = self.pattern.match(tag)
         try:
