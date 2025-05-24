@@ -136,8 +136,6 @@ class Bib2df():
         self._df.index = range(1, 1 + len(self._df))
         if fillna:
             self._df = self._df.fillna('')
-        self._file_field_df = None
-        self._file_errs = None
         self.ported_df = None
         self._author_map_df = None
         self.all_unicode_errors = None
@@ -145,12 +143,6 @@ class Bib2df():
     @property
     def df(self):
         return self._df
-
-    @property
-    def file_field_df(self):
-        if self._file_field_df is None:
-            self.parse_file_field()
-        return self._file_field_df
 
     @staticmethod
     def parse_line(entry):
@@ -241,26 +233,6 @@ class Bib2df():
             result[key] = value
 
         return result
-
-    def parse_file_field(self):
-        """Split out file field."""
-        ans = []
-        self._file_errs = []
-        for i, f in self.df[['file']].iterrows():
-            try:
-                for bit in f.file.split(';'):
-                    x = bit.split(':')
-                    # print(i, len(x))
-                    if len(x) == 4:
-                        ans.append([i, *x[1:]])
-                    # elif len(x) > 3:
-                    #     ans.append([i, x[1], x[2], x[3:]])
-                    else:
-                        self._file_errs.append([i, x[1:]])
-            except AttributeError:
-                self._file_errs.append([i, 'Attribute', f.file])
-        self._file_field_df = pd.DataFrame(ans, columns=['idx', 'drive', 'file', 'type']).set_index('idx', drop=False)
-        self._file_field_df.index.name = 'i'
 
     def contents(self, ported=False, verbose=False):
         """Contents info on df - distinct values, fields etc."""
@@ -549,7 +521,7 @@ class Bib2df():
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
-        fn = self.bibtex_file_path.name + suffix  + '.utf-8-sig.csv'
+        fn = self.bibtex_file_path.name + suffix + '.utf-8-sig.csv'
         p = BASE_DIR / 'imports' / fn
         # TODO ENCODING??
         df.to_csv(p, encoding='utf-8-sig')

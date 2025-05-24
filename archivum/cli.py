@@ -14,31 +14,9 @@ from prompt_toolkit.formatted_text import HTML
 from greater_tables import GT
 
 from . reference import Reference
+from . library import Library
 from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_SUFFIX, BIBTEX_DIR, APP_NAME
-# from . manager import ProjectManager
-
-
-# custom greater-tables formatter
-fGT = partial(GT,
-              show_index=False,
-              large_ok=True,
-              formatters={'year': str, 'index': str},
-              aligners={'suffix': 'center'})
-
-
-# @click.group()
-# def main():
-#     """File database CLI."""
-#     pass
-
-
-# @main.command()
-# @click.option('-c', '--config', type=click.Path(exists=False, dir_okay=False, path_type=Path), default=DEFAULT_CONFIG_FILE, help='YAML config path')
-# def index(config: Path):
-#     """Run the indexer and write Feather file."""
-#     pm = ProjectManager(config)
-#     pm.index(config)
-#     click.echo(f"Index update completed.")
+from . utilities import df_to_str
 
 
 @click.group()
@@ -73,7 +51,6 @@ def upload(partial):
         click.echo(ref.to_dict())  # or save it, display BibTeX, etc.
 
 
-
 @entry.command()
 @click.argument('libname', type=str)
 def create_library(libname):
@@ -84,11 +61,15 @@ def create_library(libname):
     click.secho("=== Library Config Creator ===", fg='cyan')
     click.secho(f'Creating Library {libname} at {lib_path}')
 
-    config={
+    config = {
         "library": libname,
         "description": click.prompt('Description'),
-        "database": lib_path.with_suffix(f'.{APP_NAME}-feather'),
-        "bibtex_file": click.prompt('BibTeX File', default=f'{BIBTEX_DIR}{libname}.bib'),
+        "database": str(lib_path.with_suffix(f'.{APP_NAME}-feather')),
+        "columns": ['type', 'tag', 'author', 'doi', 'file', 'journal', 'pages', 'title',
+                    'volume', 'year', 'publisher', 'url', 'institution', 'number',
+                    'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
+                    'arc-citations'],
+        "bibtex_file": click.prompt('BibTeX File', default=f'{BIBTEX_DIR}{libname}-test.bib'),
         "pdf_dir": click.prompt('PDF Directory', default='NOT USED YET'),
         "file_formats": ["*.pdf"],
         "hash_files": click.confirm("Hash files?", default=True),
@@ -103,5 +84,91 @@ def create_library(libname):
 
     click.secho(f"\nConfig written to {lib_path}", fg="green")
 
-if __name__ == '__main__':
-    entry()
+
+# todo add a default config
+@ entry.command()
+@ click.option('-c', '--config', type=str, help='Library config path')
+@ click.option('-t', '--tablefmt', default='', show_default=True, help='Markdown table format (see tabulate docs); default uses config file value.')
+def query_repl(config: Path, tablefmt: str):
+    """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
+    lib = Library(config)
+    print(lib)
+    if tablefmt == '':
+        tablefmt = lib.tablefmt
+    click.echo(f"Loaded {len(lib.database):,} rows from {lib.name}")
+    click.echo(
+        "Enter pandas query expressions (type 'exit', 'x', 'quit' or 'q' to stop and ? for help).\n")
+
+    keywords = ['cls', 'and', 'or'] + list(lib.database.columns)
+    word_completer = FuzzyCompleter(WordCompleter(keywords, sentence=True))
+    session = PromptSession(completer=word_completer)
+    result = None
+
+    while True:
+        try:
+            expr = session.prompt(HTML('<ansiyellow>>> </ansiyellow>')).strip()
+            pipe = False
+            if expr.lower() in {"exit", "x", "quit", "q"}:
+                break
+            elif expr == "?":
+                click.echo(lib.query_help())
+                click.echo(repl_help())
+                continue
+            elif expr == 'cls':
+                # clear screen
+                os.system('cls')
+                continue
+            elif expr.find(">") >= 0:
+                # contains a pipe
+                expr, pipe = expr.split('>')
+                pipe = pipe.strip()
+            elif expr.startswith('o'):
+                # open files
+                if result is None:
+                    print('No existing query! Run query first')
+                    continue
+                # open file mode, start with o n
+                try:
+                    expr = int(expr[1:].strip())
+                except ValueError:
+                    print('Wrong syntax for open, expect o index number')
+                try:
+                    fname = result.loc[expr, 'file']
+                    print('TODO...open ', file)
+                    # os.startfile(fname)
+                except KeyError:
+                    print(f'Key {expr} not found.')
+                except FileNotFoundError:
+                    print("File does not exist.")
+                except OSError as e:
+                    print(f"No association or error launching: {e}")
+                continue
+
+            # if here, run query work
+            result = lib.querex(expr)
+            click.echo(df_to_str(result, tablefmt=tablefmt))
+            click.echo(
+                f'{lib._last_unrestricted:,d} unrestricted results, {len(result)} shown.')
+            if pipe:
+                click.echo(
+                    f'Found pipe clause {pipe = } TODO: deal with this!')
+        except Exception as e:
+            click.echo(f"[Error] {e}")
+
+
+def repl_help():
+    """Help string for repl loop."""
+    return """
+Repl Help
+=========
+
+[select top regex order etc] > output file
+
+* > pipe output NYI.
+
+cls     clear screen
+?       show help
+x       exit
+
+"""
+

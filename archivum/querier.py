@@ -5,7 +5,7 @@ import re
 
 import pandas as pd
 
-from . parser import parser, FDBLexer, FDBParser
+from . parser import parser, ArcLexer, ArcParser
 
 
 def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
@@ -53,12 +53,16 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
 
     """
     # default returned columns
-    base_cols = ['name', 'dir', 'mod', 'size', 'suffix']
+    base_cols = ['tag', 'year', 'type', 'author', 'title']
 
     df = df.copy()
     expr = expr.strip()
     # specification dictionary from query string
-    spec = parser(expr, debug=False)
+    try:
+        spec = parser(expr, debug=False)
+    except ValueError as e:
+        print(e)
+        raise e
 
     print(spec)
 
@@ -96,20 +100,16 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
 
     # Sort
     if recent:
-        now = pd.Timestamp.now()
-        df = df.copy()
-        # df.loc[:, 'age'] = (now - df.loc[:, 'mod']).dt.days
-        df['age'] = (now - df['mod']).dt.days
-        df = df.sort_values(by='mod', ascending=False)
+        df = df.sort_values(by='year', ascending=False)
     elif sort_cols:
         df = df.sort_values(by=sort_cols, ascending=sort_order)
 
-    if duplicates:
-        df = df.loc[df.duplicated("hash", keep=False)]
-        df['n'] = df['hash'].map(df['hash'].value_counts().get)
-    elif hardlinks:
-        df = df.loc[df.duplicated("node", keep=False)]
-        df['n'] = df['node'].map(df['node'].value_counts().get)
+    # if duplicates:
+    #     df = df.loc[df.duplicated("hash", keep=False)]
+    #     df['n'] = df['hash'].map(df['hash'].value_counts().get)
+    # elif hardlinks:
+    #     df = df.loc[df.duplicated("node", keep=False)]
+    #     df['n'] = df['node'].map(df['node'].value_counts().get)
 
     # Top N
     unrestricted_len = len(df)
@@ -119,16 +119,21 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
 
     # prune fields
     # base cols plus select
-    fields = [i for i in df.columns if i in base_cols or i in include_cols]
+    fields = [i for i in base_cols if i in df.columns] + [
+        i for i in include_cols if i in df.columns]
     # drop out the drop cols
     if exclude_cols:
         fields = [i for i in fields if i not in exclude_cols]
     if duplicates or hardlinks:
         fields.insert(0, 'n')
-    if recent:
-        fields.insert(0, 'age')
+    if recent and 'year' not in fields:
+        fields.insert(0, 'year')
+    print(fields)
     df = df[fields]
-
+    if 'title' in fields:
+        df.title = df.title.str.replace(r'\{|\}', '', regex=True)
+    if 'tag' in fields:
+        df = df.set_index('tag')
     return df, unrestricted_len
 
 
@@ -167,7 +172,7 @@ order|sort by [-]field[, fields]
 
 * if recent an age column is added
 * select field, prefix by ! or - to drop a base column, eg select !dir drops (long) directory
-* regex not quoted
+* regex not quoted,  ! ~ something or field ~ something
 * sql clause quoted for passing to df.query
 * -field is descending order, else ascending.
 

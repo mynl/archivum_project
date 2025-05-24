@@ -29,7 +29,7 @@ classifiers = [
 
 [tool.setuptools.packages.find]
 include = ["archivum"]
-exclude = ["docs", "temp", "port_mendeley"]
+exclude = ["docs", "temp"]
 
 [tool.setuptools.dynamic]
 version = { attr = "archivum.__version__.__version__" }

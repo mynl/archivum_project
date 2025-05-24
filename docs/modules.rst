@@ -10,16 +10,10 @@ Command Line Interface
 .. automodule:: archivum.cli
    :members:
 
-Configuration Manager
------------------------
-
-.. automodule:: archivum.config
-   :members:
-
-Document tools
+Document Class
 --------------
 
-.. automodule:: archivum.doc_tools
+.. automodule:: archivum.document
    :members:
 
 Hasher

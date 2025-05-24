@@ -25,6 +25,9 @@ from . hasher import hash_many
 class Library():
     """Library specified by config yaml (archivum-config) file."""
 
+    # base columns used by the app for quick output displays
+    base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
+
     def __init__(self, config_path: Path):
         """
         Load YAML config from file.
@@ -61,7 +64,7 @@ class Library():
 
     def __repr__(self):
         """Create simple string representation."""
-        return f'PM({self.config_path.name})'
+        return f'Library({self.config_path.name})'
 
     @property
     def config(self):
@@ -80,10 +83,13 @@ class Library():
         for k, v in kwargs.items():
             self._config[k] = v
 
-    def query(self, expr):
+    def querex(self, expr):
         """Run ``expr`` through the querier."""
         self._last_query_expr = expr
-        self._last_query, self._last_unrestricted = query_ex(self.database, expr)
+        try:
+            self._last_query, self._last_unrestricted = query_ex(self.database, expr)
+        except ValueError:
+            return None
         self._last_query_title = f'<strong>QUERY</strong>: <code>{expr}</code>, showing {len(self._last_query)} of {self._last_unrestricted} results.'
         return self._last_query
 
@@ -92,14 +98,18 @@ class Library():
         """Print help for query syntax."""
         return query_help_work()
 
-    def duplicates(self, keep=False) -> pd.DataFrame:
-        """
-        Return rows that share the same hash (i.e., duplicate content).
+    def distinct(self, c):
+        """Return distinct occurrences of col c."""
+        if c == 'author':
+            return sorted(
+                set(author.strip() for s in self.database.author.dropna() for author in s.split(" and "))
+            )
+        else:
+            return sorted(set([i for i in self.database[c] if i != '']))
 
-        keep = 'first', 'last', False: keep first, last or all duplicates
-        """
-        df = self.database
-        return df[df.duplicated("hash", keep=keep)].sort_values("hash")
+    def no_file(self):
+        """Entries with no files listed."""
+        return self.df.loc[self.df.file == '', self.base_cols]
 
     def save(self):
         """Save dictionary to yaml."""
@@ -128,7 +138,26 @@ class Library():
         if self._database.empty:
             if self.database_path.exists():
                 self._database = pd.read_feather(self.database_path)
+            else:
+                # create new empty database
+                self._database = pd.DataFrame(columns=self.columns)
         return self._database
+
+    @staticmethod
+    def list():
+        """List projects in the default location."""
+        # TODO
+        return list(BASE_DIR.glob('*' + APP_SUFFIX))
+
+    @staticmethod
+    def list_deets():
+        """Dataframe of all projects in default location."""
+        # not sure what the best "way around" is for this...
+        df = pd.concat(
+            [Library(p).config_df for p in Library.list()],
+            axis=1).T.fillna('')
+        df = df.set_index('name')
+        return df
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""
@@ -153,18 +182,11 @@ class Library():
     #     else:
     #         print('Would execute\n\n', ' '.join(cmd))
 
-    @staticmethod
-    def list():
-        """List projects in the default location."""
-        # TODO
-        return list(BASE_DIR.glob('*' + APP_SUFFIX))
+    # def duplicates(self, keep=False) -> pd.DataFrame:
+    #     """
+    #     Return rows that point share the same hash (i.e., duplicate content).
 
-    @staticmethod
-    def list_deets():
-        """Dataframe of all projects in default location."""
-        # not sure what the best "way around" is for this...
-        df = pd.concat(
-            [Library(p).config_df for p in Library.list()],
-            axis=1).T.fillna('')
-        df = df.set_index('library').T
-        return df
+    #     keep = 'first', 'last', False: keep first, last or all duplicates
+    #     """
+    #     df = self.database
+    #     return df[df.duplicated("hash", keep=keep)].sort_values("hash")

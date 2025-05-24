@@ -29,6 +29,25 @@ def safeyear(s):
 fGT = partial(GT, large_ok=True, formatters={'index': str, 'year': safeyear})
 
 
+def df_to_str(df, tablefmt):
+    """Nice prepped df as string for printing."""
+    f = fGT(df)
+    df = f.df
+    dfa = [i[4:] for i in f.df_aligners]
+    colw = {c: 15 for c in df.columns}
+    for c in ['dir', 'path', 'hash']:
+        if c in df:
+            colw[c] = min(40, df[c].str.len().max())
+    for c in ['name']:
+        if c in df:
+            colw[c] = min(60, df[c].str.len().max())
+        return df.to_markdown(
+            index=False,
+            colalign=dfa,
+            tablefmt=tablefmt,
+            maxcolwidths=[colw.get(i) for i in df.columns])
+
+
 def rinfo(ob):
     """
     Generically export all reasonable data from ob

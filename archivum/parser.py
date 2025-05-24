@@ -11,18 +11,18 @@ from aggregate.sly import Lexer, Parser
 
 def parse_test(text, debug=False, show_tokens=False):
     """Convenience to test the grammar, run with a test text."""
-    lexer = FDBLexer()
-    parser = FDBParser(debug=debug)
+    lexer = ArcLexer()
+    parser = ArcParser(debug=debug)
     try:
         tokens = list(lexer.tokenize(text))
         if show_tokens:
             print("Tokens:")
             for tok in tokens:
                 print(f"  {tok.type:<10} {tok.value!r}")
-            print('-'*80)
+            print('-' * 80)
         result = parser.parse(iter(tokens))
         if debug:
-            print('-'*80)
+            print('-' * 80)
             print("Parsed result query spec")
             print("========================\n")
         pprint(result)
@@ -32,18 +32,18 @@ def parse_test(text, debug=False, show_tokens=False):
 
 def parser(text, debug=False):
     """One stop shop parsing."""
-    lexer = FDBLexer()
-    parser = FDBParser(debug=debug)
+    lexer = ArcLexer()
+    parser = ArcParser(debug=debug)
     result = None
     try:
         tokens = list(lexer.tokenize(text))
         result = parser.parse(iter(tokens))
     except Exception as e:
-        print('Parsing Error:', e)
+        raise ValueError(f'Parsing Error: {e}')
     return result
 
 
-class FDBLexer(Lexer):
+class ArcLexer(Lexer):
     """Lexer for file database query language."""
 
     tokens = {
@@ -61,7 +61,7 @@ class FDBLexer(Lexer):
     WHERE = 'where|WHERE'
     TOP = 'top|TOP'
     AND = 'and|AND'    # just AND, otherwise into parens, order of ops etc.
-    FLAG = 'recent|RECENT|verbose|VERBOSE|duplicates|DUPLICATES'
+    FLAG = 'recent|RECENT|verbose|VERBOSE' # |duplicates|DUPLICATES'
 
     # to reverse sort order
     NOT = r'\-'
@@ -113,7 +113,7 @@ class FDBLexer(Lexer):
 
     # matches very general, including regexes
     # used for column names, rhs of query, regex etc.
-    IDENTIFIER = r'[^\s,~/!][^\s,]*'
+    IDENTIFIER = r'[^\s~/!][^\s]*'
 
     STAR = r'\*'
     TILDE = r'~'
@@ -136,19 +136,19 @@ class FDBLexer(Lexer):
         self.index += 1
 
 
-class FDBParser(Parser):
+class ArcParser(Parser):
     """Parser for file database query language."""
 
     # comment this out during DEV!
     # FLAG flags -> clause or flags -> clause
     expected_shift_reduce = 1
-    tokens = FDBLexer.tokens
-    debugfile = None # 'parser.out.md'
+    tokens = ArcLexer.tokens
+    debugfile = None  # 'parser.out.md'
 
     def __init__(self, debug=False):
         self.debug = debug
         if debug:
-            print(f'FDBParser created {debug = }')
+            print(f'ArcParser created {debug = }')
         self.enhance_debugfile()
 
     def enhance_debugfile(self):
@@ -294,7 +294,7 @@ class FDBParser(Parser):
         # fudge, because eg py is indistinguishable from a column
         # treat the column as a plain text regex
         self.logger('BANG IDENTIFIER -> regex', p)
-        return ('name', p.IDENTIFIER)
+        return ('author', p.IDENTIFIER)
 
     @_('SELECT select_list')
     def clause(self, p):
