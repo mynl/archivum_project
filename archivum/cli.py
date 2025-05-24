@@ -15,7 +15,7 @@ from greater_tables import GT
 
 from . reference import Reference
 from . library import Library
-from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_SUFFIX, BIBTEX_DIR, APP_NAME
+from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_SUFFIX, APP_NAME
 from . utilities import df_to_str
 
 
@@ -69,7 +69,7 @@ def create_library(libname):
                     'volume', 'year', 'publisher', 'url', 'institution', 'number',
                     'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
                     'arc-citations'],
-        "bibtex_file": click.prompt('BibTeX File', default=f'{BIBTEX_DIR}{libname}-test.bib'),
+        "bibtex_file": click.prompt('BibTeX File', default=f'{libname}-test.bib'),
         "pdf_dir": click.prompt('PDF Directory', default='NOT USED YET'),
         "file_formats": ["*.pdf"],
         "hash_files": click.confirm("Hash files?", default=True),

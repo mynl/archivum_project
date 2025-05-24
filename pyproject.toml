@@ -18,6 +18,7 @@ dependencies = [
     "prompt_toolkit",
     "pyarrow",
     "pyyaml",
+    "aggregate",
 ]
 
 classifiers = [
