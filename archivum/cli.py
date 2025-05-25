@@ -3,12 +3,14 @@
 from functools import partial
 import os
 from pathlib import Path
+import shlex
 import socket
+import subprocess
 import yaml
 
 import click
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import FuzzyCompleter, WordCompleter
+from prompt_toolkit.completion import FuzzyCompleter, WordCompleter, NestedCompleter, PathCompleter
 from prompt_toolkit.formatted_text import HTML
 
 from greater_tables import GT
@@ -17,6 +19,10 @@ from . reference import Reference
 from . library import Library
 from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_SUFFIX, APP_NAME
 from . utilities import df_to_str
+
+
+def clear_screen():
+    os.system('cls')
 
 
 @click.group()
@@ -87,7 +93,7 @@ def create_library(libname):
 
 # todo add a default config
 @ entry.command()
-@ click.option('-c', '--config', type=str, help='Library config path')
+@ click.option('-c', '--config', type=DEFAULT_CONFIG_FILE, help='Library config path')
 @ click.option('-t', '--tablefmt', default='', show_default=True, help='Markdown table format (see tabulate docs); default uses config file value.')
 def query_repl(config: Path, tablefmt: str):
     """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
@@ -172,3 +178,129 @@ x       exit
 
 """
 
+
+@entry.command()
+@click.pass_context
+@click.argument("start", type=str, default='')
+@click.option('-d', '--debug', is_flag=True, help='Debug mode.')
+def uber(ctx, start, debug):
+    """
+    uber: access to all archivum functions, viz:
+
+        upload
+        new
+        create-library
+        query-repl
+
+    Pass start argument to begin in that command:
+
+        uber q[uery-repl]
+    """
+
+    # List of commands for completion
+    commands = [
+        # special commands
+        'upload',
+        'new',
+        'query-repl',
+        'create-library',
+        "list",
+        'deets',
+        'cls',
+        "dir", "cd", "pwd",
+        # all commands
+        "exit"
+    ]
+    dcommands = {c: None for c in commands}
+    # Add a special case for `cd` to use a PathCompleter
+    dcommands["cd"] = PathCompleter(only_directories=True, expanduser=True)
+
+    # word_completer = WordCompleter(commands)
+    word_completer = NestedCompleter(dcommands)
+    fuzzy_completer = FuzzyCompleter(word_completer)
+    session = PromptSession(completer=fuzzy_completer)
+
+    while True:
+        try:
+            if start == '':
+                q = session.prompt(HTML(f'{os.getcwd()} <ansired>archivum uber > </ansired>')).strip()
+            else:
+                q = start
+                start = ''
+            # process
+            if q in [';', 'x', '..']:
+                break
+            elif q in ['?', 'h']:
+                uber_help()
+            elif q in ['cls']:
+                clear_screen()
+            elif q.startswith('cd '):
+                path = q[3:].strip()
+                if path:
+                    try:
+                        os.chdir(path)
+                        # print(f"Changed directory to: {os.getcwd()}")
+                    except FileNotFoundError:
+                        print("Error: Directory not found.")
+                continue  # Skip further processing
+            else:
+                # delegate
+                try:
+                    # per the help, prog_name is not used for much
+                    sq = shlex.split(q)
+                    if len(sq) == 0:
+                        continue
+                    if sq[0] == 'dir':
+                        result = subprocess.run(
+                            sq, shell=True, text=True, capture_output=True)
+                        print(result.stdout)
+                    elif sq[0] == 'cd':
+                        try:
+                            os.chdir(sq[1])
+                            print(os.getcwd())
+                        except FileNotFoundError:
+                            print(f'{sq[1]} directory does not exist')
+                    elif sq[0] in ['cwd', 'pwd']:
+                        print(os.getcwd())
+                    else:
+                        if debug:
+                            print(f'Executing {sq}')
+                        entry.main(args=sq,
+                            standalone_mode=False,
+                            prog_name='archivum uber',
+                            obj=ctx.obj)
+                except SystemExit:
+                    # Handle the exit signal from click without exiting the REPL
+                    pass
+        except KeyboardInterrupt:
+            continue
+        except EOFError:
+            break
+
+
+def uber_help():
+    h = '''
+Meta
+====
+.. ; x               quit
+? h                  help
+--help               Built in help (always available)
+
+Help for Archivum Scripts
+==========================
+query-repl          enter query REPL loop
+new                 display new PDFs in watched folders
+upload              upload new pdf(s)
+list                list all archivum libraries
+deets               details on all archivum libraries
+uber                Uber search, access to all archivum functions
+
+General Functions
+==================
+cd                  change directory
+cls                 clear screen
+dir                 DOS dir
+pwd                 print current working directory
+
+'''
+    print(h)

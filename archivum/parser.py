@@ -61,7 +61,7 @@ class ArcLexer(Lexer):
     WHERE = 'where|WHERE'
     TOP = 'top|TOP'
     AND = 'and|AND'    # just AND, otherwise into parens, order of ops etc.
-    FLAG = 'recent|RECENT|verbose|VERBOSE' # |duplicates|DUPLICATES'
+    FLAG = 'recent|RECENT|verbose|VERBOSE'  # |duplicates|DUPLICATES'
 
     # to reverse sort order
     NOT = r'\-'
@@ -139,10 +139,10 @@ class ArcLexer(Lexer):
 class ArcParser(Parser):
     """Parser for file database query language."""
 
-    # comment this out during DEV!
-    # FLAG flags -> clause or flags -> clause
-    expected_shift_reduce = 1
+    # comment out expected_shift_reduce during DEV!
+    expected_shift_reduce = 8
     tokens = ArcLexer.tokens
+    # add parser.out.md during debug
     debugfile = None  # 'parser.out.md'
 
     def __init__(self, debug=False):

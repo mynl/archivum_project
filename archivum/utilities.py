@@ -5,12 +5,13 @@ from functools import partial
 import re
 import unicodedata
 
+import numpy as np
 import pandas as pd
 
 from greater_tables import GT
 
 
-def safeyear(s):
+def safe_int(s):
     """
     Safe format of s as a year for greater_tables.
 
@@ -21,31 +22,98 @@ def safeyear(s):
         return f'{int(s)}'
     except ValueError:
         if s == '':
-            return '9999'
+            return ''
         else:
             return s
 
 
-fGT = partial(GT, large_ok=True, formatters={'index': str, 'year': safeyear})
+def safe_int_comma(s):
+    """
+    Safe format of s as a year for greater_tables.
+
+    By default s may be interpreted as a float so str(x) give 2015.0
+    which is not wanted. Hence this function is needed.
+    """
+    try:
+        return f'{int(s):,d}'
+    except ValueError:
+        if s == '':
+            return ''
+        else:
+            return s
 
 
-def df_to_str(df, tablefmt):
+def safe_file_size(s):
+    """
+    Safe format of s as a year for greater_tables.
+
+    By default s may be interpreted as a float so str(x) give 2015.0
+    which is not wanted. Hence this function is needed.
+    """
+    try:
+        sz = int(s)
+        if sz < 1 << 10:
+            return f'{sz:,d}B'
+        elif sz < 1 << 18:
+            return f'{sz >> 10:,d}KB'
+        elif sz < 1 << 28:
+            return f'{sz >> 20:,d}MB'
+        elif sz < 1 << 38:
+            return f'{sz >> 30:,d}GB'
+        elif sz < 1 << 48:
+            return f'{sz >> 40:,d}TB'
+        else:
+            return f'{sz >> 50:,d}PB'
+    except ValueError:
+        if s == '':
+            return ''
+        else:
+            return s
+
+
+fGT = partial(GT, large_ok=True,
+              formatters={
+                  'index': str,
+                  'year': safe_int,
+                  'node': str,
+                  'links': safe_int,
+                  'size': safe_file_size,
+                  'number': safe_int
+              }
+              )
+
+
+def df_to_str(df, tablefmt, show_index=False):
     """Nice prepped df as string for printing."""
-    f = fGT(df)
+    if 'title' in df.columns:
+        # get rid of the {}
+        df['title'] = df['title'].str[1:-1]
+    if 'author' in df.columns:
+        df['author'] = df['author'].str.replace(r'\{|\}', '', regex=True)
+    f = fGT(df, show_index=show_index)
     df = f.df
     dfa = [i[4:] for i in f.df_aligners]
     colw = {c: 15 for c in df.columns}
-    for c in ['dir', 'path', 'hash']:
-        if c in df:
-            colw[c] = min(40, df[c].str.len().max())
-    for c in ['name']:
-        if c in df:
-            colw[c] = min(60, df[c].str.len().max())
-        return df.to_markdown(
-            index=False,
-            colalign=dfa,
-            tablefmt=tablefmt,
-            maxcolwidths=[colw.get(i) for i in df.columns])
+    for c in df:
+        lens = df[c].astype(str).str.len()
+        lens = lens[lens > 0]
+        m = lens.mean()
+        s = lens.std()
+        cw = min(m + s, lens.max(), np.percentile(lens, 75))
+        colw[c] = np.round(cw, 0)
+    # for c in ['dir', 'path', 'hash']:
+    #     if c in df:
+    #         colw[c] = min(40, df[c].str.len().max())
+    # for c in ['name']:
+    #     if c in df:
+    #         colw[c] = min(60, df[c].str.len().max())
+    print(sum(colw.values()), colw)
+    return df.to_markdown(
+        index=False,
+        colalign=dfa,
+        tablefmt=tablefmt,
+        maxcolwidths=[colw.get(i) for i in df.columns],
+        )
 
 
 def rinfo(ob):

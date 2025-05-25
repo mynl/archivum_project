@@ -4,22 +4,24 @@ Code to port over a Mendeley generated bibtex file.
 Code in this module would be used once, and adjusted to your specific library.
 """
 
+from pathlib import Path
 import re
 
 import latexcodec
+import Levenshtein
 import numpy as np
 import pandas as pd
 
 from . import BASE_DIR
 from . trie import Trie
-from . utilities import remove_accents, accent_mapper_dict, safeyear, KeyAllocator
+from . utilities import remove_accents, accent_mapper_dict, safe_int, KeyAllocator
 
 
 def suggest_tag(df):
     """Suggest tags fore each row of df."""
     a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(r' |\.|\{|\}|\-', '', regex=True)
     e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(r' |\.|\{|\}|\-', '', regex=True)
-    y = df['year'].map(str)  # was safeyear, but that's not needed or sensible
+    y = df['year'].map(str)  # was safe_int, but that's not needed or sensible
     return np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
 
 
@@ -115,19 +117,28 @@ class Bib2df():
     # end customizable mappers
     # =====================================================================================================
 
-    def __init__(self, p, fillna=True):
+    def __init__(self, p, pdf_dir, *, fillna=True, audit_mode=False):
         """
-        Read Path p into bibtex df.
+        Read Path p into bibtex df, pdf_dir is a Path to pdf files (must exist)
+
+        afile = an actual file
+        vfile = a named reference in the bibtex file that may not correspond to an afile
+
+        pdf_dir is where the afile documents live.
 
         Use fillna=False to use the contents functions (see missing fields).
 
         Note: this function is "bibtex" file based and creates a dataframe, whereas
         the Library class is dataframe based and creates a bibtex file.
         """
+        self.audit_mode = audit_mode  # if true, save_audit_file works
+        self.pdf_dir = pdf_dir
+        assert self.pdf_dir.exists(), 'PDF directory does not exist'
         self.bibtex_file_path = p
         self.txt = p.read_text(encoding='utf-8').translate(self._char_map)
         self.txt, n = self._re_subs_compiled.subn(lambda m: self._re_subs[m.group()], self.txt)
-        print(f'uber regex sub found {n = } replacements')
+        if self.audit_mode:
+            print(f'uber regex sub found {n = } replacements')
         self.stxt = re.split(r'^@', self.txt, flags=re.MULTILINE)
         l = map(self.parse_line, self.stxt[1:])
         self._df = pd.DataFrame(l)
@@ -136,9 +147,17 @@ class Bib2df():
         self._df.index = range(1, 1 + len(self._df))
         if fillna:
             self._df = self._df.fillna('')
-        self.ported_df = None
         self._author_map_df = None
         self.all_unicode_errors = None
+        self._proto_ref_doc_df = None
+        self._doc_df = None
+        self._ref_doc_df = None
+        self._ref_df = None
+        self._best_match_df = None
+        self._ref_no_doc = None
+        self._ported_df = None    # the "raw" ported df, includes file column, but otherwise like ref_df
+        self._database = None
+        self.last_missing_vfiles = None
 
     @property
     def df(self):
@@ -267,7 +286,11 @@ class Bib2df():
             df = pd.DataFrame({'original': self.distinct('author')})
             self.last_decode = []
             df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
-            a = set(df.unicoded)
+            # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials
+            df['spaced'] = df.unicoded.str.replace(r'(?<=, )([A-Z]{2,3})\b',
+                                                   lambda m: ' '.join(m.group(1)),
+                                                   regex=True)
+            a = set(df.spaced)
             t = Trie()
             for name in a:
                 t.insert(name)
@@ -278,7 +301,7 @@ class Bib2df():
                 if m != name:
                     # have found a better version
                     mapping[name] = m
-            df['longest'] = df.unicoded.replace(mapping)
+            df['longest'] = df.spaced.replace(mapping)
             accent_mapper = accent_mapper_dict(df.longest)
             df['accents'] = df.longest.replace(accent_mapper)
             # initial  periods
@@ -291,14 +314,17 @@ class Bib2df():
             self.accent_mapper = accent_mapper
         return self._author_map_df
 
-    def distinct(self, c):
+    def distinct(self, c, source='ref_df'):
         """Return distinct occurrences of col c."""
+        df = getattr(self, source)
+        if df is None:
+            return df
         if c == 'author':
             return sorted(
-                set(author.strip() for s in self.df.author.dropna() for author in s.split(" and "))
+                set(author.strip() for s in df.author.dropna() for author in s.split(" and "))
             )
         else:
-            return sorted(set([i for i in self.df[c] if i != '']))
+            return sorted(set([i for i in df[c] if i != '']))
 
     def tex_to_unicode(self, s_in: str) -> str:
         """
@@ -314,6 +340,7 @@ class Bib2df():
             s = self._r_brace2.sub(r'\1', s_in.encode('latin1').decode('latex'))
             s = self._r_brace1.sub(r'\1', s)
             if s.find(',') > 0 and s == s.upper():
+                # title case what appear to be names (comma) that are all caps
                 s = s.title()
             return s
         except ValueError as e:
@@ -354,7 +381,7 @@ class Bib2df():
         mapper.update(manual_updates)
         return mapper
 
-    def map_authors(self, df_name='ported_df'):
+    def map_authors(self, df_name):
         """Actually apply the author mapper to the author column."""
         df = getattr(self, df_name)
         am = self.author_mapper()
@@ -375,13 +402,13 @@ class Bib2df():
 
         Runs through each task in turn, see comments.
         """
+        print('Running port_mendeley_file to create ported_df')
         kept_fields = [i for i in self.df.columns if i not in self.omitted_menedely_fields]
-
-        self.ported_df = self.df[kept_fields].copy()
+        self._ported_df = self.df[kept_fields].copy()
 
         # ============================================================================================
         # author: initials, extend, accents
-        self.map_authors('ported_df')
+        self.map_authors('_ported_df')
 
         # ============================================================================================
         # de-tex other text fields
@@ -389,7 +416,7 @@ class Bib2df():
         for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
                   'editor', 'mendeley-tags']:
             self.last_decode = []
-            self.ported_df[f] = self.ported_df[f].map(self.tex_to_unicode)
+            self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
             if len(self.last_decode):
                 print(f'\tField: {f}\t{len(self.last_decode) = }')
                 self.all_unicode_errors[f] = self.last_decode.copy()
@@ -414,7 +441,7 @@ class Bib2df():
         # citations: figure number of citations from my notes in the abstract
         # dict index -> number of citations, default = 0
         citation_mapper = self.extract_citations()
-        self.ported_df['arc-citations'] = [citation_mapper.get(i, 0) for i in self.ported_df.index]
+        self._ported_df['arc-citations'] = [citation_mapper.get(i, 0) for i in self._ported_df.index]
 
         # ============================================================================================
         # edition: normalize edition field
@@ -422,7 +449,7 @@ class Bib2df():
         # for v in sorted(b.distinct('edition')):
         #     print(f'"{v}": "{v.title()}",')
         # and set edition_mapper accordingly
-        self.ported_df.edition = self.ported_df.edition.replace(self.edition_mapper)
+        self._ported_df.edition = self._ported_df.edition.replace(self.edition_mapper)
 
         # ============================================================================================
         # tags: normalize and resolve duplicate TAGS
@@ -433,22 +460,40 @@ class Bib2df():
         # files: files are entirely separately managed, field just pulled over
         # see code in file_field_df
 
+        # set tag as the index
+        self._ported_df = self._ported_df.set_index('tag')
+
+        # Ad hoc changes!!
+        print('Ad hoc changes')
+        self._ported_df.loc['Robert2022', 'file'] = self._ported_df.loc['Robert2022', 'file'].replace(
+            '/Users/steve/AppData/Local/Mendeley Ltd./Mendeley Desktop/Downloaded/',
+            '/S/Library/Robert, Denuit/')
+        # print()
+        # print(self._ported_df.loc['Kuelbs2011', ['author', 'title', 'year']])
+        self._ported_df.rename(index={'Kuelbs2011': 'Stroock2011'}, inplace=True)
+        self._ported_df.loc['Stroock2011', 'author'] = 'Stroock, Daniel W.'
+        # print()
+        # print(self._ported_df.loc['Stroock2011', ['author', 'title', 'year']])
+        # print()
+
         # ============================================================================================
         # final checks and balances, and write out info
         self.save_audit_file(self.df, '.raw-df')
-        self.save_audit_file(self.ported_df, '.ported-df')
+        self.save_audit_file(self._ported_df, '.ported-df')
         import_info = pd.DataFrame({
             'created': str(pd.Timestamp.now()),
             'bibtex_file': self.bibtex_file_path.resolve(),
             'raw_entries': len(self.df),
-            'ported_entries': len(self.ported_df)
+            'ported_entries': len(self._ported_df)
         }.items(), columns=['key', 'value'])
         self.save_audit_file(import_info, '.audit-info')
-        # for posterity and auditability
-        p_ = (BASE_DIR / 'imports' / self.bibtex_file_path.name)
-        if p_.exists():
-            p_.unlink()
-        p_.hardlink_to(self.bibtex_file_path.name)
+        if self.audit_mode:
+            # for posterity and auditability
+            p_ = (BASE_DIR / 'imports' / self.bibtex_file_path.name)
+            if p_.exists():
+                p_.unlink()
+            p_.hardlink_to(self.bibtex_file_path.name)
+        return import_info
 
     def extract_citations(self):
         """Extract citations from abstract field."""
@@ -495,7 +540,7 @@ class Bib2df():
         pat = r" |\.|\{|\}|\-|'"
         a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
         e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(pat, '', regex=True)
-        y = df['year'].map(safeyear)
+        y = df['year'].map(safe_int)
         # the standardized tag, standard_tag (stem)
         df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
 
@@ -518,14 +563,19 @@ class Bib2df():
         # actually make the change
         working_df = getattr(self, df_name)
         working_df['tag'] = df['proposed_tag']
+        # check unique
+        assert working_df.tag.is_unique, 'ERROR: proposed tags are not unique'
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
-        fn = self.bibtex_file_path.name + suffix + '.utf-8-sig.csv'
-        p = BASE_DIR / 'imports' / fn
-        # TODO ENCODING??
-        df.to_csv(p, encoding='utf-8-sig')
-        print(f'Audit DataFrame {len(df) = } saved to {p}')
+        if self.audit_mode:
+            fn = self.bibtex_file_path.name + suffix + '.utf-8-sig.csv'
+            p = BASE_DIR / 'imports' / fn
+            # TODO ENCODING??
+            df.to_csv(p, encoding='utf-8-sig')
+            print(f'Audit DataFrame {len(df) = } saved to {p}.')
+        else:
+            print(f'Audit mode OFF, DataFrame {len(df) = } NOT saved.')
 
     def querex(self, field, regex):
         """Apply regex filter to field."""
@@ -536,3 +586,188 @@ class Bib2df():
     def to_windows_csv(df, file_name):
         """Save to CSV in windows-compatible format. Can be read into Excel."""
         df.to_csv(file_name, encoding='utf-8-sig')
+
+    def _parse_library_file_field(self):
+        """Parse file field."""
+        ans = []
+        self._file_errs = []
+        df = self.ported_df
+
+        for tag, value in df.file.str.split(';').fillna('').items():
+            # the items are is name=tag, (0,1,2) and value a list of strings :path\:file:file type strings
+            # on split..":" these have four parts:
+            # before drive (empty), drive, path, type
+            try:
+                for ref in value:
+                    x = ref.split(':')
+                    if len(x) == 4:
+                        ans.append([tag, *x[1:]])
+                    else:
+                        self._file_errs.append([tag, *x[1:]])
+            except AttributeError:
+                self._file_errs.append([tag, 'Attribute', *ref])
+        self._proto_ref_doc_df = pd.DataFrame(ans, columns=['tag', 'drive', 'vfile', 'type']).set_index('tag', drop=True)
+
+    def actual_files(self, library_path):
+        """Find actual files in the library path."""
+
+    @property
+    def ported_df(self):
+        if self._ported_df is None:
+            self.port_mendeley_file()
+        return self._ported_df
+
+    @property
+    def ref_df(self):
+        """The reference df contains no file information."""
+        if self._ref_df is None:
+            self._ref_df = self.ported_df.drop(columns='file')
+            self._ref_df['arc-source'] = 'mendeley'
+        return self._ref_df
+
+    @property
+    def doc_df(self):
+        """
+        Read file information for the current library's pdf store.
+
+        Returns dataframe describing **actual files** (afiles). These may or may not
+        be referenced in library.database.
+        Currently only PDFs.
+        """
+        if self._doc_df is None:
+            pdfs = list(self.pdf_dir.rglob('*.pdf'))
+            ans = []
+            for p in pdfs:
+                stat = p.stat(follow_symlinks=True)
+                ans.append({
+                    "name": p.name,
+                    "path": str(p.as_posix()),
+                    "mod": stat.st_mtime_ns,
+                    "create": stat.st_ctime_ns,
+                    "access": stat.st_atime_ns,
+                    "node": stat.st_ino,
+                    "links": stat.st_nlink,
+                    "size": stat.st_size,
+                    "suffix": p.suffix[1:],
+                    "hash": 'TBD'
+                })
+            df = pd.DataFrame(ans)
+            tz = 'Europe/London'
+            df["create"] = pd.to_datetime(df["create"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
+            df["mod"] = pd.to_datetime(df["mod"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
+            df["access"] = pd.to_datetime(df["access"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
+            self._doc_df = df
+            print(f'Created doc_df with {len(ans)} files')
+        return self._doc_df
+
+    @property
+    def proto_ref_doc_df(self):
+        """Information about files **referenced** in the library database."""
+        if self._proto_ref_doc_df is None:
+            self._parse_library_file_field()
+        return self._proto_ref_doc_df
+
+    @property
+    def ref_doc_df(self):
+        """Make the reference/document dataframe by matching vfiles to afiles."""
+        # columns are ref_id=tag and afile name
+        if self._ref_doc_df is None:
+            actual_files = set([i for i in self.doc_df.path])
+            print(f'{len(actual_files) = }')
+            missing_vfiles = []
+            for i, r in self.proto_ref_doc_df.iterrows():
+                if r.vfile not in actual_files:
+                    missing_vfiles.append([i, r.vfile])
+            print(f'Found {len(missing_vfiles) = } missing vfiles (expected 558)')
+            print('Levenshtein matching...')
+            ans = []
+            for tag, m_vfile in missing_vfiles:
+                best_match = min(actual_files,
+                                 key=lambda alt: Levenshtein.distance(m_vfile, alt))
+                ans.append([tag, m_vfile, best_match, Levenshtein.distance(m_vfile, best_match)])
+            # for reference
+            self._best_match_df = pd.DataFrame(ans, columns=['tag', 'missing_vfile', 'match_afile', 'distance'])
+            print('Levenshtein matching completed')
+            matcher = {vfile: afile for vfile, afile in self._best_match_df[['missing_vfile', 'match_afile']].values}
+            self._ref_doc_df = pd.DataFrame({
+                'tag': self.proto_ref_doc_df.index,
+                'path': self.proto_ref_doc_df['vfile'].replace(matcher).values
+            })
+            # for ref.
+            self.last_missing_vfiles = missing_vfiles
+        return self._ref_doc_df
+
+    @property
+    def database(self):
+        """Merged database."""
+        if self._database is None:
+            self._database = (((
+             self.ref_doc_df
+                .merge(self.ref_df, on="tag",  how='right'))
+                .merge(self.doc_df, on='path', how='left'))
+            )
+            for c in ['node', 'links', 'size']:
+                self._database[c] = self._database[c].fillna(0)
+            self._database.fillna('')
+        return self._database
+
+    def refs_no_docs(self):
+        """Return tags to refs with no files."""
+        return self.ref_df.loc[sorted(list(set(self.ref_df.index) - set(self.ref_doc_df.tag)))]
+
+    def docs_no_refs(self):
+        """Return docs with no associated refs."""
+        paths = set(self.doc_df.path) - set(self.ref_doc_df.path)
+        return self.doc_df.query('path in @paths')
+
+    def stats(self):
+        """Statistics about refs (tags), docs (paths)."""
+        docs_per_ref = self.ref_doc_df.groupby('tag').count()
+        # I know most is 3
+        ref_1_doc, ref_2_doc, ref_3_doc = docs_per_ref.value_counts().values
+        assert len(docs_per_ref) == ref_1_doc + ref_2_doc + ref_3_doc
+        ref_0_doc = len(self.ref_df) - len(docs_per_ref)
+
+        refs_per_doc = self.ref_doc_df.groupby('path').count()
+        # I know most is 4
+        doc_1_ref, doc_2_ref, doc_3_ref, doc_4_ref = refs_per_doc.value_counts()
+        assert len(refs_per_doc) == doc_1_ref + doc_2_ref + doc_3_ref + doc_4_ref
+        doc_0_ref = len(self.doc_df) - len(refs_per_doc)
+
+        stats = pd.DataFrame({
+            'objects': [len(self.ref_df), len(self.doc_df)],
+            'no children': [ref_0_doc, doc_0_ref],
+            'children': [len(docs_per_ref), len(refs_per_doc)],
+            '1 child': [ref_1_doc, doc_1_ref],
+            '2 children': [ref_2_doc, doc_2_ref],
+            '3 children': [ref_3_doc, doc_3_ref],
+            '4 children': [0, doc_4_ref],
+        }, index=['references', 'documents']).T
+
+        return stats
+
+    def stats_ref_fields(self):
+        """Statistics on distinct values by field."""
+        ans = {}
+        for c in self.ref_df.columns:
+            vc = self.ref_df[c].value_counts()
+            if c == 'arc-citations':
+                ans[c] = [len(vc), vc.get(0, 0)]
+            else:
+                ans[c] = [len(vc), vc.get('', 0)]
+
+        stats = pd.DataFrame(ans.values(),
+                             columns=[ 'distinct', 'missing'],
+                             index=ans.keys())
+        # c: len(self.distinct(c)) for c in self.ref_df.columns
+        # }, index=['Value']).T
+        return stats
+
+    def _add_hashes(self):
+        """Lookup hashes from file-db object."""
+        fp = Path('\\s\\appdata\\file-database\\kolmogorov\\library.fdb-feather')
+        df = pd.read_feather(fp)
+        ans = {}
+        for p, h in df[['path', 'hash']].values:
+            ans[str(Path(p).relative_to('c:').as_posix())] = h
+        self.doc_df['hash'] = self.doc_df['path'].replace(ans)

@@ -33,12 +33,12 @@ def _get_local_folder():
 
 
 BASE_DIR = _get_local_folder()
-# for imports
-(BASE_DIR / 'imports').mkdir(exist_ok=True)
+# for imports QDFC?
+# (BASE_DIR / 'imports').mkdir(exist_ok=True)
 
 APP_NAME = __appname__
 APP_SUFFIX = '.archivum-config'
-DEFAULT_CONFIG_FILE = BASE_DIR / f"default{APP_SUFFIX}"
+DEFAULT_CONFIG_FILE = BASE_DIR / f"uber-library{APP_SUFFIX}"
 
 # BIBTEX_DIR = "\\s\\telos\\biblio\\"
 
