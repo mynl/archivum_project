@@ -51,7 +51,10 @@ class Trie:
         path = prefix
         for char in prefix:
             if char not in node.children:
-                raise ValueError(f"Prefix '{prefix}' not found in trie.")
+                if strict:
+                    raise ValueError(f"Prefix '{prefix}' not found in trie.")
+                else:
+                    break
             node = node.children[char]
 
         if strict and node.value is None:

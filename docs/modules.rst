@@ -4,6 +4,13 @@ archivum Package
 .. automodule:: archivum
    :members:
 
+CrossRef
+----------
+
+.. automodule:: archivum.crossref
+   :members:
+
+
 Command Line Interface
 -----------------------
 
@@ -15,6 +22,13 @@ Document Class
 
 .. automodule:: archivum.document
    :members:
+
+GUI
+----
+
+.. automodule:: archivum.gui
+   :members:
+
 
 Hasher
 ----------

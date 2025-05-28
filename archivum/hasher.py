@@ -19,3 +19,10 @@ def hash_many(paths: list[Path], workers: int) -> dict:
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {pool.submit(blake2b_hash, p): p for p in paths}
         return {futures[f]: f.result() for f in futures if f.exception() is None}
+
+
+def qhash(s: str) -> str:
+    """Quick hash of a string."""
+    h = hashlib.md5()
+    h.update(s)
+    return h.hexdigest()

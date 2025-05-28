@@ -27,7 +27,7 @@ def parse_test(text, debug=False, show_tokens=False):
             print("========================\n")
         pprint(result)
     except Exception as e:
-        print("Error:", e)
+        raise ValueError(f'Parsing Error: {e}')
 
 
 def parser(text, debug=False):
@@ -104,7 +104,7 @@ class ArcLexer(Lexer):
 
     NUMBER = r'-?(\d+(\.\d*)?|\.\d+)(%|[eE][+-]?\d+)?|inf|-inf'
     QUOTED_STRING = r'''"([^"\\]|\\.)*"|\'([^\'\\]|\\.)*\''''
-    REGEX_SLASHED = r'/([^/\\]|\\.)*/'
+    REGEX_SLASHED = r'/([^/\\]|\\.)*(/|$)'
     # the look ahead here rejects pure strings, so this does not match
     # columns
     # REGEX_UNQUOTED = r'(?![a-zA-Z]+ )[^\s,~/!][^\s,]*'
@@ -113,7 +113,7 @@ class ArcLexer(Lexer):
 
     # matches very general, including regexes
     # used for column names, rhs of query, regex etc.
-    IDENTIFIER = r'[^\s~/!][^\s]*'
+    IDENTIFIER = r'[^\s~/!,][^\s~=<>,]*'
 
     STAR = r'\*'
     TILDE = r'~'
@@ -124,7 +124,10 @@ class ArcLexer(Lexer):
         return t
 
     def REGEX_SLASHED(self, t):
-        t.value = t.value[1:-1]
+        if t.value.endswith('/'):
+            t.value = t.value[1:-1]
+        else:
+            t.value = t.value[1:]
         return t
 
     @_(r'\n+')
@@ -140,7 +143,7 @@ class ArcParser(Parser):
     """Parser for file database query language."""
 
     # comment out expected_shift_reduce during DEV!
-    expected_shift_reduce = 8
+    # expected_shift_reduce = 8
     tokens = ArcLexer.tokens
     # add parser.out.md during debug
     debugfile = None  # 'parser.out.md'
@@ -272,11 +275,6 @@ class ArcParser(Parser):
         self.logger('IDENTIFIER TILDE REGEX_SLASHED -> regex', p)
         return (p.IDENTIFIER, p.REGEX_SLASHED)
 
-    # @_('IDENTIFIER TILDE REGEX_UNQUOTED')
-    # def regex(self, p):
-    #     self.logger('IDENTIFIER TILDE REGEX_UNQUOTED -> regex', p)
-    #     return (p.IDENTIFIER, p.REGEX_UNQUOTED)
-
     @_('IDENTIFIER TILDE IDENTIFIER')
     def regex(self, p):
         # fudge, because eg py is indistinguishable from a column
@@ -284,17 +282,17 @@ class ArcParser(Parser):
         self.logger('IDENTIFIER TILDE IDENTIFIER -> regex', p)
         return (p.IDENTIFIER0, p.IDENTIFIER1)
 
-    # @_('BANG REGEX_UNQUOTED')
-    # def regex(self, p):
-    #     self.logger('BANG REGEX_UNQUOTED -> regex', p)
-    #     return ('name', p.REGEX_UNQUOTED)
+    @_('BANG REGEX_SLASHED')
+    def regex(self, p):
+        self.logger('BANG REGEX_SLASHED -> regex', p)
+        return ('BANG', p.REGEX_SLASHED)
 
     @_('BANG IDENTIFIER')
     def regex(self, p):
         # fudge, because eg py is indistinguishable from a column
         # treat the column as a plain text regex
         self.logger('BANG IDENTIFIER -> regex', p)
-        return ('author', p.IDENTIFIER)
+        return ('BANG', p.IDENTIFIER)
 
     @_('SELECT select_list')
     def clause(self, p):
@@ -463,7 +461,7 @@ DEFINITIONS
     WHERE = 'where|WHERE'
     TOP = 'top|TOP'
     AND = 'and|AND'    # just AND, otherwise into parens, order of ops etc.
-    FLAG = 'recent|RECENT|verbose|VERBOSE|duplicates|DUPLICATES|hardlinks|HARDLINKS'
+    FLAG = 'recent|RECENT|verbose|VERBOSE'
 
     STAR = r'\b\*\b'
     TILDE = r'\b~\b'

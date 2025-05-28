@@ -1,5 +1,9 @@
-"""Query archivum Library database."""
-# derived from file-database
+"""
+Query with pandas query-regex-SQL syntax
+
+
+Derived from file-database query.py.
+"""
 
 import re
 
@@ -8,9 +12,30 @@ import pandas as pd
 from . parser import parser, ArcLexer, ArcParser
 
 
-def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
+def querex_work(df: pd.DataFrame,
+                expr: str,
+                base_cols: list,
+                bang_field: str,
+                recent_field: str,
+                debug=False) -> pd.DataFrame:
     """
     Run extended query parser.
+
+    Usage: attach to an existing dataframe df as a method with base_cols set appropriately:
+
+        from types import MethodType
+        from functools import partial
+        base_cols_for_df = ['tag', 'year', 'type', 'author', 'title']
+        querex = partial(querex_work, base_cols=base_cols, debug=False)
+        df.querex = MethodType(querex, df)
+
+    MethodType means the df is passed in as the first parameter.
+
+    :param df: the dataframe to query
+    :param base_cols: list of columns to return by default, use select a, -b to adjust
+    :bang_field: column that ! expands to in regex queries
+    :recent_field: date column to use for recent queries
+
 
     Supports optional 'top N' prefix, regex with '~', and pandas query().
     Also supports 'sort by col1, col2' at the end.
@@ -52,9 +77,6 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
     Always case insenstive...TODO: !!
 
     """
-    # default returned columns
-    base_cols = ['tag', 'year', 'type', 'author', 'title']
-
     df = df.copy()
     expr = expr.strip()
     # specification dictionary from query string
@@ -64,19 +86,20 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
         print(e)
         raise e
 
-    print(spec)
+    if debug:
+        print(spec)
 
     # default values
     flags = spec['flags']
     recent = flags.get('recent', False)
     verbose = flags.get('verbose', False)
-    hardlinks = flags.get('hardlinks', False)
-    duplicates = flags.get('duplicates', False)
 
     top_n = spec['top']
     regex_filters = spec['regexes']
     query_expr = spec['where']
     include_cols = spec['select'].get('include', [])
+    if include_cols and include_cols[0] == '*':
+        include_cols = list(df.columns)
     exclude_cols = spec['select'].get('exclude', [])
 
     # sort spec
@@ -89,9 +112,10 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
 
     # Apply regex filters
     for field, pattern in regex_filters:
+        if field == 'BANG': field = bang_field
         if field in df.columns:
             try:
-                df = df[df[field].astype(str).str.contains(
+                df = df.loc[df[field].astype(str).str.contains(
                     pattern, regex=True, case=False, na=False)]
             except re.error:
                 print(f'Regular expression error with {pattern}...ignoring.')
@@ -100,7 +124,7 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
 
     # Sort
     if recent:
-        df = df.sort_values(by='year', ascending=False)
+        df = df.sort_values(by=recent_field, ascending=False)
     elif sort_cols:
         df = df.sort_values(by=sort_cols, ascending=sort_order)
 
@@ -111,12 +135,11 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
     #     df = df.loc[df.duplicated("node", keep=False)]
     #     df['n'] = df['node'].map(df['node'].value_counts().get)
 
-    # Top N
-    unrestricted_len = len(df)
+    # Top N and GT caption support, note df changes if top n...
+    qx_unrestricted_len = len(df)
     if top_n > 0:
         # -1 is all rows, the default
         df = df.head(top_n)
-
     # prune fields
     # base cols plus select
     fields = [i for i in base_cols if i in df.columns] + [
@@ -124,17 +147,20 @@ def query_ex(df: pd.DataFrame, expr: str) -> pd.DataFrame:
     # drop out the drop cols
     if exclude_cols:
         fields = [i for i in fields if i not in exclude_cols]
-    if duplicates or hardlinks:
-        fields.insert(0, 'n')
-    if recent and 'year' not in fields:
-        fields.insert(0, 'year')
-    print(fields)
+    if recent and recent_field not in fields:
+        fields.insert(0, recent_field)
     df = df[fields]
     if 'title' in fields:
-        df.title = df.title.str.replace(r'\{|\}', '', regex=True)
-    if 'tag' in fields:
-        df = df.set_index('tag')
-    return df, unrestricted_len
+        df['title'] = df['title'].replace(r'\{|\}', '', regex=True)
+    # if 'tag' in fields:
+    #     df = df.set_index('tag')
+
+    # apply decorations last thing before returning
+    df.qx_unrestricted_len = qx_unrestricted_len
+    df.gt_caption = f'Query: {expr}, {df.qx_unrestricted_len} rows returned'
+    if top_n > 0:
+        df.gt_caption += f', showing top {top_n}.'
+    return df
 
 
 def _parse_sort_fields(spec: str):
@@ -152,7 +178,7 @@ def _parse_sort_fields(spec: str):
     return fields, orders
 
 
-def query_help():
+def querex_help():
     return """
 Help on querex function
 =======================

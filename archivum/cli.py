@@ -1,10 +1,8 @@
 """Implement command line interface for archivum."""
 
-from functools import partial
 import os
 from pathlib import Path
 import shlex
-import socket
 import subprocess
 import yaml
 
@@ -13,12 +11,10 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import FuzzyCompleter, WordCompleter, NestedCompleter, PathCompleter
 from prompt_toolkit.formatted_text import HTML
 
-from greater_tables import GT
-
 from . reference import Reference
 from . library import Library
-from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_SUFFIX, APP_NAME
-from . utilities import df_to_str
+from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME
+from . utilities import fGT
 
 
 def clear_screen():
@@ -35,7 +31,8 @@ def entry():
 @click.option('-d', '--directory', default='~/Downloads', type=click.Path(exists=True), help='Directory to scan for PDFs')
 def new(directory):
     """List PDFs and show basic metadata."""
-    pdfs = find_pdfs(directory)
+    directory = Path(directory)
+    pdfs = directory.rgrep('*.pdf')
     for i, pdf in enumerate(pdfs):
         meta = extract_metadata(pdf)
         click.echo(f"{i}: {pdf.name}")
@@ -63,14 +60,13 @@ def create_library(libname):
     """Interactively create a YAML config file for a new library called libname."""
 
     # sort the file out
-    lib_path = BASE_DIR / f'{libname}{APP_SUFFIX}'
+    lib_path = BASE_DIR / f'{libname}.{APP_NAME}-config'
     click.secho("=== Library Config Creator ===", fg='cyan')
     click.secho(f'Creating Library {libname} at {lib_path}')
 
     config = {
         "library": libname,
         "description": click.prompt('Description'),
-        "database": str(lib_path.with_suffix(f'.{APP_NAME}-feather')),
         "columns": ['type', 'tag', 'author', 'doi', 'file', 'journal', 'pages', 'title',
                     'volume', 'year', 'publisher', 'url', 'institution', 'number',
                     'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
@@ -117,7 +113,7 @@ def query_repl(config: Path, tablefmt: str):
             if expr.lower() in {"exit", "x", "quit", "q"}:
                 break
             elif expr == "?":
-                click.echo(lib.query_help())
+                click.echo(lib.querex_help())
                 click.echo(repl_help())
                 continue
             elif expr == 'cls':
@@ -140,7 +136,7 @@ def query_repl(config: Path, tablefmt: str):
                     print('Wrong syntax for open, expect o index number')
                 try:
                     fname = result.loc[expr, 'file']
-                    print('TODO...open ', file)
+                    print('TODO...open ', fname)
                     # os.startfile(fname)
                 except KeyError:
                     print(f'Key {expr} not found.')

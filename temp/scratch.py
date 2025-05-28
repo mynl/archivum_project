@@ -51,7 +51,7 @@ import latexcodec
 #     pass
 
 
-# class KeyAllocator:
+# class TagAllocator:
 
 #     def __init__(self, existing: set[str]):
 #         """Class to determine the next key (@AuthorYYYY) given a list of existing keys."""

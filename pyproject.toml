@@ -15,9 +15,11 @@ dependencies = [
     "greater_tables",
     "numpy",
     "pandas",
+    "pendulum",
     "prompt_toolkit",
     "pyarrow",
     "pyyaml",
+    "pypdf",
     "aggregate",
 ]
 

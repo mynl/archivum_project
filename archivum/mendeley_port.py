@@ -6,6 +6,7 @@ Code in this module would be used once, and adjusted to your specific library.
 
 from pathlib import Path
 import re
+from types import MethodType
 
 import latexcodec
 import Levenshtein
@@ -14,7 +15,7 @@ import pandas as pd
 
 from . import BASE_DIR
 from . trie import Trie
-from . utilities import remove_accents, accent_mapper_dict, safe_int, KeyAllocator
+from . utilities import remove_accents, accent_mapper_dict, safe_int, TagAllocator
 
 
 def suggest_tag(df):
@@ -316,6 +317,9 @@ class Bib2df():
 
     def distinct(self, c, source='ref_df'):
         """Return distinct occurrences of col c."""
+        if source == 'ref_df' and self._ref_df is None:
+            print('*** distinct with ref_df not set, defaulting to df')
+            source = 'df'
         df = getattr(self, source)
         if df is None:
             return df
@@ -550,12 +554,16 @@ class Bib2df():
             print(noans)
 
         # make the proposed tags, build lists as you go with no duplicates
-        ka = KeyAllocator([])
-        df['proposed_tag'] = df.standard_tag.map(ka)
+        ta = TagAllocator([])
+        df['proposed_tag'] = df.standard_tag.map(ta)
         df = df.sort_values('proposed_tag')
 
         # check all unique
-        assert len(df.loc[df.proposed_tag.duplicated(keep=False)]) == 0, 'ERROR: map tags produced non-unqiue tags'
+        non_uq_tags = df.loc[df.proposed_tag.duplicated(keep=False)]
+        if len(non_uq_tags):
+            print(f'Non-unique tags {len(non_uq_tags) = }\n')
+            print(set(non_uq_tags.proposed))
+            raise ValueError('Non-unique proposed tags')
 
         # save for audit purposes
         self.save_audit_file(df, '.tag-mapping')
@@ -614,14 +622,16 @@ class Bib2df():
     @property
     def ported_df(self):
         if self._ported_df is None:
+            print('ported_df prop running ***************************************')
             self.port_mendeley_file()
         return self._ported_df
 
     @property
     def ref_df(self):
-        """The reference df contains no file information."""
+        """The reference df contains no file information and has tag NOT as the index."""
         if self._ref_df is None:
-            self._ref_df = self.ported_df.drop(columns='file')
+            print('ref_df prop running ***************************************')
+            self._ref_df = self.ported_df.drop(columns='file').reset_index(drop=False)
             self._ref_df['arc-source'] = 'mendeley'
         return self._ref_df
 
@@ -635,6 +645,7 @@ class Bib2df():
         Currently only PDFs.
         """
         if self._doc_df is None:
+            print('doc_df prop running ***************************************')
             pdfs = list(self.pdf_dir.rglob('*.pdf'))
             ans = []
             for p in pdfs:
@@ -657,6 +668,7 @@ class Bib2df():
             df["mod"] = pd.to_datetime(df["mod"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
             df["access"] = pd.to_datetime(df["access"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
             self._doc_df = df
+            self._add_hashes()
             print(f'Created doc_df with {len(ans)} files')
         return self._doc_df
 
@@ -664,6 +676,7 @@ class Bib2df():
     def proto_ref_doc_df(self):
         """Information about files **referenced** in the library database."""
         if self._proto_ref_doc_df is None:
+            print('proto_ref_doc_df prop running ***************************************')
             self._parse_library_file_field()
         return self._proto_ref_doc_df
 
@@ -672,6 +685,7 @@ class Bib2df():
         """Make the reference/document dataframe by matching vfiles to afiles."""
         # columns are ref_id=tag and afile name
         if self._ref_doc_df is None:
+            print('ref_doc_df prop running ***************************************')
             actual_files = set([i for i in self.doc_df.path])
             print(f'{len(actual_files) = }')
             missing_vfiles = []
@@ -699,11 +713,15 @@ class Bib2df():
 
     @property
     def database(self):
-        """Merged database."""
+        """Merged database, with exploded authors."""
         if self._database is None:
+            exploded_authors = (
+                self.ref_df.assign(author=self.ref_df.author.str.split(" and "))
+                .explode("author", ignore_index=True)
+            )
             self._database = (((
-             self.ref_doc_df
-                .merge(self.ref_df, on="tag",  how='right'))
+                self.ref_doc_df
+                .merge(exploded_authors, on="tag", how='right'))
                 .merge(self.doc_df, on='path', how='left'))
             )
             for c in ['node', 'links', 'size']:
@@ -713,7 +731,8 @@ class Bib2df():
 
     def refs_no_docs(self):
         """Return tags to refs with no files."""
-        return self.ref_df.loc[sorted(list(set(self.ref_df.index) - set(self.ref_doc_df.tag)))]
+        idx = sorted(list(set(self.ref_df.tag) - set(self.ref_doc_df.tag)))
+        return self.ref_df.query('tag in @idx')
 
     def docs_no_refs(self):
         """Return docs with no associated refs."""
@@ -730,7 +749,8 @@ class Bib2df():
 
         refs_per_doc = self.ref_doc_df.groupby('path').count()
         # I know most is 4
-        doc_1_ref, doc_2_ref, doc_3_ref, doc_4_ref = refs_per_doc.value_counts()
+        doc_1_ref, doc_2_ref, doc_3_ref, *doc_4_ref = refs_per_doc.value_counts()
+        doc_4_ref = sum(doc_4_ref)
         assert len(refs_per_doc) == doc_1_ref + doc_2_ref + doc_3_ref + doc_4_ref
         doc_0_ref = len(self.doc_df) - len(refs_per_doc)
 
@@ -741,7 +761,7 @@ class Bib2df():
             '1 child': [ref_1_doc, doc_1_ref],
             '2 children': [ref_2_doc, doc_2_ref],
             '3 children': [ref_3_doc, doc_3_ref],
-            '4 children': [0, doc_4_ref],
+            '4+ children': [0, doc_4_ref],
         }, index=['references', 'documents']).T
 
         return stats
@@ -770,4 +790,12 @@ class Bib2df():
         ans = {}
         for p, h in df[['path', 'hash']].values:
             ans[str(Path(p).relative_to('c:').as_posix())] = h
-        self.doc_df['hash'] = self.doc_df['path'].replace(ans)
+        self._doc_df['hash'] = self.doc_df['path'].replace(ans)
+
+    def create_library(self, lib_name=''):
+        """Save the files to the Lirbary."""
+        if lib_name == '':
+            lib_name = 'uber-library'
+        self.ref_df.to_feather(BASE_DIR / (lib_name + '.archivum-ref-feather'))
+        self.doc_df.to_feather(BASE_DIR / (lib_name + '.archivum-doc-feather'))
+        self.ref_doc_df.to_feather(BASE_DIR / (lib_name + '.archivum-ref-doc-feather'))

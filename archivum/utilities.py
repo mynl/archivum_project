@@ -27,20 +27,20 @@ def safe_int(s):
             return s
 
 
-def safe_int_comma(s):
-    """
-    Safe format of s as a year for greater_tables.
+# def safe_int_comma(s):
+#     """
+#     Safe format of s as a year for greater_tables.
 
-    By default s may be interpreted as a float so str(x) give 2015.0
-    which is not wanted. Hence this function is needed.
-    """
-    try:
-        return f'{int(s):,d}'
-    except ValueError:
-        if s == '':
-            return ''
-        else:
-            return s
+#     By default s may be interpreted as a float so str(x) give 2015.0
+#     which is not wanted. Hence this function is needed.
+#     """
+#     try:
+#         return f'{int(s):,d}'
+#     except ValueError:
+#         if s == '':
+#             return ''
+#         else:
+#             return s
 
 
 def safe_file_size(s):
@@ -71,49 +71,41 @@ def safe_file_size(s):
             return s
 
 
-fGT = partial(GT, large_ok=True,
+def default_formatter(x):
+    """
+    For raw columns.
+
+    The issue is that cols with ints and '' strings are not recognized as int by GT.
+    """
+    if isinstance(x, int):
+        return f'{x:d}'
+    else:
+        return str(x)
+
+
+fGT = partial(GT,
+              large_ok=True,
+              show_index=False,
               formatters={
-                  'index': str,
-                  'year': safe_int,
-                  'node': str,
-                  'links': safe_int,
                   'size': safe_file_size,
-                  'number': safe_int
-              }
+              },
+              raw_cols=['year', 'index', 'node', 'links', 'number'],
+              aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
+              default_formatter=default_formatter,
+              str_max_width=120,
               )
 
 
-def df_to_str(df, tablefmt, show_index=False):
-    """Nice prepped df as string for printing."""
-    if 'title' in df.columns:
-        # get rid of the {}
-        df['title'] = df['title'].str[1:-1]
-    if 'author' in df.columns:
-        df['author'] = df['author'].str.replace(r'\{|\}', '', regex=True)
-    f = fGT(df, show_index=show_index)
-    df = f.df
-    dfa = [i[4:] for i in f.df_aligners]
-    colw = {c: 15 for c in df.columns}
-    for c in df:
-        lens = df[c].astype(str).str.len()
-        lens = lens[lens > 0]
-        m = lens.mean()
-        s = lens.std()
-        cw = min(m + s, lens.max(), np.percentile(lens, 75))
-        colw[c] = np.round(cw, 0)
-    # for c in ['dir', 'path', 'hash']:
-    #     if c in df:
-    #         colw[c] = min(40, df[c].str.len().max())
-    # for c in ['name']:
-    #     if c in df:
-    #         colw[c] = min(60, df[c].str.len().max())
-    print(sum(colw.values()), colw)
-    return df.to_markdown(
-        index=False,
-        colalign=dfa,
-        tablefmt=tablefmt,
-        maxcolwidths=[colw.get(i) for i in df.columns],
-        )
+# def df_to_str(df, tablefmt):
+#     """Nice prepped df as string for printing."""
+#     df = df.copy()
+#     if 'title' in df.columns:
+#         # get rid of the {}
+#         df['title'] = df['title'].str[1:-1]
+#     if 'author' in df.columns:
+#         df['author'] = df['author'].str.replace(r'\{|\}', '', regex=True)
+#     # user should call str....let's see!
+#     return fGT(df)
 
 
 def rinfo(ob):
@@ -174,12 +166,12 @@ def suggest_filename(s):
     pass
 
 
-class KeyAllocator:    # noqa
+class TagAllocator:    # noqa
 
     def __init__(self, existing: set[str]):
         """Class to determine the next key (@AuthorYYYY) given a list of existing keys."""
         self.existing = set(existing)
-        self.pattern = re.compile(r'^([A-Za-z][^0-9]+)(\d{4})([a-z]?)$')
+        self.pattern = re.compile(r'^(.+?)(\d{4})?([a-z]?)$')
         self.allocators = defaultdict(self._make_iter)
 
     def _make_iter(self):
@@ -189,24 +181,32 @@ class KeyAllocator:    # noqa
                 yield c
         return gen()
 
-    def next_key(self, tag) -> str:
+    def next_tag(self, tag) -> str:
         """Return the next available tag matching the input tag = NameYYYY format."""
         # name: str, year: int
         m = self.pattern.match(tag)
         try:
             name = m[1]
             year = m[2]
+            if year is None:
+                year = 'YYYY'
         except TypeError:
             # m - none, no match found
+            print(f'Type Error for {tag = }')
             return tag
         else:
-            base = f"{name}{year}"
-            it = self.allocators[(name, year)]
-            while True:
-                suffix = next(it)
-                candidate = base + suffix
-                if candidate not in self.existing:
-                    self.existing.add(candidate)
-                    return candidate
+            return self.get_tag(name, year)
 
-    __call__ = next_key
+    __call__ = next_tag
+
+    def get_tag(self, name: str, year: str) -> str:
+        """Create a tag for given name and year."""
+        base = f"{name}{year}"
+        it = self.allocators[(name, year)]
+        while True:
+            suffix = next(it)
+            candidate = base + suffix
+            if candidate not in self.existing:
+                self.existing.add(candidate)
+                return candidate
+
