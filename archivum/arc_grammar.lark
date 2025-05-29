@@ -1,0 +1,68 @@
+?query: clause_list
+      | empty
+
+empty:
+
+clause_list: clause+
+
+clause: TOP NUMBER                         -> top_clause
+      | flags                              -> flags_clause
+      | regexes                            -> regex_clause
+      | SELECT select_list                 -> select_clause
+      | WHERE where_clause_list            -> where_clause
+      | ORDER_BY column_sort_list          -> order_by_clause
+
+flags: FLAG+
+
+regexes: regex (AND regex)*
+
+regex: IDENTIFIER TILDE REGEX_SLASHED       -> regex_ident
+     | IDENTIFIER TILDE IDENTIFIER          -> regex_ident
+     | BANG REGEX_SLASHED                   -> regex_bang
+     | BANG IDENTIFIER                      -> regex_bang
+
+select_list: select_item ("," select_item)*
+
+select_item: IDENTIFIER                     -> select_include_identifier
+           | NOT IDENTIFIER                 -> select_exclude_identifier
+           | STAR                           -> select_all
+
+where_clause_list: where_clause (AND where_clause)*
+
+where_clause: IDENTIFIER EQ_TEST QUOTED_STRING   -> where_quoted_string
+            | IDENTIFIER EQ_TEST IDENTIFIER      -> where_identifier
+            | IDENTIFIER EQ_TEST NUMBER          -> where_number
+            | IDENTIFIER EQ_TEST DATETIME        -> where_datetime
+
+column_sort_list: column_sort ("," column_sort)*
+
+column_sort: IDENTIFIER                          -> column_sort_asc
+           | NOT IDENTIFIER                      -> column_sort_desc
+
+// Tokens
+TOP: "top"i
+SELECT: "select"i
+WHERE: "where"i
+ORDER_BY: ("order"i | "sort"i)
+AND: "and"i
+FLAG: "recent"i | "verbose"i
+
+NOT: "-"
+EQ_TEST: "==" | "<=" | "<" | ">" | ">="
+TILDE: "~"
+BANG: "!"
+STAR: "*"
+
+// Complex tokens
+REGEX_SLASHED:  /\/([^\/\\]*(\\.[^\/\\]*)*)\//
+QUOTED_STRING: /"[^"\\]*(\\\\.[^"\\]*)*"|'[^'\\]*(\\\\.[^'\\]*)*'/
+NUMBER: /-?(\d+(\.\d*)?|\.\d+)(%|[eE][+-]?\d+)?|inf|-inf/
+IDENTIFIER: /[^\s~\-\/!,][^\s~=<>,]*/
+
+%import common.NEWLINE
+%import common.WS
+%ignore WS
+%ignore NEWLINE
+
+// Regular expressions for DATETIME
+DATETIME: /(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])\s(?:[01][0-9]|2[0-3]):[0-5][0-9]|(19|20)\d{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])|(19|20)\d{2}-(0[1-9]|1[0-2])|(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])|(?:[01][0-9]|2[0-3]):[0-5][0-9]/

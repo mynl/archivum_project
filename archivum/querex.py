@@ -9,7 +9,7 @@ import re
 
 import pandas as pd
 
-from . parser import parser, ArcLexer, ArcParser
+from . parser import parser
 
 
 def querex_work(df: pd.DataFrame,
@@ -91,11 +91,11 @@ def querex_work(df: pd.DataFrame,
 
     # default values
     flags = spec['flags']
-    recent = flags.get('recent', False)
-    verbose = flags.get('verbose', False)
+    recent = 'recent' in flags
+    verbose = 'verbose' in flags
 
     top_n = spec['top']
-    regex_filters = spec['regexes']
+    regex_filters = spec['regex']
     query_expr = spec['where']
     include_cols = spec['select'].get('include', [])
     if include_cols and include_cols[0] == '*':
@@ -112,7 +112,8 @@ def querex_work(df: pd.DataFrame,
 
     # Apply regex filters
     for field, pattern in regex_filters:
-        if field == 'BANG': field = bang_field
+        if field == 'BANG':
+            field = bang_field
         if field in df.columns:
             try:
                 df = df.loc[df[field].astype(str).str.contains(
@@ -142,8 +143,10 @@ def querex_work(df: pd.DataFrame,
         df = df.head(top_n)
     # prune fields
     # base cols plus select
-    fields = [i for i in base_cols if i in df.columns] + [
-        i for i in include_cols if i in df.columns]
+    # do in two steps to avoid duplicating fields
+    fields = [i for i in base_cols if i in df.columns]
+    fields = fields + [
+        i for i in include_cols if i in df.columns and i not in fields]
     # drop out the drop cols
     if exclude_cols:
         fields = [i for i in fields if i not in exclude_cols]

@@ -26,6 +26,7 @@ import archivum.document as arcd
 import archivum.crossref as arcc
 import archivum.gui as arcg
 import archivum.reference as arcr
+import archivum.cli as cli
 from archivum.utilities import fGT
 
 %load_ext autotime
@@ -186,3 +187,51 @@ PDF / text files respv.
 * A reference can have zero or more corresponding `vfiles`
 * Need to match `vfiles` to `afiles`. This is done with fuzzy name matching and the Levenshtein library to compute distance resulting in `best_match_df` from which we create `best_match_mapper`
 * `ref_doc_df` then effects the remapping.
+
+
+# Querex Language
+
+## Test Cases
+
+Run against `ref_df`
+
+```python
+
+querex_test_cases = [
+    '',
+    'top 4',
+    'recent',
+    'recent top 3',
+    'verbose recent top 17',
+    'select *',
+    'top 10 select *',
+    'where year == 2024',
+    'where year == "2024"',
+    'where type == "book"',
+    '! Delbaen',
+    '! /Wang, R/',
+    '! /Wang, R',
+    'recent top 3 author ~ /Wang, R/',
+    'verbose top 5 recent select journal author ~ /Wang, R/',
+    'top 6 order author',
+    'top 7 order journal',
+    'verbose top 8 select journal where year == "2024" order author',
+    'verbose top 9 select journal where year == "2024" order -journal, author',
+]
+
+
+import archivum.parser as arcp
+import archivum.library as arcl
+from archivum.utilities import fGT
+lib = arcl.Library('uber-library')
+
+for q in querex_test_cases:
+    print(repr(q))
+    try:
+        r = lib.ref_df.querex(q) 
+    except ValueError as e:
+        print('ERROR: ', e)
+    else:
+        # print(sorted(r.columns))
+        display(fGT(r.head(10)))
+```

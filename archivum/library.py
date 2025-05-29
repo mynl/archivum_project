@@ -19,9 +19,14 @@ import pandas as pd
 
 from . import BASE_DIR, APP_NAME
 from . trie import Trie
-from . querier import querex_work, querex_help as querex_help_work
+from . querex import querex_work, querex_help as querex_help_work
 from . hasher import hash_many
 from . utilities import TagAllocator
+from . logger_shim import LoggerShim, LogLevel
+
+
+# logger
+logger = LoggerShim(use_click=False, name=__name__)
 
 
 class Library():
@@ -38,12 +43,11 @@ class Library():
         If not found in current directory, looks in local (eg. for default config).
         """
         self.debug = False
-        self.config_path = BASE_DIR / f'{config_file}.{APP_NAME}-config'
-        assert self.config_path.exists()
-        # print(self.config_path)
+        self.config_path = Path(config_file)
         if not self.config_path.exists():
-            self.config_path = BASE_DIR / self.config_path.name
-        # print(self.config_path)
+            self.config_path = BASE_DIR / f'{config_file}.{APP_NAME}-config'
+        logger.info('config_path = %s', self.config_path)
+        assert self.config_path.exists()
         with self.config_path.open() as f:
             self._config = yaml.safe_load(f)
         self._last_query = None
@@ -58,6 +62,17 @@ class Library():
         self._database = pd.DataFrame([])
         self._trie = None
         self._tag_allocator = None
+        self.is_dirty = False
+        self.is_empty = False
+
+    def close(self):
+        """Close library."""
+        logger.todo('Library.close()')
+        pass
+
+    def save(self):
+        """Save library if necessary."""
+        logger.todo('Library.save()')
 
     @property
     def doc_df(self):
@@ -217,19 +232,26 @@ class Library():
         return self.df.loc[self.df.file == '', self.base_cols]
 
     @staticmethod
+    def get_library_list():
+        """Get a list of available libraries as Path objects."""
+        return list(BASE_DIR.glob(f'*.{APP_NAME}-config'))
+
+    @staticmethod
     def list():
         """List projects in the default location."""
         # TODO
-        return list(BASE_DIR.glob(f'*.{APP_NAME}-config'))
+        return '\n'.join(f.name for f in Library.get_library_list())
 
     @staticmethod
     def list_deets():
         """Dataframe of all projects in default location."""
         # not sure what the best "way around" is for this...
         df = pd.concat(
-            [Library(p).config_df for p in Library.list()],
+            [Library(p).config_df for p in Library.get_library_list()],
             axis=1).T.fillna('')
-        df = df.set_index('name')
+        df = df[['name', 'description', 'bibtex_file', 'pdf_dir', 'text_dir_name', 'extractor', 'watched_dirs', ]]
+        df = df.reset_index(drop=False)
+        logger.info(str(df))
         return df
 
     def to_name_ex(self, name, strict=False):
@@ -272,7 +294,7 @@ class Library():
 
         return stats
 
-    def stats_ref_fields(self):
+    def distinct_values_by_field(self):
         """Statistics on distinct values by field."""
         ans = {}
         for c in self.ref_df.columns:
@@ -288,6 +310,17 @@ class Library():
         # c: len(self.distinct(c)) for c in self.ref_df.columns
         # }, index=['Value']).T
         return stats
+
+    def distinct_value_counts(self, field):
+        """Return the top 20 distinct value counts for field."""
+        return (None
+                if field not in self.database else
+                    self.database[field]
+                        .value_counts()
+                        .to_frame('count')
+                        .sort_values('count', ascending=False)
+                        .head(20)
+                )
 
     def next_tag(self, name, year):
         """Return the next tag RELATIVE TO THE CURRENT DATA after name, year."""
@@ -305,7 +338,7 @@ class Library():
                 # nothing close
                 return base_tag
         except IndexError as e:
-            print('ERROR in next tag ', e)
+            logger.error('ERROR in next tag ', e)
 
     @property
     def tag_allocator(self):

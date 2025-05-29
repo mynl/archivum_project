@@ -20,7 +20,7 @@ dependencies = [
     "pyarrow",
     "pyyaml",
     "pypdf",
-    "aggregate",
+    "lark",
 ]
 
 classifiers = [

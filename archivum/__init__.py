@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 
+
 __appname__ = 'archivum'
 __author__ = 'Stephen Mildenhall'
 __date__ = '2025-05-22'
@@ -37,7 +38,7 @@ BASE_DIR = _get_local_folder()
 # (BASE_DIR / 'imports').mkdir(exist_ok=True)
 
 APP_NAME = __appname__
-DEFAULT_CONFIG_FILE = BASE_DIR / f"uber-library.{APP_NAME}-config"
+DEFAULT_CONFIG_FILE = "uber-library"
 # BIBTEX_DIR = "\\s\\telos\\biblio\\"
 
 
