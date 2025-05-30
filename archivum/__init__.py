@@ -41,6 +41,7 @@ APP_NAME = __appname__
 DEFAULT_CONFIG_FILE = "uber-library"
 # BIBTEX_DIR = "\\s\\telos\\biblio\\"
 
+EMPTY_LIBRARY = type('EmptyLibrary', (), {'name': 'No library open', 'is_empty': True})
 
 # avoid circular import errors, import here
 from . library import Library  # noqa

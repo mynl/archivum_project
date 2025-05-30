@@ -10,6 +10,10 @@ import pandas as pd
 
 from greater_tables import GT
 
+# the imported global formatter, set using make_fGT
+#
+fGT = None
+
 
 def safe_int(s):
     """
@@ -83,18 +87,24 @@ def default_formatter(x):
         return str(x)
 
 
-fGT = partial(GT,
-              large_ok=True,
-              show_index=False,
-              formatters={
-                  'size': safe_file_size,
-              },
-              raw_cols=['year', 'index', 'node', 'links', 'number'],
-              aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
-              default_formatter=default_formatter,
-              str_max_width=120,
-              )
+def make_fGT(max_table_width=120, **kwargs):
+    global fGT
+    fGT = partial(GT,
+                  large_ok=True,
+                  show_index=False,
+                  formatters={
+                      'size': safe_file_size,
+                  },
+                  raw_cols=['year', 'index', 'node', 'links', 'number'],
+                  aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
+                  default_formatter=default_formatter,
+                  max_table_width=120,
+                  **kwargs
+                  )
 
+
+# update the global object
+make_fGT()
 
 # def df_to_str(df, tablefmt):
 #     """Nice prepped df as string for printing."""
@@ -209,4 +219,3 @@ class TagAllocator:    # noqa
             if candidate not in self.existing:
                 self.existing.add(candidate)
                 return candidate
-

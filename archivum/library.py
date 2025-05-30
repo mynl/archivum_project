@@ -21,7 +21,7 @@ from . import BASE_DIR, APP_NAME
 from . trie import Trie
 from . querex import querex_work, querex_help as querex_help_work
 from . hasher import hash_many
-from . utilities import TagAllocator
+from . utilities import TagAllocator, make_fGT
 from . logger_shim import LoggerShim, LogLevel
 
 
@@ -46,10 +46,11 @@ class Library():
         self.config_path = Path(config_file)
         if not self.config_path.exists():
             self.config_path = BASE_DIR / f'{config_file}.{APP_NAME}-config'
-        logger.info('config_path = %s', self.config_path)
+        logger.debug('config_path = %s', self.config_path)
         assert self.config_path.exists()
         with self.config_path.open() as f:
             self._config = yaml.safe_load(f)
+        make_fGT(max_table_width=self.max_table_width)
         self._last_query = None
         self._last_unrestricted = 0
         self._last_query_title = ''
@@ -80,7 +81,7 @@ class Library():
         if self._doc_df.empty:
 
             self._doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
-            pdf_dir = self.pdf_dir
+            pdf_dir = Path(self.pdf_dir_name)
             self._doc_df['tpath'] = [
                 str(Path(i).relative_to(pdf_dir).parent)
                 for i in self._doc_df.path]
@@ -200,15 +201,14 @@ class Library():
         for k, v in kwargs.items():
             self._config[k] = v
 
-    def querex(self, expr, debug=False):
+    def querex(self, expr):
         """Run ``expr`` through the querier."""
         self._last_query_expr = expr
         try:
-            self._last_query = self.database.querex(expr, debug)
-            self._last_unrestricted = unrestricted_len
+            self._last_query = self.database.querex(expr)
+            self._last_unrestricted = getattr(self.database, "qx_unrestricted_len", -1)
         except ValueError:
             return None
-        self._last_query_title = f'<strong>QUERY</strong>: <code>{expr}</code>, showing {len(self._last_query)} of {self._last_unrestricted} results.'
         return self._last_query
 
     @staticmethod
@@ -232,26 +232,25 @@ class Library():
         return self.df.loc[self.df.file == '', self.base_cols]
 
     @staticmethod
-    def get_library_list():
-        """Get a list of available libraries as Path objects."""
+    def get_library_path_list():
+        """Get a list of available libraries (no suffix) as list of Paths (see also ``list``)."""
         return list(BASE_DIR.glob(f'*.{APP_NAME}-config'))
 
     @staticmethod
     def list():
-        """List projects in the default location."""
+        """List of projects in the default location."""
         # TODO
-        return '\n'.join(f.name for f in Library.get_library_list())
+        return [f.name for f in Library.get_library_path_list()]
 
     @staticmethod
     def list_deets():
         """Dataframe of all projects in default location."""
         # not sure what the best "way around" is for this...
         df = pd.concat(
-            [Library(p).config_df for p in Library.get_library_list()],
+            [Library(p).config_df for p in Library.get_library_path_list()],
             axis=1).T.fillna('')
-        df = df[['name', 'description', 'bibtex_file', 'pdf_dir', 'text_dir_name', 'extractor', 'watched_dirs', ]]
-        df = df.reset_index(drop=False)
-        logger.info(str(df))
+        df = df[['name', 'description', 'bibtex_file', 'pdf_dir_name', 'text_dir_name', 'extractor', ]]
+        df = df.reset_index(drop=True)
         return df
 
     def to_name_ex(self, name, strict=False):

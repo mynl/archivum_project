@@ -19,18 +19,75 @@ from random import sample
 import fitz  # PyMuPDF
 import Levenshtein
 
-import archivum.mendeley_port as arcm
-import archivum.library as arcl
-import archivum.utilities as arcu
-import archivum.document as arcd
-import archivum.crossref as arcc
-import archivum.gui as arcg
-import archivum.reference as arcr
-import archivum.cli as cli
 from archivum.utilities import fGT
+import archivum.cli as cli
+import archivum.crossref as arcc
+import archivum.document as arcd
+import archivum.gui as arcg
+import archivum.library as arcl
+import archivum.mendeley_port as arcm
+import archivum.parser as arcp
+import archivum.reference as arcr
+import archivum.utilities as arcu
+
 
 %load_ext autotime
 ```
+
+## Test GUI
+
+```python
+cli.entry(args=['--help'], standalone_mode=False);
+```
+
+Produces
+
+```
+Usage: ipykernel_launcher.py [OPTIONS] COMMAND [ARGS]...
+
+  CLI for managing bibliographic entries.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+x  close-library        Close the currently open library.
+  create-library       Interactively create a YAML config file for a new...
+x  get-distinct-values  Display number of distinct values in each library...
+x  get-library-stats    Display library stats library.
+  import               Import bibliographic entries, optionally filtered...
+x  list-libraries       List all available libraries.
+  merge-library        Merge another library into the current library.
+  new                  Scan a directory for new PDF files and optionally...
+x  open-library         Open a library by name and set it as current.
+  query-library        Interactive REPL to run multiple queries on the...
+x  save-library         Save the current library to disk.
+  uber                 Start an interactive REPL loop for issuing...
+```
+
+`query-library` won't work for `asyncio` reasons.
+
+```python
+
+cli.entry(args=["list-libraries"], standalone_mode=False)
+cli.entry(args=["list-libraries", "-d"], standalone_mode=False)
+
+
+cli.entry(args=['open-library', 'uber-library'], standalone_mode=False)
+cli.entry(args=['get-library-stats'], standalone_mode=False)
+cli.entry(args=['get-distinct-values', ], standalone_mode=False)
+cli.entry(args=['get-distinct-values', '-f author'], standalone_mode=False)
+cli.entry(args=['close-library', ], standalone_mode=False)
+cli.entry(args=['get-library-stats'], standalone_mode=False)
+
+# NYI
+cli.entry(args=['save-library'], standalone_mode=False)
+cli.entry(args=['merge-library', 'othername'], standalone_mode=False)
+cli.entry(args=['create-library', 'Test Library'], standalone_mode=False)
+cli.entry(args=['import'], standalone_mode=False)
+cli.entry(args=['new'], standalone_mode=False)
+```
+
 
 ## Create a Library
 

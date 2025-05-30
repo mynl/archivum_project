@@ -160,9 +160,11 @@ def querex_work(df: pd.DataFrame,
 
     # apply decorations last thing before returning
     df.qx_unrestricted_len = qx_unrestricted_len
-    df.gt_caption = f'Query: {expr}, {df.qx_unrestricted_len} rows returned'
+    df.gt_caption = f'Query: {expr}, {df.qx_unrestricted_len}'
     if top_n > 0:
-        df.gt_caption += f', showing top {top_n}.'
+        df.gt_caption += f', showing top {top_n} of {qx_unrestricted_len} rows returned.'
+    else:
+        df.gt_caption += f', {qx_unrestricted_len} rows returned.'
     return df
 
 

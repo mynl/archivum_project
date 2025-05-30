@@ -19,11 +19,12 @@ from pendulum import local_timezone
 from pypdf import PdfReader
 from tqdm import tqdm
 
+from . import EMPTY_LIBRARY
 
 class Document():
     """Manage physical document files."""
 
-    def __init__(self, doc_path: Path, text_dir_path: Path, extractor: str = "pdftotext"):
+    def __init__(self, doc_path, text_dir_path=None, extractor: str = "pdftotext"):
         """Create Documents class based on file path."""
         self.doc_path = doc_path
         self._stats = None
@@ -66,7 +67,7 @@ class Document():
             self._stats["access"] = pd.to_datetime(self._stats["access"], unit="ns").tz_localize("UTC").tz_convert(tz)
         return self._stats
 
-    def meta_data(self, lib=None):
+    def meta_data(self, lib=EMPTY_LIBRARY):
         """
         Extract meta data from pdf.
 
@@ -86,7 +87,7 @@ class Document():
                 # proba first last
                 *f, l = a.split(' ')
                 a = l + ', ' + ' '.join(f)
-        if lib is not None and  a != '':
+        if not lib.is_empty and  a != '':
             meta['author_ex'] = lib.to_name_ex(a, strict=False)
         else:
             meta['author_ex'] = ''
