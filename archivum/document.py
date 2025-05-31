@@ -21,6 +21,7 @@ from tqdm import tqdm
 
 from . import EMPTY_LIBRARY
 
+
 class Document():
     """Manage physical document files."""
 
@@ -30,6 +31,12 @@ class Document():
         self._stats = None
         self._text_dir_path = text_dir_path
         self.extractor = extractor
+        self.meta_author = ''
+        self.meta_author_ex = ''
+        self.meta_title = ''
+        self.meta_subject = ''
+        self.meta_raw = None
+        self.meta_cross_ref = ''
 
     def __repr__(self):
         return f'Document({self.doc_path.name})'
@@ -67,33 +74,39 @@ class Document():
             self._stats["access"] = pd.to_datetime(self._stats["access"], unit="ns").tz_localize("UTC").tz_convert(tz)
         return self._stats
 
-    def meta_data(self, lib=EMPTY_LIBRARY):
+    def add_meta_data(self, lib=EMPTY_LIBRARY):
         """
         Extract meta data from pdf.
 
         Return author(ex), subject, title and raw output in namedtuple.
         """
         with fitz.open(self.doc_path) as doc:
-            meta_in = doc.metadata
+            self.meta_raw = doc.metadata
         meta_keys = [
             'author',
             'subject',
             'title',
         ]
-        meta = {k: meta_in.get(k, '') for k in meta_keys}
-        a = meta['author']
+        a = self.meta_raw.get('author', '').strip()
+        self.meta_author_ex = ''
+        self.meta_title = self.meta_raw.get('title', '').strip()
+        self.meta_subject = self.meta_raw.get('subject', '').strip()
+
+        # deal with author
         if a != '':
             if a.find(',') < 0:
                 # proba first last
                 *f, l = a.split(' ')
                 a = l + ', ' + ' '.join(f)
-        if not lib.is_empty and  a != '':
-            meta['author_ex'] = lib.to_name_ex(a, strict=False)
+        self.meta_author = a
+        if not lib.is_empty and a != '':
+            self.meta_author_ex = lib.to_name_ex(a, strict=False)
         else:
-            meta['author_ex'] = ''
-        meta['raw'] = meta_in
-        Meta = namedtuple('Meta', meta.keys())
-        return Meta(*meta.values())
+            self.meta_author_ex = ''
+        # meta['raw'] = meta_in
+        # Meta = namedtuple('Meta', meta.keys())
+        # return Meta(*meta.values())
+        self.meta_crossref = self.guess_crossref_query()
 
     def meta_data_debug(self):
         """Extract meta data from pdf, verbose testing version."""
@@ -218,6 +231,61 @@ class Document():
         text = unicodedata.normalize("NFC", text)
 
         return text
+
+    @staticmethod
+    def _looks_like_title(text):
+        """Test if text looks like a title."""
+        if not text or not isinstance(text, str):
+            return False
+        text = text.strip()
+        # Reject if mostly digits, file junk, or boilerplate
+        if re.fullmatch(r"[\d\s\-_.]+", text):
+            return False
+        if len(text) < 5 or len(text.split()) < 2:
+            return False
+        return True
+
+    @staticmethod
+    def _extract_year(text):
+        """Extract year from text."""
+        if not isinstance(text, str):
+            return None
+        m = re.search(r"\b(19|20)\d{2}\b", text)
+        return m.group() if m else None
+
+    @staticmethod
+    def _de_slugify(text):
+        return text.replace('_', ' ').strip()
+
+    def guess_crossref_query(self):
+        """Tried to guess a reasonable cross ref query search from the metadata and filename."""
+        # Try clean metadata title first
+        title = self.meta_title
+        title = re.sub(r'Microsoft (PowerPoint|Word)( - )?|Presentation title', '', title, flags=re.IGNORECASE)
+        author = self.meta_author_ex or self.meta_author
+        subject = self.meta_subject
+        fname = self.doc_path.stem
+
+        year = self._extract_year(subject) or self._extract_year(title) or self._extract_year(fname)
+
+        author = query = ''
+        if self._looks_like_title(title):
+            query = title
+        elif self._looks_like_title(subject):
+            query = subject
+        elif self._looks_like_title(self._de_slugify(fname)):
+            query = self._de_slugify(fname)
+        else:
+            return ''  # nothing usable
+
+        # Prefer to include author if it's more than 1 word
+        if author and len(author.split()) >= 2:
+            query = f"{author} {query}"
+
+        if year:
+            query = f"{query} {year}"
+
+        return query
 
 
 def _process_single_pdf(doc_path: Path, text_dir_path: Path, extractor: str):

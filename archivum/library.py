@@ -23,7 +23,7 @@ from . querex import querex_work, querex_help as querex_help_work
 from . hasher import hash_many
 from . utilities import TagAllocator, make_fGT
 from . logger_shim import LoggerShim, LogLevel
-
+from . document import Document
 
 # logger
 logger = LoggerShim(use_click=False, name=__name__)
@@ -349,6 +349,41 @@ class Library():
             names = set(d.author)
             self._tag_allocator = TagAllocator(names)
         return self._tag_allocator
+
+    def new_documents(self, directory, meta, recursive):
+        """
+        Scan a directory for new PDF files and optionally extract metadata.
+
+        Note ``new`` requires an open library for name completion and
+        timezone. You should always be working with an open library
+        and they are easy to complete.
+        """
+        directory = Path(directory)
+        if not directory.exists():
+            raise FileNotFoundError('Directory directory does not exist')
+        if recursive:
+            pdfs = directory.rglob('*.pdf')
+        else:
+            pdfs = directory.glob('*.pdf')
+        pdfs = sorted(pdfs)
+        dfs = pd.DataFrame({
+            'Document': [Document(p) for p in pdfs],
+            'file_name': [d.name for d in pdfs],
+            'path': pdfs,
+            'create': [
+                pd.to_datetime(p.stat().st_ctime_ns, unit='ns').tz_localize('UTC').tz_convert(self.timezone)
+                for p in pdfs]
+        }).sort_values('create', ascending=False)
+        dfs['n'] = range(1, len(dfs) + 1)
+        dfs = dfs.reset_index(drop=True)
+        if meta:
+            dfs.Document.map(lambda x: x.add_meta_data(self))
+            dfs['meta_author'] = dfs.Document.map(lambda md: md.meta_author)
+            dfs['meta_subject'] = dfs.Document.map(lambda md: md.meta_subject)
+            dfs['meta_title'] = dfs.Document.map(lambda md: md.meta_title)
+            dfs['meta_author_ex'] = dfs.Document.map(lambda md: md.meta_author_ex)
+            dfs['meta_crossref'] = dfs.Document.map(lambda md: md.meta_crossref)
+        return dfs
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

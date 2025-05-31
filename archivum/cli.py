@@ -27,8 +27,8 @@ from . logger_shim import LoggerShim, LogLevel
 
 
 # local constants
-DEFAULT_NEW_DIR = str(Path().home() / 'Downloads')
-
+DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
+EMPTY_DF = pd.DataFrame([])
 # logger
 logger = LoggerShim(level=LogLevel.INFO, use_click=True, name=__name__)
 
@@ -318,7 +318,7 @@ def query_library(start: str):
     # session = PromptSession(completer=word_completer)
     # result = None
 
-    result = pd.DataFrame([])
+    result = EMPTY_DF
     base_completer = make_query_completer_static(lib.database)
 
     def tag_branch():
@@ -424,50 +424,32 @@ def new(directory, meta, recursive):
     """
     Scan a directory for new PDF files and optionally display metadata.
 
-    Note ``new`` does not require an open library, it is pure file manipulation.
+    Note ``new`` requires an open library for timezone and name completion.
+    Optionally: look for duplicates!
     """
     logger.info("Scanning directory %s", directory)
     lib = LibraryContext.get()
-    directory = Path(directory)
-    if not directory.exists():
-        click.echo(f'Directory {directory.resolve()} does not exist, exiting.')
+    if lib.is_empty:
+        click.echo('No open library...exiting')
+        LibraryContext.last_new = EMPTY_DF
         return
-    if recursive:
-        logger.info("Recursive scanning mode.")
-    if meta:
-        logger.info("Displaying metadata for found PDFs.")
-    # TODO: Implement actual scanning logic
-    if recursive:
-        pdfs = directory.rglob('*.pdf')
+    try:
+        dfs = lib.new_documents(directory, meta, recursive)
+    except FileNotFoundError:
+        click.echo('%s directory not found', directory)
+        LibraryContext.last_new = EMPTY_DF
+        return
     else:
-        pdfs = directory.glob('*.pdf')
-    pdfs = sorted(pdfs)
-    dfs = pd.DataFrame({
-        'n': range(1, 1 + len(pdfs)),
-        'document': [d.name for d in pdfs],
-        'path': pdfs
-    })
+        # store it away in the context
+        LibraryContext.last_new = dfs
+
     if meta:
-        dfs['meta_author'] = ''
-        dfs['meta_subject'] = ''
-        dfs['meta_title'] = ''
-        dfs['meta_author_ex'] = ''
-        for i, p in enumerate(pdfs):
-            d = Document(p)
-            md = d.meta_data(lib)
-            dfs.loc[i, 'create'] = d.stats['create']
-            dfs.loc[i, 'meta_author'] = md.author
-            dfs.loc[i, 'meta_subject'] = md.subject
-            dfs.loc[i, 'meta_title'] = md.title
-            dfs.loc[i, 'meta_author_ex'] = md.author_ex
-        click.echo(fGT(dfs[['n', 'create', 'document', 'meta_author',
-                            'meta_subject', 'meta_title']]
+        click.echo(fGT(dfs[['n', 'create', 'file_name', 'meta_author',
+                            'meta_subject', 'meta_title', 'meta_crossref']]
                        .sort_values('create', ascending=False)
                        ))
     else:
         click.echo(fGT(dfs[['n', 'document']]))
-    # store it away in the context
-    LibraryContext.last_new = dfs
 
 # ========================================================================================
 
