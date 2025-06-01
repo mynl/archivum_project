@@ -13,15 +13,21 @@ requires-python = ">=3.10"
 dependencies = [
     "click",
     "greater_tables",
+    "lark",
+    "latexcodec",
     "numpy",
     "pandas",
     "pendulum",
     "prompt_toolkit",
     "pyarrow",
-    "pyyaml",
-    "pypdf",
     "pymupdf",   # fitz
-    "lark",
+    "pypdf",
+    "python_Levenshtein",
+    "pyyaml",
+    "rapidfuzz",
+    "requests",
+    "tkinter",
+    "tqdm",
 ]
 
 classifiers = [

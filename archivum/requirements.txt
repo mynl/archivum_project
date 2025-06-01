@@ -1,0 +1,16 @@
+click==8.1.7
+greater_tables==1.0.0
+lark==1.2.2
+latexcodec==2.0.1
+numpy==2.2.6
+pandas==2.2.3
+pendulum==3.1.0
+prompt_toolkit==3.0.41
+pymupdf==1.26.0
+pypdf==5.6.0
+python_Levenshtein==0.27.1
+PyYAML==6.0.1
+PyYAML==6.0.2
+rapidfuzz==3.13.0
+Requests==2.32.3
+tqdm==4.66.1
