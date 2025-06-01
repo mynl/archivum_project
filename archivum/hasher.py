@@ -24,5 +24,5 @@ def hash_many(paths: list[Path], workers: int) -> dict:
 def qhash(s: str) -> str:
     """Quick hash of a string."""
     h = hashlib.md5()
-    h.update(s)
+    h.update(s.encode('utf-8'))
     return h.hexdigest()

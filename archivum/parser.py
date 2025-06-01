@@ -13,7 +13,51 @@ GRAMMAR_FILE = Path(__file__).parent / "arc_grammar.lark"
 
 
 def parse_test(qno, text, debug=False, show_tokens=False):
-    """Convenience to test the grammar, run with a test text."""
+    """
+    Convenience to test the grammar, run with a test text.
+
+    Test cases::
+
+        querex_test_cases = [
+            '',
+            'top 4',
+            'recent',
+            'recent top 3',
+            'verbose recent top 17',
+            'select *',
+            'top 10 select *',
+            'where year == 2024',
+            'where year == "2024"',
+            'where type == "book"',
+            '! Delbaen',
+            '! /Wang, R/ and journal ~ Annals',
+            'recent top 3 author ~ /Wang, R/',
+            'verbose top 5 recent select journal author ~ /Wang, R/',
+            'top 5 select journal author ~ /Wang, R/',
+            'top 6 order author',
+            'top 7 order journal',
+            'top 8 select journal where year == 2024 order author',
+            'verbose top 9 select journal where year == 2024 order -journal, author',
+            'recent top 10  verbose select *, -c ! /Wang, R/ and journal ~ [A-J]+ where year == 2024 and publisher ==  "Springer" and mod > 2024-05',
+            'top 10 select c, d, -a, e recent ! /Wang, R/ and journal ~ [A-J]+ where year == 2024 and publisher ==  "Springer" and mod > 2024 order name, year',
+            'error',
+        ]
+        import archivum.parser as arcp
+        import archivum.library as arcl
+        from archivum.utilities import fGT
+        lib = arcl.Library('uber-library')
+
+        for q in querex_test_cases[-1:]:
+            print(repr(q))
+            try:
+                r = lib.ref_df.querex(q)
+            except ValueError as e:
+                print('Synt error', e)
+            else:
+                # print(sorted(r.columns))
+                display(fGT(r.head(10)))
+
+    """
     rt = repr(text)
     lt = max(80, len(rt) + 12)
     print('\n' + '=' * lt)

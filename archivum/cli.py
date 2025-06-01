@@ -449,7 +449,7 @@ def new(directory, meta, recursive):
                        .sort_values('create', ascending=False)
                        ))
     else:
-        click.echo(fGT(dfs[['n', 'document']]))
+        click.echo(fGT(dfs[['n', 'file_name']]))
 
 # ========================================================================================
 

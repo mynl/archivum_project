@@ -20,6 +20,7 @@ dependencies = [
     "pyarrow",
     "pyyaml",
     "pypdf",
+    "pymupdf",   # fitz
     "lark",
 ]
 

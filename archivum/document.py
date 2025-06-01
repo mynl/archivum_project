@@ -13,7 +13,7 @@ import re
 import subprocess
 import unicodedata
 
-import fitz
+import pymupdf
 import pandas as pd
 from pendulum import local_timezone
 from pypdf import PdfReader
@@ -80,7 +80,7 @@ class Document():
 
         Return author(ex), subject, title and raw output in namedtuple.
         """
-        with fitz.open(self.doc_path) as doc:
+        with pymupdf.open(self.doc_path) as doc:
             self.meta_raw = doc.metadata
         meta_keys = [
             'author',
@@ -110,7 +110,7 @@ class Document():
 
     def meta_data_debug(self):
         """Extract meta data from pdf, verbose testing version."""
-        # this confirms the two are about the same...we'll use fritz
+        # this confirms the two are about the same...we'll use pymupdf
         reader = PdfReader(self.doc_path)
         raw_meta = reader.metadata
         ans = {}
@@ -126,7 +126,7 @@ class Document():
             if v:
                 ans[f'm1_{k.lower()}'] = v
 
-        with fitz.open(self.doc_path) as doc:
+        with pymupdf.open(self.doc_path) as doc:
             m2 = doc.metadata
         m2_keys = [
             'author',
@@ -164,17 +164,17 @@ class Document():
 
     def extract_text_compare(self):
         """Copmare both methods."""
-        fr = self._extract_text_fitz()
+        fr = self._extract_text_pymupdf()
         fr = ''
         tt = self._extract_text_pdftotext()
-        self.doc_path.with_suffix('.fritz.md').write_text(fr, encoding='utf-8')
+        self.doc_path.with_suffix('.pymupdf.md').write_text(fr, encoding='utf-8')
         self.doc_path.with_suffix('.pdftotext.md').write_text(tt, encoding='utf-8')
-        DocText = namedtuple('DocText', 'fritz,pdftotext')
+        DocText = namedtuple('DocText', 'pymupdf,pdftotext')
         return DocText(fr, tt)
 
-    def _extract_text_fitz(self):
+    def _extract_text_pymupdf(self):
         """Cross referencing between docs and refs."""
-        with fitz.open(self.doc_path) as doc:
+        with pymupdf.open(self.doc_path) as doc:
             return "\n".join(page.get_text("text", sort=True) for page in doc)
 
     def _extract_text_pdftotext_old(self):

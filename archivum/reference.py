@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, List, Union
 
+import pandas as pd
 
 from . hasher import qhash
 
@@ -19,19 +20,20 @@ class Reference:
     number: Optional[str] = None
     month: Optional[str] = None
     pages: Optional[str] = None
-    edition: Optional[str] = None
     booktitle: Optional[str] = None
-    isbn: Optional[str] = None
     editor: Optional[str] = None
+    edition: Optional[str] = None
+    chapter: Optional[str] = None
+    doi: Optional[str] = None
+    isbn: Optional[str] = None
     publisher: Optional[str] = None
     institution: Optional[str] = None
     address: Optional[str] = None
-    doi: Optional[str] = None
     url: Optional[Path] = None
-    source: Optional[Path] = None
     mendeley_tags: Optional[str] = None    # from mendeley library...these will transition
     arc_citations: Optional[Path] = None
     arc_source: Optional[Path] = None      # mendeley, imported etc.
+    ref_source: Optional[Path] = None      # source of reference info, crossref, gs (google scholar) etc.
 
     def to_dict(self, fillna=None):
         """Convert to dictionary format."""
@@ -40,9 +42,11 @@ class Reference:
         else:
             return {k: fillna if v is None else v for k, v in self.__dict__.items()}
 
-    def to_bibtex(self):
+    def to_ref_ser(self):
         """Return dict with fillna='' suitable for loading into ref_df."""
-        return self.to_dict('')
+        # remember ref_df will then make the bibtex file!
+        d = self.to_dict('')
+        return pd.Series(d.values(), index=d.keys())
 
     @staticmethod
     def from_crossref(data: dict, lib=None) -> dict:
@@ -155,9 +159,9 @@ class Reference:
             tag = lib.next_tag(a, y)
         else:
             # XXXX Year! TODO
-            tag = lib.next_tag('NoName', '2025')
+            tag = qhash(str(data)) + '2025'
         entry['tag'] = tag
-        entry['source'] = 'crossref'
+        entry['ref_source'] = 'crossref'
         entry['arc_source'] = 'import'
 
         return Reference(**entry)
