@@ -26,7 +26,6 @@ dependencies = [
     "pyyaml",
     "rapidfuzz",
     "requests",
-    "tkinter",
     "tqdm",
 ]
 
