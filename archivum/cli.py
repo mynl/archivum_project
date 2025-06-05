@@ -1,12 +1,16 @@
 """Implement command line interface for archivum."""
 
+import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
+import sys
 import yaml
 
 import click
+from lark import ParseError
 import pandas as pd
 from pendulum import local_timezone
 from prompt_toolkit import PromptSession
@@ -16,6 +20,8 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.document import Document
+from rich.console import Console
+from rich.text import Text
 
 from . reference import Reference
 from . library import Library
@@ -32,6 +38,8 @@ EMPTY_DF = pd.DataFrame([])
 # logger
 logger = LoggerShim(level=LogLevel.INFO, use_click=True, name=__name__)
 
+
+console = Console()
 
 # ========================================================================================
 # ========================================================================================
@@ -67,7 +75,7 @@ def get_prompt(cmd):
     lib_name = lib.name
     return HTML(
         f'<ansigreen>[{lib_name}]-></ansigreen> '
-        '<ansiyellow>{cmd} > </ansiyellow>'
+        f'<ansiyellow>{cmd} > </ansiyellow>'
     )
 
 # ========================================================================================
@@ -78,7 +86,10 @@ def get_prompt(cmd):
 def make_query_completer_static(df):
     """Make nested query completer for df (eg ref_df or database)."""
     lib = LibraryContext.get()
-    libs = lib.list()
+    if lib.is_empty:
+        libs = None
+    else:
+        libs = {l: None for l in lib.list()}
     cols = {col: None for col in df.columns}
     cols_with_values = {
         col: {
@@ -117,7 +128,8 @@ def make_query_completer_static(df):
 @click.group()
 def entry():
     """CLI for managing bibliographic entries."""
-    pass
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding='utf-8')
 
 # ========================================================================================
 
@@ -141,6 +153,7 @@ def save_library():
     """Save the current library to disk."""
     lib = LibraryContext.get()
     if lib.is_empty:
+        click.echo("No library open...nothing to save. Returning")
         return
     logger.todo("Saving library %s", lib)
     lib.save()
@@ -262,6 +275,7 @@ def get_library_stats():
     """Display library stats library."""
     lib = LibraryContext.get()
     if lib.is_empty:
+        click.echo("No library open. Returning")
         return
     logger.debug("Library stats %s", lib)
     click.echo(fGT(lib.stats().reset_index(drop=False)))
@@ -279,6 +293,7 @@ def get_distinct_values(field):
     """Display number of distinct values in each library field."""
     lib = LibraryContext.get()
     if lib.is_empty:
+        click.echo("No library open...don't know where to look for files. Returning")
         return
     field = field.strip()
     logger.debug("Distinct values for field %s", field)
@@ -298,15 +313,27 @@ def get_distinct_values(field):
 @entry.command()
 @click.argument(
     'start',
-    type=set,
+    type=str,
     default='',
     required=False,
 )
-def query_library(start: str):
+@click.option(
+    '-r', '--ref',
+    is_flag=True,
+    help='Search ref_df rather than database (default)'
+)
+def query_library(start: str, ref):
     """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
     lib = LibraryContext.get()
     if lib.is_empty:
+        click.echo("No library open...don't what to query. Returning")
         return
+    if ref:
+        df = lib.ref_df
+    else:
+        df = lib.database
+
+    click.echo(df.columns)
 
     click.echo(
         "Enter querex expression [verbose] [recent] [top n] [select field[, fields]\n"
@@ -317,9 +344,8 @@ def query_library(start: str):
     # word_completer = FuzzyCompleter(WordCompleter(keywords, sentence=True))
     # session = PromptSession(completer=word_completer)
     # result = None
-
     result = EMPTY_DF
-    base_completer = make_query_completer_static(lib.database)
+    base_completer = make_query_completer_static(df)
 
     def tag_branch():
         tag_values = sorted({str(tag) for tag in result["tag"].dropna().unique()})
@@ -328,7 +354,6 @@ def query_library(start: str):
     # Inject dynamic fuzzy completer into 'open' and 'o'
     base_completer.options["open"] = DynamicCompleter(tag_branch)
     base_completer.options["o"] = DynamicCompleter(tag_branch)
-
     session = PromptSession(completer=base_completer)
 
     while True:
@@ -336,7 +361,7 @@ def query_library(start: str):
             expr = start or session.prompt(get_prompt('query-library'))
             start = ''
             pipe = False
-            if expr.lower() in {"exit", "x", "quit", "q"}:
+            if expr.lower() in {"exit", "x", "quit", "q", ".."}:
                 break
             elif expr == "?":
                 click.echo(lib.querex_help())
@@ -366,10 +391,16 @@ def query_library(start: str):
                     tags = sorted(set(tags.values))
                     docs = lib.ref_doc_df.query('tag in @tags').path.values
                     logger.info(f'{docs = }')
+                    print(f'Trying to open {docs = }')
+                    logger.info(f'Trying to open {docs = }')
                     for d in docs:
+                        p = Path(d)
+                        if not p.exists():
+                            logger.info('file %s not found', p.name)
+                            continue
                         try:
                             # windows only
-                            os.startfile(d)
+                            os.startfile(p)
                         except FileNotFoundError:
                             logger.error("File not found %s", d)
                         except PermissionError:
@@ -380,23 +411,22 @@ def query_library(start: str):
                             logger.error("Unexpected error: %s", e)
                 except Exception:
                     raise
-                #     logger.error(e)
-                # except KeyError as e:
-                #     logger.error(f'Key {expr} not found, {  e= }')
-                # except FileNotFoundError as e:
-                #     logger.error("File does not exist.")
-                # except OSError as e:
-                #     logger.error(f"No association or error launching: {e}")
                 continue
 
             # if here, run query work
-            result = lib.database.querex(expr)
-            click.echo(fGT(result))
-            click.echo(
-                f'{len(result)} of {result.qx_unrestricted_len:,d} results shown.')
-            if pipe:
+            try:
+                # set as ref_df or database above...
+                result = df.querex(expr)
+            except ParseError as e:
+                logger.error('Parsing error')
+                logger.error(e)
+            else:
+                click.echo(fGT(result))
                 click.echo(
-                    f'Found pipe clause {pipe = } TODO: deal with this!')
+                    f'{len(result)} of {result.qx_unrestricted_len:,d} results shown.')
+                if pipe:
+                    click.echo(
+                        f'Found pipe clause {pipe = } TODO: deal with this!')
         except Exception as e:
             click.echo(f"[Error] {e}")
 
@@ -451,9 +481,8 @@ def new(directory, meta, recursive):
     else:
         click.echo(fGT(dfs[['n', 'file_name']]))
 
+
 # ========================================================================================
-
-
 @entry.command(name='import')
 @click.option(
     '-x', '--execute',
@@ -466,30 +495,99 @@ def new(directory, meta, recursive):
     show_default=True,
     help='Comma-separated list of PDF file numbers to upload, default all files.'
 )
-def import_(execute, partial):
+@click.option(
+    '-r', '--regex',
+    is_flag=True,
+    help='Interpret partial option as a regex, default is comma separated list'
+)
+def import_(execute, partial, regex):
     """Import bibliographic entries, optionally filtered and executed."""
-    logger.info("Importing entries, partial match = '%s'", partial)
-    if execute:
-        logger.info("Execution enabled: changes will be applied.")
+    logger.info("Importing documents, partial match = '%s', regex mode %", partial, regex)
+    df = LibraryContext.last_new
+    if df.empty:
+        click.echo('No new documents found! Run new.')
+        return
+    # figure the docs
+    if regex:
+        r = re.compile(partial)
+        indices = [i for i in range(1, 1 + len(df))
+                   if r.search(str(i))]
     else:
-        logger.info("Dry run mode: no changes applied.")
-    # TODO: Implement import logic
-    indices = [int(i.strip()) for i in partial.split(',')]
-    pdfs = find_pdfs()  # reuse previous list or cache it
+        indices = [int(i.strip()) for i in partial.split(',')]
+    logger.info('Indices = %', indices)
+    # Import logic
     for i in indices:
-        pdf_path = pdfs[i]
+        pdf_path = df.loc[i, 'path']
         ref = Reference.from_pdf(pdf_path)
         # prompt_for_fields(ref)  # interactively fill in fields
         click.echo(ref.to_dict())  # or save it, display BibTeX, etc.
 
+    if execute:
+        logger.info("Execution enabled: changes will be applied.")
+    else:
+        logger.info("Dry run mode: no changes applied.")
+
+
+# ========================================================================================
+def run_ripgrep(pattern, args):
+    cmd = ["rg", "--json", "--stats", "--C 1", pattern, *args]
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except FileNotFoundError:
+        console.print("[red]ripgrep (rg) not found on PATH[/red]")
+        return
+
+    if proc.stdout is None:
+        console.print("[red]Failed to read rg output[/red]")
+        return
+
+    for line in proc.stdout:
+        try:
+            result = json.loads(line)
+            if result.get("type") == "match":
+                file = result["data"]["path"]["text"]
+                line_num = result["data"]["line_number"]
+                text = result["data"]["lines"]["text"].rstrip()
+
+                styled = Text()
+                styled.append(f"{file}:{line_num}: ", style="bold cyan")
+                styled.append(text, style="white")
+                console.print(styled)
+        except json.JSONDecodeError:
+            console.print(line.strip(), style="dim")
+
+
+@entry.command(context_settings={"ignore_unknown_options": True})
+@click.argument("pattern")
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def rg(pattern, args):
+    """Run ripgrep (rg) with given pattern and args against text extracts from pdfs."""
+    run_ripgrep(pattern, args)
+    return
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know where to look for files. Returning")
+        return
+    text_dir_name = lib.text_dir_name
+    print(type(args))
+    args = list(args) + [f'-g "{text_dir_name}"']
+    cmd = ["rg", pattern, *args]
+    print(cmd)
+    try:
+        subprocess.run(cmd, check=False)
+    except FileNotFoundError:
+        click.echo("Error: ripgrep (rg) not found on PATH", err=True)
+
 
 # ========================================================================================
 @entry.command()
-@click.argument(
-    "lib_name",
+@click.option(
+    "-l", "lib_name",
     default='',
     required=False,
     type=str,
+    help="Starting library name, default 'Uber-Library'"
 )
 @click.option(
     '-d', '--debug',
@@ -503,16 +601,27 @@ def import_(execute, partial):
     default='',
     help='Starting command, e.g., uber query-library.'
 )
-def uber(lib_name, start, debug):
+@click.argument(
+    "subcommand_args",
+    nargs=-1,
+    type=click.UNPROCESSED,
+)
+def uber(lib_name, start, debug, subcommand_args):
     """
     Start an interactive REPL loop for issuing archivum commands.
 
     If given, open lib_name, otherwise open the default library.
 
+    \b
     Examples:
-        archivum uber
-        archivum uber "query-library"
-        archivum uber "open-library mylib"
+        - archivum uber
+        - archivum uber "query-library"
+        - archivum uber "open-library mylib"
+        - archivum uber -d -s query-library -- "recent top 10 !/Wang, R/"
+
+    \b
+    Arguments
+        - argument: argument to pass to the subcommand."
     """
     if debug:
         logger.setLevel(LogLevel.DEBUG)
@@ -530,6 +639,7 @@ def uber(lib_name, start, debug):
         'get-distinct-values',
         'new',
         'import',
+        'rg',
         'cls',
         'exit',
     ]
@@ -565,6 +675,13 @@ def uber(lib_name, start, debug):
     logger.info('Opening "%s" and starting interactive loop.', lib_name)
     entry(args=["open-library", lib_name], standalone_mode=False)
 
+    if len(subcommand_args) == 1:
+        subcommand_args = list(subcommand_args)
+    elif len(subcommand_args):
+        subcommand_args = [' '.join(subcommand_args)]
+    else:
+        subcommand_args = []
+
     while True:
         try:
             lib = LibraryContext.get()
@@ -583,7 +700,7 @@ def uber(lib_name, start, debug):
                     args = q.split()
                     if args:
                         args[0] = resolve_command_hybrid(args[0])
-                    logger.info('uber dispatch, resolved args = %s', args)
+                    logger.info('uber dispatch, resolved args = %s, sub = %s', args, subcommand_args)
                     # only query-library function takes debug arg
                     if len(args) > 1 and 'debug' in args and 'query-library' not in args:
                         args.remove('debug')
@@ -591,7 +708,9 @@ def uber(lib_name, start, debug):
                     if lib.is_empty and cmd not in safe_on_empty_libraries:
                         click.echo(f'No library open, cannot execute {cmd}.')
                     else:
-                        entry(args=args, standalone_mode=False)
+                        print(args + subcommand_args)
+                        entry(args=args + subcommand_args, standalone_mode=False)
+                        subcommand_args = []
                     logger.info('REPL loop completed.')
                 except Exception as e:
                     logger.error(f"Error: {e}")

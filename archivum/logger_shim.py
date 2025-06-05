@@ -62,6 +62,8 @@ class LoggerShim:
         """
         self.level = LogLevel[level.upper()] if isinstance(level, str) else level
 
+    setLevel = set_level
+
     def _should_log(self, level: LogLevel) -> bool:
         """Determine whether a message at the given level should be shown."""
         return level >= self.level

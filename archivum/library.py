@@ -101,7 +101,7 @@ class Library():
         if self._ref_df.empty:
             self._ref_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
             # set base cols
-            base_cols = ['tag', 'type', 'year', 'author', 'title']
+            base_cols = ['tag', 'author', 'title', 'journal']
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='author',
@@ -142,7 +142,7 @@ class Library():
                 self._database[c] = self._database[c].fillna(0)
             self._database.fillna('')
             # set base cols
-            base_cols = ['tag', 'type', 'year', 'author', 'title', 'create', 'tpath']
+            base_cols = ['tag', 'author', 'title', 'journal', 'create']
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='author',

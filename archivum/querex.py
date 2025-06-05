@@ -54,6 +54,8 @@ def querex_work(df: pd.DataFrame,
 
     Do not need quotes around dates?
 
+    Drops empty columns.
+
     Ordering
         verbose: turns on verbose mode to debug how query is parsed
         recent : automatically sort by mod date
@@ -157,6 +159,14 @@ def querex_work(df: pd.DataFrame,
         df['title'] = df['title'].replace(r'\{|\}', '', regex=True)
     # if 'tag' in fields:
     #     df = df.set_index('tag')
+    # drop empty columns. which means value '' in every column
+    # Drop all columns where every entry is an empty string ('')
+    # Step-by-step:
+    # (df == '')       → DataFrame of booleans where each cell is True if it equals ''
+    # .all()           → For each column, check if all values are True (i.e., all are '')
+    # ~(...)           → Invert the boolean Series: True becomes False (keep these columns)
+    # df.loc[:, ...]   → Select only the columns that are not all empty strings
+    df = df.loc[:, ~(df == '').all()]
 
     # apply decorations last thing before returning
     df.qx_unrestricted_len = qx_unrestricted_len

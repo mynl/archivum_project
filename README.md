@@ -4,6 +4,10 @@ Latin for "archive".
 
 PDF reference manager.
 
+## Lark
+
+Parser IDE: https://www.lark-parser.org/ide/
+
 ## General STUFF
 
 ```python
