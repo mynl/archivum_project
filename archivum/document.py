@@ -36,7 +36,7 @@ class Document():
         self.meta_title = ''
         self.meta_subject = ''
         self.meta_raw = None
-        self.meta_cross_ref = ''
+        self.meta_crossref = ''
 
     def __repr__(self):
         return f'Document({self.doc_path.name})'

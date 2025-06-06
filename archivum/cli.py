@@ -44,6 +44,8 @@ console = Console()
 # ========================================================================================
 # ========================================================================================
 # Library context manager
+
+
 class LibraryContext:
     """Singleton context manager for the global open Library instance."""
 
@@ -386,13 +388,13 @@ def query_library(start: str, ref):
                         expr = expr[1:].strip()
                     elif expr.startswith('open '):
                         expr = expr[5:].strip()
-                    logger.info(f'{expr = }')
+                    logger.info(f'{expr=}')
                     tags = result.loc[result.tag.str.contains(expr, regex=True), 'tag']
                     tags = sorted(set(tags.values))
                     docs = lib.ref_doc_df.query('tag in @tags').path.values
-                    logger.info(f'{docs = }')
-                    print(f'Trying to open {docs = }')
-                    logger.info(f'Trying to open {docs = }')
+                    logger.info(f'{docs=}')
+                    print(f'Trying to open {docs=}')
+                    logger.info(f'Trying to open {docs=}')
                     for d in docs:
                         p = Path(d)
                         if not p.exists():
@@ -426,7 +428,7 @@ def query_library(start: str, ref):
                     f'{len(result)} of {result.qx_unrestricted_len:,d} results shown.')
                 if pipe:
                     click.echo(
-                        f'Found pipe clause {pipe = } TODO: deal with this!')
+                        f'Found pipe clause {pipe=} TODO: deal with this!')
         except Exception as e:
             click.echo(f"[Error] {e}")
 
@@ -530,10 +532,14 @@ def import_(execute, partial, regex):
 
 # ========================================================================================
 def run_ripgrep(pattern, args):
-    cmd = ["rg", "--json", "--stats", "--C 1", pattern, *args]
+    cmd = ["rg", "--json", "--stats", "-C", "1", pattern, *args]
 
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        proc = subprocess.Popen(cmd,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                text=True,
+                                encoding='utf-8')
     except FileNotFoundError:
         console.print("[red]ripgrep (rg) not found on PATH[/red]")
         return
@@ -542,20 +548,34 @@ def run_ripgrep(pattern, args):
         console.print("[red]Failed to read rg output[/red]")
         return
 
+    n = 0
+    last_file = ''
+    fc = 0
     for line in proc.stdout:
         try:
             result = json.loads(line)
             if result.get("type") == "match":
+                n += 1
+                if n > 10: break
                 file = result["data"]["path"]["text"]
+                new_file = file != last_file
+                if new_file:
+                    console.print('')  # between files
+                    # new file
+                    fc = 0
+                    last_file = file
+                styled = Text()
+                if new_file:
+                    file = file.replace('\\temp\\pdf-full-text\\S', '').replace('.pdftotext.md', '')
+                    styled.append(f"{file}\n", style="bold cyan")
+                fc += 1
                 line_num = result["data"]["line_number"]
                 text = result["data"]["lines"]["text"].rstrip()
-
-                styled = Text()
-                styled.append(f"{file}:{line_num}: ", style="bold cyan")
-                styled.append(text, style="white")
-                console.print(styled)
+                styled.append(f"[m{fc:02d}@.{line_num:05d}]: ", style="bold cyan")
+                styled.append(text + '\n', style="blue")
+                console.print(styled, end='')
         except json.JSONDecodeError:
-            console.print(line.strip(), style="dim")
+            console.print('ERROR ' + line.strip(), style="dim")
 
 
 @entry.command(context_settings={"ignore_unknown_options": True})
