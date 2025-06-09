@@ -76,7 +76,7 @@ def get_prompt(cmd):
     lib = LibraryContext.get()
     lib_name = lib.name
     return HTML(
-        f'<ansigreen>[{lib_name}]-></ansigreen> '
+        f'<ansigreen>[{lib_name}]-></ansigreen>'
         f'<ansiyellow>{cmd} > </ansiyellow>'
     )
 
@@ -466,7 +466,7 @@ def new(directory, meta, recursive):
         LibraryContext.last_new = EMPTY_DF
         return
     try:
-        dfs = lib.new_documents(directory, meta, recursive)
+        dfs = lib.get_new_documents(directory, meta, recursive)
     except FileNotFoundError:
         click.echo('%s directory not found', directory)
         LibraryContext.last_new = EMPTY_DF
@@ -531,32 +531,50 @@ def import_(execute, partial, regex):
 
 
 # ========================================================================================
-def run_ripgrep(pattern, args):
-    cmd = ["rg", "--json", "--stats", "-C", "1", pattern, *args]
 
-    try:
-        proc = subprocess.Popen(cmd,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE,
-                                text=True,
-                                encoding='utf-8')
-    except FileNotFoundError:
-        console.print("[red]ripgrep (rg) not found on PATH[/red]")
+
+@entry.command(context_settings={"ignore_unknown_options": True})
+# @click.argument("pattern", type=str, required=True)
+@click.option(
+    '-n',
+    default=10,
+    type=int,
+    show_default=True,
+    help='Number of results to return, default=10, n=-1 returns all.'
+)
+@click.argument("args", nargs=-1, type=click.UNPROCESSED)
+def rg(args, n):
+    """Run ripgrep (rg) with given pattern and args against text extracts from pdfs."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know where to look for text files. Returning")
         return
-
-    if proc.stdout is None:
+    # library runs the query, cli prints it out
+    if not args:
+        click.echo("Missing pattern!", err=True)
+    pattern = args[0]
+    args = args[1:]
+    return_value, proc = lib.run_ripgrep(pattern, args)
+    if return_value == 'FileNotFoundError':
+        console.print(proc)
+    elif return_value == "None":
         console.print("[red]Failed to read rg output[/red]")
-        return
+    elif return_value:
+        console.print("OTHER MYSTERIOUS ERROR??")
 
-    n = 0
+    # otherwise all good - printout
+    # for search and replace in resulting filenames
+    prefix = str(lib.text_dir_full_name)
+    suffix = f'.{lib.extractor}.md'
     last_file = ''
     fc = 0
     for line in proc.stdout:
         try:
             result = json.loads(line)
             if result.get("type") == "match":
-                n += 1
-                if n > 10: break
+                n -= 1
+                if n == 0:
+                    break
                 file = result["data"]["path"]["text"]
                 new_file = file != last_file
                 if new_file:
@@ -566,38 +584,40 @@ def run_ripgrep(pattern, args):
                     last_file = file
                 styled = Text()
                 if new_file:
-                    file = file.replace('\\temp\\pdf-full-text\\S', '').replace('.pdftotext.md', '')
+                    file = file.replace(prefix, '').replace(suffix, '')
                     styled.append(f"{file}\n", style="bold cyan")
                 fc += 1
                 line_num = result["data"]["line_number"]
-                text = result["data"]["lines"]["text"].rstrip()
+                line_text = result["data"]["lines"]["text"].rstrip()
+                text = Text(line_text, style="blue")
+                # color matches
+                for sub in result["data"].get("submatches", []):
+                    start = sub["start"]
+                    end = sub["end"]
+                    text.stylize("bold red", start, end)
+
                 styled.append(f"[m{fc:02d}@.{line_num:05d}]: ", style="bold cyan")
-                styled.append(text + '\n', style="blue")
+                styled.append(text)
+                styled.append('\n')
                 console.print(styled, end='')
         except json.JSONDecodeError:
             console.print('ERROR ' + line.strip(), style="dim")
 
 
-@entry.command(context_settings={"ignore_unknown_options": True})
-@click.argument("pattern")
-@click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def rg(pattern, args):
-    """Run ripgrep (rg) with given pattern and args against text extracts from pdfs."""
-    run_ripgrep(pattern, args)
     return
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo("No library open...don't know where to look for files. Returning")
-        return
-    text_dir_name = lib.text_dir_name
-    print(type(args))
-    args = list(args) + [f'-g "{text_dir_name}"']
-    cmd = ["rg", pattern, *args]
-    print(cmd)
-    try:
-        subprocess.run(cmd, check=False)
-    except FileNotFoundError:
-        click.echo("Error: ripgrep (rg) not found on PATH", err=True)
+    # lib = LibraryContext.get()
+    # if lib.is_empty:
+    #     click.echo("No library open...don't know where to look for files. Returning")
+    #     return
+    # text_dir_name = lib.text_dir_full_name
+    # print(type(args))
+    # args = list(args) + [f'-g "{text_dir_name}"']
+    # cmd = ["rg", pattern, *args]
+    # print(cmd)
+    # try:
+    #     subprocess.run(cmd, check=False)
+    # except FileNotFoundError:
+    #     click.echo("Error: ripgrep (rg) not found on PATH", err=True)
 
 
 # ========================================================================================

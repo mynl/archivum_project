@@ -8,6 +8,7 @@ Querying uses a file-database project-like combo regex-sql (querex) querier.
 
 from datetime import datetime
 from functools import partial
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -43,9 +44,10 @@ class Library():
         If not found in current directory, looks in local (eg. for default config).
         """
         self.debug = False
+        self.BASE_DIR = BASE_DIR.resolve()    # helpful externally, keep it all in the library
         self.config_path = Path(config_file)
         if not self.config_path.exists():
-            self.config_path = BASE_DIR / f'{config_file}.{APP_NAME}-config'
+            self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
         logger.debug('config_path = %s', self.config_path)
         assert self.config_path.exists()
         with self.config_path.open() as f:
@@ -65,6 +67,8 @@ class Library():
         self._tag_allocator = None
         self.is_dirty = False
         self.is_empty = False
+        self.text_dir_path = self.BASE_DIR / self.text_dir_name
+        self.text_dir_full_name = str(self.text_dir_path)
 
     def close(self):
         """Close library."""
@@ -350,7 +354,7 @@ class Library():
             self._tag_allocator = TagAllocator(names)
         return self._tag_allocator
 
-    def new_documents(self, directory, meta, recursive):
+    def get_new_documents(self, directory, meta, recursive):
         """
         Scan a directory for new PDF files and optionally extract metadata.
 
@@ -358,6 +362,8 @@ class Library():
         timezone. You should always be working with an open library
         and they are easy to complete.
         """
+        if directory == '':
+            directory = self.watched_dirs[0]
         directory = Path(directory)
         if not directory.exists():
             raise FileNotFoundError('Directory directory does not exist')
@@ -367,7 +373,7 @@ class Library():
             pdfs = directory.glob('*.pdf')
         pdfs = sorted(pdfs)
         dfs = pd.DataFrame({
-            'Document': [Document(p) for p in pdfs],
+            'Document': [Document(p, self) for p in pdfs],
             'file_name': [d.name for d in pdfs],
             'path': pdfs,
             'create': [
@@ -384,6 +390,36 @@ class Library():
             dfs['meta_author_ex'] = dfs.Document.map(lambda md: md.meta_author_ex)
             dfs['meta_crossref'] = dfs.Document.map(lambda md: md.meta_crossref)
         return dfs
+
+    def run_ripgrep(self, pattern, args):
+        """Execute and format ripgrep search against library full text extracts."""
+        # figure library location and prefix and suffix search terms
+
+        cmd = ["rg",
+                    "--json",
+                    "--stats",
+                    "-C", "1",
+                    "-g", '*.md',
+                    "--encoding", "utf-8",
+                    pattern,
+                    *args,
+                    self.text_dir_full_name
+                ]
+        logger.info("will run %s", cmd)
+        # execute command
+        try:
+            proc = subprocess.Popen(cmd,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE,
+                                    text=True,
+                                    encoding='utf-8')
+        except FileNotFoundError:
+            return "FileNotFoundError", "[red]ripgrep (rg) not found on PATH[/red]"
+
+        if proc.stdout is None:
+            return "None", "[red]Failed to read rg output[/red]"
+
+        return 0, proc
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

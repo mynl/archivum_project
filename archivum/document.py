@@ -15,8 +15,8 @@ import unicodedata
 
 import pymupdf
 import pandas as pd
-from pendulum import local_timezone
 from pypdf import PdfReader
+from rapidfuzz.fuzz import ratio
 from tqdm import tqdm
 
 from . import EMPTY_LIBRARY
@@ -25,21 +25,34 @@ from . import EMPTY_LIBRARY
 class Document():
     """Manage physical document files."""
 
-    def __init__(self, doc_path, text_dir_path=None, extractor: str = "pdftotext"):
+    def __init__(self, doc_path, library):
         """Create Documents class based on file path."""
+        self.library = library
+        self.text_dir_path = library.text_dir_path if library else None
+        self.extractor = library.extractor if library else None
+        self.tz = library.timezone if library else "Europe/London"
         self.doc_path = doc_path
-        self._stats = None
-        self._text_dir_path = text_dir_path
-        self.extractor = extractor
         self.meta_author = ''
         self.meta_author_ex = ''
         self.meta_title = ''
         self.meta_subject = ''
         self.meta_raw = None
         self.meta_crossref = ''
+        self.title_similarity = 0
+        self.best_guess_title = ''
+        self.best_guess_query = ''
+        # from page 1, the cover page
+        self.cover_author = ''
+        self.cover_title = ''
+        self._stats = None
+        self._text = ''
 
     def __repr__(self):
         return f'Document({self.doc_path.name})'
+
+    @property
+    def has_text(self):
+        return self._text != ""
 
     def exists(self):
         return self.doc_path.exists()
@@ -68,13 +81,12 @@ class Document():
                 "size": stat.st_size,
                 "suffix": self.doc_path.suffix[1:],
             }
-            tz = local_timezone()
-            self._stats["create"] = pd.to_datetime(self._stats["create"], unit="ns").tz_localize("UTC").tz_convert(tz)
-            self._stats["mod"] = pd.to_datetime(self._stats["mod"], unit="ns").tz_localize("UTC").tz_convert(tz)
-            self._stats["access"] = pd.to_datetime(self._stats["access"], unit="ns").tz_localize("UTC").tz_convert(tz)
+            self._stats["create"] = pd.to_datetime(self._stats["create"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
+            self._stats["mod"] = pd.to_datetime(self._stats["mod"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
+            self._stats["access"] = pd.to_datetime(self._stats["access"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
         return self._stats
 
-    def add_meta_data(self, lib=EMPTY_LIBRARY):
+    def add_meta_data(self):
         """
         Extract meta data from pdf.
 
@@ -89,7 +101,9 @@ class Document():
         ]
         a = self.meta_raw.get('author', '').strip()
         self.meta_author_ex = ''
-        self.meta_title = self.meta_raw.get('title', '').strip()
+        title = self.meta_raw.get('title', '').strip()
+        title = re.sub(r'Microsoft (PowerPoint|Word)( - )?|Presentation title', '', title, flags=re.IGNORECASE)
+        self.meta_title = title
         self.meta_subject = self.meta_raw.get('subject', '').strip()
 
         # deal with author
@@ -99,16 +113,13 @@ class Document():
                 *f, l = a.split(' ')
                 a = l + ', ' + ' '.join(f)
         self.meta_author = a
-        if not lib.is_empty and a != '':
-            self.meta_author_ex = lib.to_name_ex(a, strict=False)
+        if not self.library.is_empty and a != '':
+            self.meta_author_ex = self.library.to_name_ex(a, strict=False)
         else:
             self.meta_author_ex = ''
-        # meta['raw'] = meta_in
-        # Meta = namedtuple('Meta', meta.keys())
-        # return Meta(*meta.values())
         self.meta_crossref = self.guess_crossref_query()
 
-    def meta_data_debug(self):
+    def _meta_data_debug(self):
         """Extract meta data from pdf, verbose testing version."""
         # this confirms the two are about the same...we'll use pymupdf
         reader = PdfReader(self.doc_path)
@@ -144,26 +155,34 @@ class Document():
 
     def text_path(self):
         """Return Path to where text is or will be stored."""
-        return ( self._text_dir_path
-                 / self.doc_path.with_suffix(f'.{self.extractor}.md')
-                 .relative_to(self.doc_path.anchor))
+        if self.text_dir_path is None:
+            return None
+        else:
+            return (self.text_dir_path
+                    / self.doc_path.with_suffix(f'.{self.extractor}.md')
+                    .relative_to(self.doc_path.anchor))
 
-    def text_exists(self):
+    def text_path_exists(self):
         """Check if text file exists."""
-        return self.text_path().exists()
+        return False if self.text_path() is None else self.text_path().exists()
 
     def extract_text(self):
         """Current best-efforts extraction."""
-        txt_out = self.text_path()
-        if txt_out.exists():
-            return txt_out.read_text(encoding='utf-8')
-        txt = self._extract_text_pdftotext()
-        txt_out.parent.mkdir(parents=True, exist_ok=True)
-        txt_out.write_text(txt, encoding='utf-8')
-        return txt
+        if self._text != "":
+            return self._text
+        if self.has_text:
+            txt_out = self.text_path()
+            if txt_out.exists():
+                self._text = txt_out.read_text(encoding='utf-8')
+                return self._text
+        self._text = self._extract_text_pdftotext()
+        if self.text_dir_path is not None:
+            txt_out.parent.mkdir(parents=True, exist_ok=True)
+            txt_out.write_text(self._text, encoding='utf-8')
+        return self._text
 
-    def extract_text_compare(self):
-        """Copmare both methods."""
+    def _extract_text_compare(self):
+        """Compare both methods."""
         fr = self._extract_text_pymupdf()
         fr = ''
         tt = self._extract_text_pdftotext()
@@ -204,29 +223,6 @@ class Document():
         # Remove hyphenated line breaks: "hyphen-\nated" → "hyphenated"
         text = re.sub(r'(\w+)-\n(\w+)', r'\1\2', text)
 
-        # these attempts fail because pdftotext does not separate paragraphs
-        # Join wrapped lines (non-empty lines split by a single newline)
-        # regex = r"(?<!\n)\n(?!\n)"
-
-        # Replace the matched lonely newline with a space
-        # text = re.sub(regex, " ", text)
-
-        # # Join wrapped lines (non-empty lines split by a single newline)
-        # # Step 1: Protect paragraph breaks (convert two or more \n to a placeholder)
-        # text = re.sub(r'\n{2,}', '<<<PARA>>>', text)
-
-        # # Step 2: Remove all remaining (soft) line breaks
-        # text = text.replace('\n', ' ')
-
-        # # Step 3: Restore paragraph breaks
-        # text = text.replace('<<<PARA>>>', '\n\n')
-
-        # Normalize overlong paragraph breaks: more than 2 newlines → 2.
-        # text = re.sub(r'\n{3,}', '\n\n', text)
-
-        # Strip trailinag whitespace from each line.
-        # text = "\n".join(line.rstrip() for line in text.splitlines())
-
         # Normalize Unicode (e.g., é as a single composed character).
         text = unicodedata.normalize("NFC", text)
 
@@ -257,11 +253,26 @@ class Document():
     def _de_slugify(text):
         return text.replace('_', ' ').strip()
 
-    def guess_crossref_query(self):
+    def get_best_guess_title(self):
+        """Extract best guess for a title using meta data, page 1, and file name."""
+        self.title_similarity = ratio(self.meta_title, self.cover_title)
+        if self.title_similarity > 90:
+            return self.meta_title
+        elif len(self.meta_title) > len(self.cover_title) and len(self.meta_title) > 10:
+            return self.meta_title
+        elif len(self.cover_title) > len(self.meta_title) and len(self.cover_title) > 10:
+            return self.cover_title
+        # no obvious contender
+        fn = self.doc_path.name.replace('.pdf', '').replace('_', ' ')
+        if len(fn.split(' ')) > 3:
+            return fn
+        else:
+            return ''
+
+    def get_guess_crossref_query(self):
         """Tried to guess a reasonable cross ref query search from the metadata and filename."""
         # Try clean metadata title first
         title = self.meta_title
-        title = re.sub(r'Microsoft (PowerPoint|Word)( - )?|Presentation title', '', title, flags=re.IGNORECASE)
         author = self.meta_author_ex or self.meta_author
         subject = self.meta_subject
         fname = self.doc_path.stem
@@ -287,7 +298,48 @@ class Document():
 
         return query
 
+    def add_cover_title_author(self):
+        """
+        Try to guess authors and title from first page of pdf
 
+        Heuristics for finding title and author
+            Title is usually the largest text block near the top.
+            Authors often follow the title and may include email/affiliations.
+            Try regular expressions for email/domain to help anchor authors.
+        """
+        doc = pymupdf.open(self.doc_path)
+        first_page = doc[0]
+        blocks = first_page.get_text("dict")["blocks"]
+
+        texts = []
+        for b in blocks:
+            for line in b.get("lines", []):
+                for span in line["spans"]:
+                    texts.append((span["size"], span["text"]))
+
+        # Sort by size descending
+        texts.sort(reverse=True)
+
+        title = texts[0][1].strip() if texts else ""
+        possible_authors = [t[1].strip() for t in texts[1:4]]
+        self.cover_author = possible_authors
+        self.cover_title = title
+
+    def uber(self):
+        """
+        Run all edits to enhance a Document.
+
+        Read meta data, extract title and author from cover page,
+        determine best guess title, and best guess query.
+        """
+        self.stats;
+        self.add_meta_data()
+        self.add_cover_title_author()
+        bgt = self.get_best_guess_title()
+        crc = self.get_guess_crossref_query()
+        return bgt, crc
+
+# extract text
 def _process_single_pdf(doc_path: Path, text_dir_path: Path, extractor: str):
     try:
         doc = Document(doc_path, text_dir_path=text_dir_path, extractor=extractor)
@@ -313,13 +365,13 @@ def extract_text(pdf_paths: list[Path], text_dir_path: Path, extractor: str = 'p
 def pdf_dir_to_text(lib_dir_name, text_dir_name='\\temp\\pdf-full-text', extractor='pdftotext'):
     """Extract text from all PDFs in lib_dir_name (recursive)."""
     pdfs = list(Path(lib_dir_name).rglob('*.pdf'))
-    print(f'PDFs found: {len(pdfs) = }')
+    print(f'PDFs found: {len(pdfs)=}')
 
     text_dir_path = Path(text_dir_name)
     pDocument = partial(Document, text_dir_path=text_dir_path, extractor=extractor)
 
     docs = [pDocument(p) for p in pdfs]
-    print(f'doc object created: {len(docs) = } and {len(pdfs) = }')
+    print(f'doc object created: {len(docs)=} and {len(pdfs)=}')
 
     # do the extraction
     result = extract_text(pdfs, text_dir_path)
@@ -350,5 +402,5 @@ def find_missing_txt(pdf_paths, text_dir_name='\\temp\\pdf-full-text', extractor
     pDocument = partial(Document, text_dir_path=text_dir_path, extractor=extractor)
 
     docs = [pDocument(p) for p in pdf_paths]
-    docs_wo_text = [d for d in docs if not d.text_exists()]
+    docs_wo_text = [d for d in docs if not d.text_path_exists()]
     return docs_wo_text

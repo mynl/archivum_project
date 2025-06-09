@@ -34,7 +34,7 @@ def analysis(f):
             ans.append(i)
     ans = np.diff(np.array(ans))
     print('actual widths by column         ', ans)
-    print('acutal total width              ', ans.sum() + 1)
+    print('actual total width              ', ans.sum() + 1)
     dcw = getattr(f, '_debug_col_widths', None)
     if dcw is not None:
         ans = np.array(ans)

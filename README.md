@@ -90,6 +90,7 @@ cli.entry(args=['merge-library', 'othername'], standalone_mode=False)
 cli.entry(args=['create-library', 'Test Library'], standalone_mode=False)
 cli.entry(args=['import'], standalone_mode=False)
 cli.entry(args=['new'], standalone_mode=False)
+cli.entry(args=['new', '-m'], standalone_mode=False)
 ```
 
 
