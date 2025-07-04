@@ -31,22 +31,6 @@ def safe_int(s):
             return s
 
 
-# def safe_int_comma(s):
-#     """
-#     Safe format of s as a year for greater_tables.
-
-#     By default s may be interpreted as a float so str(x) give 2015.0
-#     which is not wanted. Hence this function is needed.
-#     """
-#     try:
-#         return f'{int(s):,d}'
-#     except ValueError:
-#         if s == '':
-#             return ''
-#         else:
-#             return s
-
-
 def safe_file_size(s):
     """
     Safe format of s as a year for greater_tables.
@@ -87,7 +71,7 @@ def default_formatter(x):
         return str(x)
 
 
-def make_fGT(max_table_width=120, **kwargs):
+def make_fGT(max_table_width=12, **kwargs):
     global fGT
     fGT = partial(GT,
                   large_ok=True,
@@ -98,53 +82,13 @@ def make_fGT(max_table_width=120, **kwargs):
                   raw_cols=['year', 'index', 'node', 'links', 'number'],
                   aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
                   default_formatter=default_formatter,
-                  max_table_width=120,
+                  max_table_inch_width=10,
                   **kwargs
                   )
 
 
 # update the global object
 make_fGT()
-
-# def df_to_str(df, tablefmt):
-#     """Nice prepped df as string for printing."""
-#     df = df.copy()
-#     if 'title' in df.columns:
-#         # get rid of the {}
-#         df['title'] = df['title'].str[1:-1]
-#     if 'author' in df.columns:
-#         df['author'] = df['author'].str.replace(r'\{|\}', '', regex=True)
-#     # user should call str....let's see!
-#     return fGT(df)
-
-
-def rinfo(ob):
-    """
-    Generically export all reasonable data from ob
-    store in DataFrame as a ROW and set reasonable data types.
-
-    Non-callable items only. From great2.
-    :param ob:
-    :param index_attribute:
-    :param timestamp: add a timestamp column
-    """
-    d = {}
-    for i in dir(ob):
-        if i[0] != '_':
-            try:
-                a = getattr(ob, i, None)
-                if a is not None and not callable(a):
-                    d[i] = [a]
-            except Exception as e:
-                d[i] = 'ERROR:' + str(type(e))
-    index = str(type(ob))
-    df = pd.DataFrame(d, index=[index])
-    df.index.name = 'id'
-    return df
-
-
-def info(x):
-    return rinfo(x).T
 
 
 def remove_accents(s: str) -> str:
