@@ -1,5 +1,5 @@
 click==8.1.7
-greater_tables==1.0.0
+greater_tables
 lark==1.2.2
 latexcodec==2.0.1
 numpy==2.2.6

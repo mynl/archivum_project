@@ -1,6 +1,7 @@
 """Implement command line interface for archivum."""
 
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -35,8 +36,9 @@ from . logger_shim import LoggerShim, LogLevel
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
 EMPTY_DF = pd.DataFrame([])
+
 # logger
-logger = LoggerShim(level=LogLevel.INFO, use_click=True, name=__name__)
+logger = logging.getLogger(__name__)
 
 
 console = Console()

@@ -9,6 +9,7 @@ Querying uses a file-database project-like combo regex-sql (querex) querier.
 from datetime import datetime
 from functools import partial
 import json
+import logging 
 from pathlib import Path
 import re
 import subprocess
@@ -26,9 +27,7 @@ from . utilities import TagAllocator, make_fGT
 from . logger_shim import LoggerShim, LogLevel
 from . document import Document
 
-# logger
-logger = LoggerShim(use_click=False, name=__name__)
-
+logger = logging.getLogger(__name__)
 
 class Library():
     """Library specified by config yaml (archivum-config) file."""
