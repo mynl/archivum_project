@@ -17,6 +17,7 @@ dependencies = [
     "latexcodec",
     "numpy",
     "pandas",
+    "pendulum",
     "prompt_toolkit",
     "pyarrow",
     "pymupdf",   # fitz
