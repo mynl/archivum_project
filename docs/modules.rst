@@ -56,10 +56,10 @@ Parser
    :members:
 
 
-Querier
+Querex
 -----------
 
-.. automodule:: archivum.querier
+.. automodule:: archivum.querex
    :members:
 
 Reference
