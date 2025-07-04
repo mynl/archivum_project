@@ -8,7 +8,7 @@ from typing import Union
 
 import requests
 
-from . __version__ import __version__ as version
+from . import __version__ as version
 
 HEADERS = {
     "User-Agent": f"archivum/{version} (mailto:stephenjmildenhall@gmail.com)"

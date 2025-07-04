@@ -1,12 +1,11 @@
 """archivum project."""
 
-from . __version__ import __version__
 import sys
 import os
 from pathlib import Path
 
 
-
+__version__ = "0.5.0"
 __appname__ = 'archivum'
 __author__ = 'Stephen Mildenhall'
 __date__ = '2025-05-22'
