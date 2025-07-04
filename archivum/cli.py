@@ -30,7 +30,6 @@ from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME, EMPTY_LIBRARY
 from . utilities import fGT
 from . document import find_pdfs, Document
 from . library import Library
-from . logger_shim import LoggerShim, LogLevel
 
 
 # local constants
@@ -78,7 +77,7 @@ def get_prompt(cmd):
     lib = LibraryContext.get()
     lib_name = lib.name
     return HTML(
-        f'<ansigreen>[{lib_name}]-></ansigreen>'
+        f'<ansigreen>[{lib_name}] > </ansigreen>'
         f'<ansiyellow>{cmd} > </ansiyellow>'
     )
 
@@ -339,10 +338,10 @@ def query_library(start: str, ref):
 
     click.echo(df.columns)
 
-    click.echo(
-        "Enter querex expression [verbose] [recent] [top n] [select field[, fields]\n"
-        "column ~ /regex/ where sql_expression sort field1, -field2\n"
-        " or type 'exit', 'x', 'quit' or 'q' to stop and ? for help).\n")
+    # click.echo(
+    #     "Enter querex expression [verbose] [recent] [top n] [select field[, fields]\n"
+    #     "column ~ /regex/ where sql_expression sort field1, -field2\n"
+    #     " or type 'exit', 'x', 'quit' or 'q' to stop and ? for help).\n")
 
     # keywords = ['cls', 'and', 'or'] + list(lib.database.columns)
     # word_completer = FuzzyCompleter(WordCompleter(keywords, sentence=True))
@@ -365,7 +364,7 @@ def query_library(start: str, ref):
             expr = start or session.prompt(get_prompt('query-library'))
             start = ''
             pipe = False
-            if expr.lower() in {"exit", "x", "quit", "q", ".."}:
+            if expr.lower() in {"exit", "x", ".."}:
                 break
             elif expr == "?":
                 click.echo(lib.querex_help())
@@ -784,7 +783,7 @@ def uber_help():
     h = '''
 Meta
 ====
-.. ; x               quit
+.. ; x               exit
 ? h                  help
 --help               Built in help (always available)
 

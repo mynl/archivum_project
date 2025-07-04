@@ -12,7 +12,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "click",
-    "greater_tables",
+    "greater_tables>=5.2.1",
     "lark",
     "latexcodec",
     "numpy",

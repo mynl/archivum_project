@@ -24,7 +24,6 @@ from . trie import Trie
 from . querex import querex_work, querex_help as querex_help_work
 from . hasher import hash_many
 from . utilities import TagAllocator, make_fGT
-from . logger_shim import LoggerShim, LogLevel
 from . document import Document
 
 logger = logging.getLogger(__name__)

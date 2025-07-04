@@ -82,7 +82,7 @@ def make_fGT(max_table_width=12, **kwargs):
                   raw_cols=['year', 'index', 'node', 'links', 'number'],
                   aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
                   default_formatter=default_formatter,
-                  max_table_inch_width=10,
+                  max_table_inch_width=16,
                   **kwargs
                   )
 
