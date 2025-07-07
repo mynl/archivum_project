@@ -1,0 +1,43 @@
+{% extends "generic/loc_base.html" %}
+
+{% block title %}Echo Page Title{% endblock %}
+
+{% block page_heading %}Echo Page Input{% endblock %}
+
+{% block breadcrumbs %}
+  <p><a href="{{ url_for('generic.home') }}">Generic Home</a> → Echo</p>
+{% endblock %}
+
+{% block content %}
+  <script src="https://unpkg.com/htmx.org@1.9.5"></script>
+  <style>
+    textarea {
+      width: 100%;
+      resize: vertical;
+      font-family: monospace;
+      font-size: 1em;
+    }
+    .echo-label {
+      margin-top: 1em;
+      padding: 0.5em;
+      border: 1px solid #eee;
+      background-color: #f9f9f9;
+      min-height: 1.5em;
+    }
+  </style>
+
+  <h2>Echo Input Function</h2>
+
+  <textarea
+      id="myTextBox"
+      name="textBoxContent"
+      rows="5"
+      placeholder="Start typing here..."
+      hx-post="{{ url_for('generic.echo_text') }}"
+      hx-trigger="keyup changed delay:300ms"
+      hx-target="#echoedText"
+      hx-swap="innerHTML"
+  ></textarea>
+
+  <div id="echoedText" class="echo-label"></div>
+{% endblock %}

@@ -1,7 +1,9 @@
 """Implement command line interface for archivum."""
 
+from importlib.resources import files
 import json
 import logging
+import logging.config
 import os
 from pathlib import Path
 import re
@@ -30,6 +32,7 @@ from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME, EMPTY_LIBRARY
 from . utilities import fGT
 from . document import find_pdfs, Document
 from . library import Library
+from . config import Configurator
 
 
 # local constants
@@ -144,7 +147,7 @@ def open_library(lib_name):
     try:
         lib = Library(lib_name)
         LibraryContext.set(lib)
-        logger.debug(f"Opened {lib.name}, loaded {len(lib.ref_df):,d} references.")
+        logger.debug(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
     except Exception as e:
         logger.error('Open library error: %s', e)
 
@@ -240,14 +243,19 @@ def create_library(lib_name):
         "timezone": click.prompt(pr("Timezone"), default=local_timezone()),
         "tablefmt": click.prompt(pr("Table format"), completer=tablefmt_completer),
     }
+    try:
+        con = Configurator(**config)
+    except ValidationError as e:
+        logger.error('configuration error %s', e)
+        click.secho('Error in config, no file written')
+    else:
+        with lib_path.open("w", encoding="utf-8") as f:
+            yaml.dump(config, f, sort_keys=False)
 
-    with lib_path.open("w", encoding="utf-8") as f:
-        yaml.dump(config, f, sort_keys=False)
+        lib = Library(lib_file_name)
+        LibraryContext.set(lib)
 
-    lib = Library(lib_file_name)
-    LibraryContext.set(lib)
-
-    click.secho(f"\nConfig written to {lib_path}", fg="green")
+        click.secho(f"\nConfig written to {lib_path}", fg="green")
 
 
 # ========================================================================================
@@ -604,7 +612,6 @@ def rg(args, n):
         except json.JSONDecodeError:
             console.print('ERROR ' + line.strip(), style="dim")
 
-
     return
     # lib = LibraryContext.get()
     # if lib.is_empty:
@@ -631,9 +638,10 @@ def rg(args, n):
     help="Starting library name, default 'Uber-Library'"
 )
 @click.option(
-    '-d', '--debug',
-    is_flag=True,
-    help='Enable debug mode with verbose output.'
+    '-c', '--logconfig',
+    type=str,
+    default='',
+    help='Log config file, default uses default',
 )
 @click.option(
     '-s', '--start',
@@ -647,7 +655,7 @@ def rg(args, n):
     nargs=-1,
     type=click.UNPROCESSED,
 )
-def uber(lib_name, start, debug, subcommand_args):
+def uber(lib_name, start, logconfig, subcommand_args):
     """
     Start an interactive REPL loop for issuing archivum commands.
 
@@ -664,9 +672,18 @@ def uber(lib_name, start, debug, subcommand_args):
     Arguments
         - argument: argument to pass to the subcommand."
     """
-    if debug:
-        logger.setLevel(LogLevel.DEBUG)
-        logger.debug("Debug mode enabled.")
+    # fire up logging
+    if logconfig == '':
+        with (files("archivum.configurations") / "logging-default.yaml").open("r") as f:
+            cfg = yaml.safe_load(f)
+    else:
+        p = Path(logconfig)
+        assert p.exists()
+        with p.open('r') as f:
+            cfg = yaml.safe_load(f)
+
+    logging.config.dictConfig(cfg)
+    logger.info('logging loaded')
 
     commands = [
         'open-library',

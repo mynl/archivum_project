@@ -6,27 +6,26 @@ Equivalent to and based on manager module in file_database.
 Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
 
-from datetime import datetime
 from functools import partial
-import json
 import logging 
 from pathlib import Path
 import re
 import subprocess
-import time
 from types import MethodType
 
 import yaml
 import pandas as pd
+from pydantic import ValidationError
 
 from . import BASE_DIR, APP_NAME
 from . trie import Trie
 from . querex import querex_work, querex_help as querex_help_work
-from . hasher import hash_many
 from . utilities import TagAllocator, make_fGT
 from . document import Document
+from . config import Configurator
 
 logger = logging.getLogger(__name__)
+
 
 class Library():
     """Library specified by config yaml (archivum-config) file."""
@@ -34,23 +33,36 @@ class Library():
     # base columns used by the app for quick output displays
     base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
 
-    def __init__(self, config_file, debug=False):
+    def __init__(self, config_file: Path | None = None, **overrides):
         """
         Load YAML config from file.
 
         The archivum-config suffix optional and added if missing.
         If not found in current directory, looks in local (eg. for default config).
         """
-        self.debug = False
         self.BASE_DIR = BASE_DIR.resolve()    # helpful externally, keep it all in the library
-        self.config_path = Path(config_file)
-        if not self.config_path.exists():
-            self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
-        logger.debug('config_path = %s', self.config_path)
-        assert self.config_path.exists()
-        with self.config_path.open() as f:
-            self._config = yaml.safe_load(f)
-        make_fGT(max_table_width=self.max_table_width)
+        logger.debug('config_file = %s', config_file)
+        if config_file:
+            # not none, but not necessarily the whole file name
+            self.config_path = Path(config_file)
+            if not self.config_path.exists():
+                self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
+            try:
+                raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+                base_config = Configurator.model_validate(raw)
+            except (ValidationError, OSError) as e:
+                raise ValueError(
+                    f"Failed to load config from {config_file}") from e
+        else:
+            base_config = Configurator()
+
+        # access through config
+        # update and validate; need to merge to avoid repeated args
+        # merged = dict(base_config.model_dump(), **overrides)
+        merged = base_config.model_dump() | overrides
+        self.config = Configurator(**merged)
+
+        make_fGT(max_table_inch_width=self.config.max_table_inch_width)
         self._last_query = None
         self._last_unrestricted = 0
         self._last_query_title = ''
@@ -65,7 +77,7 @@ class Library():
         self._tag_allocator = None
         self.is_dirty = False
         self.is_empty = False
-        self.text_dir_path = self.BASE_DIR / self.text_dir_name
+        self.text_dir_path = self.BASE_DIR / self.config.text_dir_name
         self.text_dir_full_name = str(self.text_dir_path)
 
     def close(self):
@@ -83,7 +95,7 @@ class Library():
         if self._doc_df.empty:
 
             self._doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
-            pdf_dir = Path(self.pdf_dir_name)
+            pdf_dir = Path(self.config.pdf_dir_name)
             self._doc_df['tpath'] = [
                 str(Path(i).relative_to(pdf_dir).parent)
                 for i in self._doc_df.path]
@@ -92,8 +104,7 @@ class Library():
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='name',
-                             recent_field='mod',
-                             debug=self.debug)
+                             recent_field='mod')
             self._doc_df.querex = MethodType(querex, self._doc_df)
         return self._doc_df
 
@@ -107,8 +118,7 @@ class Library():
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='author',
-                             recent_field='year',
-                             debug=self.debug)
+                             recent_field='year')
             self._ref_df.querex = MethodType(querex, self._ref_df)
         return self._ref_df
 
@@ -122,8 +132,7 @@ class Library():
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='path',
-                             recent_field='tag',
-                             debug=self.debug)
+                             recent_field='tag')
             self._ref_doc_df.querex = MethodType(querex, self._ref_doc_df)
         return self._ref_doc_df
 
@@ -148,8 +157,7 @@ class Library():
             querex = partial(querex_work,
                              base_cols=base_cols,
                              bang_field='author',
-                             recent_field='mod',
-                             debug=self.debug)
+                             recent_field='mod')
             self._database.querex = MethodType(querex, self._database)
         return self._database
 
@@ -171,25 +179,25 @@ class Library():
         self._doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
         self._ref_doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
 
-    def __getattr__(self, name):
-        """Provide access to config yaml dictionary."""
-        if name in self._config:
-            return self._config[name]
-        raise AttributeError(
-            f"{type(self).__name__!r} object has no attribute {name!r}")
+    # def __getattr__(self, name):
+    #     """Provide access to config yaml dictionary."""
+    #     if name in self._config:
+    #         return self._config[name]
+    #     raise AttributeError(
+    #         f"{type(self).__name__!r} object has no attribute {name!r}")
 
-    def __getitem__(self, name):
-        """Access to values of config dictionary."""
-        return self._config[name]
+    # def __getitem__(self, name):
+    #     """Access to values of config dictionary."""
+    #     return self._config[name]
 
     def __repr__(self):
         """Create simple string representation."""
         return f'Library({self.config_path.name})'
 
-    @property
-    def config(self):
-        """Return the config yaml dictionary."""
-        return self._config
+    # @property
+    # def config(self):
+    #     """Return the config yaml dictionary."""
+    #     return self._config
 
     @property
     def config_df(self):
@@ -198,10 +206,10 @@ class Library():
             self._config_df.index.name = 'key'
         return self._config_df
 
-    def set_attributes(self, **kwargs):
-        """Set new attributes of config yaml dictionary."""
-        for k, v in kwargs.items():
-            self._config[k] = v
+    # def set_attributes(self, **kwargs):
+    #     """Set new attributes of config yaml dictionary."""
+    #     for k, v in kwargs.items():
+    #         self._config[k] = v
 
     def querex(self, expr):
         """Run ``expr`` through the querier."""
@@ -361,7 +369,7 @@ class Library():
         and they are easy to complete.
         """
         if directory == '':
-            directory = self.watched_dirs[0]
+            directory = self.config.watched_dirs[0]
         directory = Path(directory)
         if not directory.exists():
             raise FileNotFoundError('Directory directory does not exist')
@@ -375,13 +383,13 @@ class Library():
             'file_name': [d.name for d in pdfs],
             'path': pdfs,
             'create': [
-                pd.to_datetime(p.stat().st_ctime_ns, unit='ns').tz_localize('UTC').tz_convert(self.timezone)
+                pd.to_datetime(p.stat().st_ctime_ns, unit='ns').tz_localize('UTC').tz_convert(self.config.timezone)
                 for p in pdfs]
         }).sort_values('create', ascending=False)
         dfs['n'] = range(1, len(dfs) + 1)
         dfs = dfs.reset_index(drop=True)
         if meta:
-            dfs.Document.map(lambda x: x.add_meta_data(self))
+            dfs.Document.map(lambda x: x.add_meta_data())
             dfs['meta_author'] = dfs.Document.map(lambda md: md.meta_author)
             dfs['meta_subject'] = dfs.Document.map(lambda md: md.meta_subject)
             dfs['meta_title'] = dfs.Document.map(lambda md: md.meta_title)

@@ -29,8 +29,8 @@ class Document():
         """Create Documents class based on file path."""
         self.library = library
         self.text_dir_path = library.text_dir_path if library else None
-        self.extractor = library.extractor if library else None
-        self.tz = library.timezone if library else "Europe/London"
+        self.extractor = library.config.extractor if library else None
+        self.tz = library.config.timezone if library else "Europe/London"
         self.doc_path = doc_path
         self.meta_author = ''
         self.meta_author_ex = ''
@@ -117,7 +117,7 @@ class Document():
             self.meta_author_ex = self.library.to_name_ex(a, strict=False)
         else:
             self.meta_author_ex = ''
-        self.meta_crossref = self.guess_crossref_query()
+        self.meta_crossref = self.get_guess_crossref_query()
 
     def _meta_data_debug(self):
         """Extract meta data from pdf, verbose testing version."""

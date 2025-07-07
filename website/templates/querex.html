@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}Querex{% endblock %}
+
+{% block content %}
+
+  <form id="qform" method="post">
+    <textarea id="query" name="query" rows="3" placeholder="Enter query..." hx-trigger="keyup changed delay:300ms, keydown[ctrl+Enter]"
+    hx-target="#result"
+    hx-post="/querex"
+    hx-swap="innerHTML"
+    >{{ query }}</textarea>
+    <!-- <button type="submit">Submit</button> -->
+  </form>
+
+  <div id="result" class="result">
+    {{ result|safe }}
+  </div>
+
+{% endblock %}
