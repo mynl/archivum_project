@@ -5,6 +5,7 @@ from pprint import pprint
 import re
 
 from lark import Lark, Transformer, v_args, Tree
+from lark.exceptions import UnexpectedEOF
 
 # choice has minimal impact on speed for test cases
 PARSER = 'lalr'
@@ -94,9 +95,11 @@ def parser(text, debug=False):
     try:
         tree = parser.parse(text)
         result = ArcTransformer().transform(tree)
-    except Exception as e:
-        raise ValueError(f'Parsing Error: {e}')
-    return result
+    except UnexpectedEOF as e:
+        raise
+        # raise ValueError(f'Parsing Error: {type(e)}, {e}')
+    else:
+        return result
 
 
 class ArcParser:

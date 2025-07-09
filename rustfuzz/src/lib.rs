@@ -4,6 +4,8 @@ use pyo3::prelude::*;
 use pyo3::types::PyList;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use fuzzy_matcher::FuzzyMatcher as FuzzyMatcherTrait;
+// use std::collections::HashSet;
+
 
 /// A fuzzy search object initialized with a list of strings.
 #[pyclass]
@@ -129,9 +131,171 @@ impl FuzzyMatcherMulti {
 
 }
 
+#[pyclass]
+struct FieldAwareFuzzy {
+    data: Vec<(String, String, String, String)>, // (author, title, journal, year)
+    matcher: SkimMatcherV2,
+}
+
+#[pymethods]
+impl FieldAwareFuzzy {
+    #[new]
+    fn new(pylist: &PyList) -> PyResult<Self> {
+        let data = pylist.iter()
+            .map(|item| {
+                let tuple: (String, String, String, String) = item.extract()?;
+                Ok(tuple)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(Self { data, matcher: SkimMatcherV2::default() })
+    }
+
+    fn query_html(&self, query: &str, top_k: usize) -> Vec<String> {
+        let tokens: Vec<&str> = query.split_whitespace().collect();
+        let mut results = Vec::new();
+
+        for (author, title, journal, year) in &self.data {
+            let mut token_scores = Vec::new();
+            let mut field_highlights: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+
+            for &token in &tokens {
+                let mut best_score: Option<(i64, usize, Vec<usize>)> = None;
+
+                for (fid, field_val) in [author, title, journal].iter().enumerate() {
+                    if let Some((score, idxs)) = self.matcher.fuzzy_indices(field_val, token) {
+                        if best_score.is_none() || score > best_score.as_ref().unwrap().0 {
+                            best_score = Some((score, fid, idxs));
+                        }
+                    }
+                }
+
+                if let Some((score, fid, idxs)) = best_score {
+                    token_scores.push(score);
+                    field_highlights[fid].extend(idxs);
+                } else {
+                    token_scores.clear();
+                    break;
+                }
+            }
+
+            if !token_scores.is_empty() {
+                let score: i64 = token_scores.iter().sum();
+
+                let highlight = |s: &str, idxs: &[usize]| -> String {
+                    let mut result = String::new();
+                    for (i, c) in s.chars().enumerate() {
+                        if idxs.contains(&i) {
+                            result.push_str(&format!("<mark>{}</mark>", c));
+                        } else {
+                            result.push(c);
+                        }
+                    }
+                    result
+                };
+
+                let author_html  = highlight(author, &field_highlights[0]);
+                let title_html   = highlight(title,  &field_highlights[1]);
+                let journal_html = highlight(journal,&field_highlights[2]);
+
+                let row = format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    author_html, title_html, journal_html, year, score
+                );
+                results.push((score, row));
+            }
+        }
+
+
+        results.sort_by(|a, b| b.0.cmp(&a.0));
+        results.truncate(top_k);
+        results.into_iter().map(|(_, row)| row).collect()
+    }
+}
+
+#[pyclass]
+struct FieldAwareFuzzy2 {
+    data: Vec<(String, String, String, String)>, // (author, title, journal, year)
+    matcher: SkimMatcherV2,
+}
+
+#[pymethods]
+impl FieldAwareFuzzy2 {
+    #[new]
+    fn new(pylist: &PyList) -> PyResult<Self> {
+        let data = pylist.iter()
+            .map(|item| {
+                let tuple: (String, String, String, String) = item.extract()?;
+                Ok(tuple)
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Ok(Self { data, matcher: SkimMatcherV2::default() })
+    }
+
+    fn query_html(&self, query: &str, top_k: usize) -> Vec<String> {
+        let tokens: Vec<&str> = query.split_whitespace().collect();
+        let mut results = Vec::new();
+
+        for (author, title, journal, year) in &self.data {
+            let concat = format!("{} {} {}", author, title, journal);
+
+            let mut token_scores = Vec::new();
+            let mut field_highlights: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+
+            for &token in &tokens {
+                if let Some((score, _)) = self.matcher.fuzzy_indices(&concat, token) {
+                    token_scores.push(score);
+
+                    for (fid, field_val) in [author, title, journal].iter().enumerate() {
+                        if let Some((_, idxs)) = self.matcher.fuzzy_indices(field_val, token) {
+                            field_highlights[fid].extend(idxs);
+                            break;
+                        }
+                    }
+                } else {
+                    token_scores.clear();
+                    break;
+                }
+            }
+
+            if !token_scores.is_empty() {
+                let score: i64 = token_scores.iter().sum();
+
+                let highlight = |s: &str, idxs: &[usize]| -> String {
+                    let mut result = String::new();
+                    for (i, c) in s.chars().enumerate() {
+                        if idxs.contains(&i) {
+                            result.push_str(&format!("<mark>{}</mark>", c));
+                        } else {
+                            result.push(c);
+                        }
+                    }
+                    result
+                };
+
+                let author_html  = highlight(author, &field_highlights[0]);
+                let title_html   = highlight(title,  &field_highlights[1]);
+                let journal_html = highlight(journal,&field_highlights[2]);
+
+                let row = format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    author_html, title_html, journal_html, year, score
+                );
+                results.push((score, row));
+            }
+        }
+
+        results.sort_by(|a, b| b.0.cmp(&a.0));
+        results.truncate(top_k);
+        results.into_iter().map(|(_, row)| row).collect()
+    }
+}
+
+
 #[pymodule]
 fn rustfuzz(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<FuzzyMatcher>()?;
     m.add_class::<FuzzyMatcherMulti>()?;
+    m.add_class::<FieldAwareFuzzy>()?;
+    m.add_class::<FieldAwareFuzzy2>()?;
     Ok(())
 }

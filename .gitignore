@@ -66,3 +66,4 @@ rust/pycomfy/target
 /temp/img
 *.ipynb
 /rustfuzz/target
+temp/new-import.ipynb

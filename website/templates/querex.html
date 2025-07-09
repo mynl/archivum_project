@@ -4,6 +4,14 @@
 
 {% block content %}
 
+<style>
+  mark {
+    background-color: #ffd54f;
+    padding: 0 0px;
+  }
+</style>
+
+
   <form id="qform" method="post">
     <textarea id="query" name="query" rows="3" placeholder="Enter query..." hx-trigger="keyup changed delay:300ms, keydown[ctrl+Enter]"
     hx-target="#result"
@@ -12,6 +20,21 @@
     >{{ query }}</textarea>
     <!-- <button type="submit">Submit</button> -->
   </form>
+
+    <style>
+      table, table th {
+      font-size: 10pt;
+    }
+      table td {
+      font-size: 8pt;
+    }
+    td:nth-child(4),
+    td:nth-child(5),
+    th:nth-child(4),
+    th:nth-child(5)  {
+        text-align: right;
+    }
+    </style>
 
   <div id="result" class="result">
     {{ result|safe }}
