@@ -1,6 +1,6 @@
 import re
 import pandas as pd
-from rustfuzz import FuzzyMatcherMulti, FieldAwareFuzzy, FieldAwareFuzzy2
+from rustfuzz import FuzzyMatcherMulti, FieldAwareFuzzy2 # , FieldAwareFuzzy
 from rapidfuzz import process, fuzz # Used by fuzzy_search (old version)
 
 # These will be initialized once per application lifecycle when the blueprint is registered
@@ -38,7 +38,8 @@ def wrap(table_rows):
     # convert to html table
     ans = ['<table>']
     ans.append('''<colgroup>
-    <col style="width: 25%;">
+    <col style="width: 5%;">
+    <col style="width: 20%;">
     <col style="width: 45%;">
     <col style="width: 20%;">
     <col style="width: 5%;">
@@ -46,7 +47,7 @@ def wrap(table_rows):
 </colgroup>''')
 
     ans.append('<thead>')
-    ans.append('<tr><th>Author</th><th>Title</th><th>Journal</th><th>Year</th><th>Score</th></tr>'
+    ans.append('<tr><th>n</th><th>Author</th><th>Title</th><th>Journal</th><th>Year</th><th>Score</th></tr>'
               )
     ans.append('</thead>')
     ans.append('<tbody>')
@@ -54,6 +55,7 @@ def wrap(table_rows):
     ans.append('</tbody>')
     ans.append('</table>')
     return '\n'.join(ans)
+
 
 def new_search(query, library):
     global _df_search, _rf_matcher
@@ -67,7 +69,7 @@ def new_search(query, library):
             df.year.fillna("").astype(str),
         ))
         _rf_matcher = FieldAwareFuzzy2(rows)
-    table_rows = _rf_matcher.query_html(query, top_k)
+    table_rows, idx = _rf_matcher.query_html(query, top_k, '/view')
     return wrap(subset(table_rows, 0.8))
 
 

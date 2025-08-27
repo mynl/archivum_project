@@ -131,7 +131,7 @@ impl FuzzyMatcherMulti {
 
 }
 
-#[pyclass]
+#[pyclass] 
 struct FieldAwareFuzzy {
     data: Vec<(String, String, String, String)>, // (author, title, journal, year)
     matcher: SkimMatcherV2,
@@ -231,11 +231,11 @@ impl FieldAwareFuzzy2 {
         Ok(Self { data, matcher: SkimMatcherV2::default() })
     }
 
-    fn query_html(&self, query: &str, top_k: usize) -> Vec<String> {
+    fn query_html(&self, query: &str, top_k: usize, url: &str) -> PyResult<(Vec<String>, Vec<usize>)> {
         let tokens: Vec<&str> = query.split_whitespace().collect();
-        let mut results = Vec::new();
+        let mut scored: Vec<(i64, usize, String)> = Vec::new();
 
-        for (author, title, journal, year) in &self.data {
+        for (i, (author, title, journal, year)) in self.data.iter().enumerate() {
             let concat = format!("{} {} {}", author, title, journal);
 
             let mut token_scores = Vec::new();
@@ -244,7 +244,6 @@ impl FieldAwareFuzzy2 {
             for &token in &tokens {
                 if let Some((score, _)) = self.matcher.fuzzy_indices(&concat, token) {
                     token_scores.push(score);
-
                     for (fid, field_val) in [author, title, journal].iter().enumerate() {
                         if let Some((_, idxs)) = self.matcher.fuzzy_indices(field_val, token) {
                             field_highlights[fid].extend(idxs);
@@ -272,23 +271,33 @@ impl FieldAwareFuzzy2 {
                     result
                 };
 
-                let author_html  = highlight(author, &field_highlights[0]);
-                let title_html   = highlight(title,  &field_highlights[1]);
-                let journal_html = highlight(journal,&field_highlights[2]);
-
                 let row = format!(
-                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                    author_html, title_html, journal_html, year, score
+                    "<tr><td><a href=\"{}?i={}\">{}</a></td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
+                    url,
+                    i,
+                    i,
+                    highlight(author, &field_highlights[0]),
+                    highlight(title,  &field_highlights[1]),
+                    highlight(journal,&field_highlights[2]),
+                    year,
+                    score
                 );
-                results.push((score, row));
+
+                scored.push((score, i, row));
             }
         }
 
-        results.sort_by(|a, b| b.0.cmp(&a.0));
-        results.truncate(top_k);
-        results.into_iter().map(|(_, row)| row).collect()
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.truncate(top_k);
+
+        let htmls = scored.iter().map(|(_, _, row)| row.clone()).collect();
+        let indices = scored.iter().map(|(_, i, _)| *i).collect();
+
+        Ok((htmls, indices))
     }
+
 }
+
 
 
 #[pymodule]

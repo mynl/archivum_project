@@ -4,11 +4,11 @@
 
 {% block content %}
 
-<div class="row mb-4">
+<!-- <div class="row mb-4">
   <div class="col-12">
     <h1>archivum - new papers</h1>
   </div>
-</div>
+</div> -->
 
 <div class="row mb-4">
   <div class="col-md-1">
@@ -41,13 +41,13 @@
 {% if selected %}
 <div class="row">
   <div class="col-md-6">
-    <h2>PDF Document</h2>
+    <!-- <h2>PDF Document</h2> -->
     <iframe src="{{ url_for('new_doc.serve_pdf', filename=selected) }}" class="w-100" style="min-height: 500px;"></iframe>
   </div>
   <div class="col-md-6">
-    <h2>Extracted meta data</h2>
+    <!-- <h2>Extracted meta data</h2> -->
     {{ metadata|safe }}
-    <h2 class="mt-4">Draft bibTeX</h2>
+    <!-- <h2 class="mt-4">Draft bibTeX</h2> -->
     <textarea id="bibtex" rows="15" class="form-control" style="resize: vertical;">{{ bibtex }}</textarea>
   </div>
 </div>
