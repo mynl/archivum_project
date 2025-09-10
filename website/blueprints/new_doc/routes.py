@@ -7,13 +7,14 @@ from .services import process_new_pdf
 def new():
     pdf_dir = current_app.config['PDF_DIR']
     lib = current_app.lib
-
+    print(pdf_dir)
     pdf_paths = sorted(p for p in pdf_dir.glob("*.pdf"))
     pdfs = [i.name for i in pdf_paths]
     selected_filename = request.args.get("file", pdfs[0] if pdfs else None)
 
     dummy_metadata_html = '<strong>Metadata not yet set</strong>'
     bibtex = "None available."
+    titles = ("", "")
 
     if selected_filename:
         selected_pdf_path = None
@@ -29,6 +30,7 @@ def new():
                 # Handle potential errors during PDF processing or metadata extraction
                 dummy_metadata_html = f"<strong style='color:red;'>Error processing PDF: {e}</strong>"
                 bibtex = "Error: Could not generate BibTeX."
+                titles = ('Error?', 'Error?')
 
     return render_template("new.html",
         active_page="new",
