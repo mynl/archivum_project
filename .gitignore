@@ -67,3 +67,4 @@ rust/pycomfy/target
 *.ipynb
 /rustfuzz/target
 temp/new-import.ipynb
+/new-papers
