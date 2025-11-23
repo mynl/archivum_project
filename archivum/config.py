@@ -38,6 +38,11 @@ class Configurator(BaseModel):
     tablefmt: str = Field("mixed_grid", description="Table format for display (see tabulate)")
     max_table_inch_width: int = Field(80, gt=0, description="Maximum width for table display in characters")
 
+    imports_dir_name: str = Field(
+        "imports",
+        description="Root directory for BibTeX import runs (relative to BASE_DIR or absolute)",
+    )
+
     def write_template(self, path: Path):
         """Generate a clean default config file at the given path."""
         path = Path(path)

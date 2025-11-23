@@ -20,7 +20,7 @@ from pydantic import ValidationError
 from . import BASE_DIR, APP_NAME
 from . trie import Trie
 from . querex import querex_work, querex_help as querex_help_work
-from . utilities import TagAllocator, make_fGT
+from . utilities import TagAllocator
 from . document import Document
 from . config import Configurator
 
@@ -62,7 +62,6 @@ class Library():
         merged = base_config.model_dump() | overrides
         self.config = Configurator(**merged)
 
-        make_fGT(max_table_inch_width=self.config.max_table_inch_width)
         self._last_query = None
         self._last_unrestricted = 0
         self._last_query_title = ''
@@ -88,6 +87,10 @@ class Library():
     def save(self):
         """Save library if necessary."""
         logger.todo('Library.save()')
+
+    @property
+    def name(self):
+        return self.config.name if self.config else "~~no name~~"
 
     @property
     def doc_df(self):
@@ -426,6 +429,37 @@ class Library():
             return "None", "[red]Failed to read rg output[/red]"
 
         return 0, proc
+
+    def import_bibtex(
+        self,
+        bibtex_path: Path,
+        imports_dir: Path | None = None,
+        pdf_dir: Path | None = None,
+        audit_mode: bool = False,
+    ):
+        """
+        Import references and documents from a BibTeX file into this library.
+
+        This delegates to the import_bibtex helper module, which reuses the
+        Mendeley porting logic (Bib2df) and updates the underlying feather
+        files and in-memory dataframes.
+        """
+        from . import import_bibtex as import_bibtex_mod
+
+        bibtex_path = Path(bibtex_path)
+        if imports_dir is not None:
+            imports_dir = Path(imports_dir)
+        if pdf_dir is not None:
+            pdf_dir = Path(pdf_dir)
+
+        result = import_bibtex_mod.run_import(
+            bibtex_path=bibtex_path,
+            library=self,
+            imports_dir=imports_dir,
+            pdf_dir=pdf_dir,
+            audit_mode=audit_mode,
+        )
+        return result
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

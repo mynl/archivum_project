@@ -47,6 +47,10 @@ version = { attr = "archivum.__version__" }
 [project.scripts]
 archivum = "archivum.cli:entry"
 
+# Magic discovery by great2 uber uber routine
+[project.entry-points."great2.plugins"]
+archivum = "archivum.cli:entry"
+
 [project.urls]
 "Source Code" = "https://github.com/mynl/archivum_project"
 

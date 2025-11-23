@@ -45,7 +45,6 @@ def parse_test(qno, text, debug=False, show_tokens=False):
         ]
         import archivum.parser as arcp
         import archivum.library as arcl
-        from archivum.utilities import fGT
         lib = arcl.Library('uber-library')
 
         for q in querex_test_cases[-1:]:
@@ -56,7 +55,7 @@ def parse_test(qno, text, debug=False, show_tokens=False):
                 print('Synt error', e)
             else:
                 # print(sorted(r.columns))
-                display(fGT(r.head(10)))
+                display(r.head(10))
 
     """
     rt = repr(text)

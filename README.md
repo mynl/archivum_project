@@ -4,6 +4,19 @@ Latin for "archive".
 
 PDF reference manager.
 
+
+## November 2025
+
+Path to use and update uber-library... 
+
+1. Drop PDF into Mendeley.
+2. Let Mendeley extract metadata.
+3. Mendeley auto-exports a .bib file.
+4. Run: archivum import-mendeley path/to/library.bib
+5. Archivum adds reference, normalises names, stores PDF.
+6. Optional: remove entry from Mendeley.
+
+
 ## Lark
 
 Parser IDE: https://www.lark-parser.org/ide/
@@ -245,7 +258,7 @@ PDF / text files respv.
 
 * References are BibTeX entries, creates  `ref_df`
 * Part of a Mendeley bibtex entry is a field `file` that is a `;` separated list of a `:` list of `drive:path:suffix`. These paths may or may not exist, call them `vfiles` (virtual files, like a `Path` object to a file that DNE). These are extracted into `proto_ref_doc_df`, the prototype reference-document table.
-* Separately we have documents corresponding to actual files, `afiles`, found by rgrepping the relevant Library directory 
+* Separately we have documents corresponding to actual files, `afiles`, found by rgrepping the relevant Library directory
 * A reference can have zero or more corresponding `vfiles`
 * Need to match `vfiles` to `afiles`. This is done with fuzzy name matching and the Levenshtein library to compute distance resulting in `best_match_df` from which we create `best_match_mapper`
 * `ref_doc_df` then effects the remapping.
@@ -290,7 +303,7 @@ lib = arcl.Library('uber-library')
 for q in querex_test_cases:
     print(repr(q))
     try:
-        r = lib.ref_df.querex(q) 
+        r = lib.ref_df.querex(q)
     except ValueError as e:
         print('ERROR: ', e)
     else:

@@ -10,10 +10,6 @@ import pandas as pd
 
 from greater_tables import GT
 
-# the imported global formatter, set using make_fGT
-#
-fGT = None
-
 
 def safe_int(s):
     """
@@ -71,23 +67,20 @@ def default_formatter(x):
         return str(x)
 
 
-def make_fGT(**kwargs):
-    global fGT
-    fGT = partial(GT,
-                  large_ok=True,
-                  show_index=False,
-                  formatters={
-                      'size': safe_file_size,
-                  },
-                  raw_cols=['year', 'index', 'node', 'links', 'number'],
-                  aligners={'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
-                  default_formatter=default_formatter,
-                  **kwargs
-                  )
-
-
-# update the global object
-make_fGT()
+# make the library display function
+def make_partial_GT(**kwargs):
+    """Make a partial GT function with sensible defaults."""
+    default_args = {
+            "large_ok": True,
+            "show_index": False,
+            "formatters": {'size': safe_file_size, },
+            "raw_cols": ['year', 'index', 'node', 'links', 'number'],
+            "aligners": {'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
+            "default_formatter": default_formatter,
+        }
+    default_args = default_args | kwargs
+    qd = partial(GT, **default_args)
+    return qd
 
 
 def remove_accents(s: str) -> str:

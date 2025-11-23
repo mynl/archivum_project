@@ -1,11 +1,23 @@
-"""archivum project."""
+"""
+archivum project.
+===================
+
+v 0.7.0
+    moved to Library having a qd function in place of older fGT
+
+v 0.6.0
+    added self discovery for great2 uber uber
+    updated stand alone uber
+v 0.5.0
+
+"""
 
 import sys
 import os
 from pathlib import Path
 
 
-__version__ = "0.5.0"
+__version__ = "0.7.0"
 __appname__ = 'archivum'
 __author__ = 'Stephen Mildenhall'
 __date__ = '2025-05-22'

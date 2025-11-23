@@ -26,10 +26,13 @@ from prompt_toolkit.document import Document
 from rich.console import Console
 from rich.text import Text
 
+# for uber loop
+from great2.shell import UberShell
+
 from . reference import Reference
 from . library import Library
 from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME, EMPTY_LIBRARY
-from . utilities import fGT
+from . utilities import make_partial_GT
 from . document import find_pdfs, Document
 from . library import Library
 from . config import Configurator
@@ -39,11 +42,19 @@ from . config import Configurator
 DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
 EMPTY_DF = pd.DataFrame([])
 
+# for local display function
+partialGT = make_partial_GT(max_table_inch_width=10)
+
 # logger
 logger = logging.getLogger(__name__)
 
-
 console = Console()
+
+
+# helper display function
+def qd(df, **kwargs):
+    click.echo(partialGT(df, **kwargs))
+
 
 # ========================================================================================
 # ========================================================================================
@@ -78,14 +89,17 @@ class LibraryContext:
 def get_prompt(cmd):
     """Make a prompt for REPL."""
     lib = LibraryContext.get()
-    lib_name = lib.name
-    return HTML(
-        f'<ansigreen>[{lib_name}] > </ansigreen>'
-        f'<ansiyellow>{cmd} > </ansiyellow>'
-    )
-
+    try:
+        lib_name = lib.name
+        return HTML(
+            f'<ansigreen>[{lib_name}] > </ansigreen>'
+            f'<ansiyellow>{cmd} > </ansiyellow>'
+        )
+    except AttributeError as e:
+        print('get prompt error', e, sep='\n')
+        return HTML(f'ERR: <ansiyellow>{cmd} > </ansiyellow>')
 # ========================================================================================
-# ========================================================================================
+# ===================f=====================================================================
 # Completers
 
 
@@ -272,12 +286,12 @@ def list_libraries(details):
     if details:
         logger.debug("Detailed information.")
         df = Library.list_deets()
-        click.echo(fGT(df))
+        qd(df)
     else:
         logger.debug("Basic information.")
         l = Library.list()
         l.insert(0, 'Library')
-        click.echo(fGT(l))
+        qd(l)
 
 
 # ========================================================================================
@@ -289,7 +303,7 @@ def get_library_stats():
         click.echo("No library open. Returning")
         return
     logger.debug("Library stats %s", lib)
-    click.echo(fGT(lib.stats().reset_index(drop=False)))
+    qd(lib.stats().reset_index(drop=False))
 
 
 # ========================================================================================
@@ -312,10 +326,10 @@ def get_distinct_values(field):
         df = lib.distinct_values_by_field().reset_index(drop=False)
         df.index.name = 'field'
         df = df.sort_values(['distinct'], ascending=[False])
-        click.echo(fGT(df))
+        qd(df)
     elif field in lib.database:
         df = lib.distinct_value_counts(field).reset_index(drop=False)
-        click.echo(fGT(df))
+        qd(df)
     else:
         click.echo(f'Field {field} not found in library database.')
 
@@ -432,7 +446,7 @@ def query_library(start: str, ref):
                 logger.error('Parsing error')
                 logger.error(e)
             else:
-                click.echo(fGT(result))
+                qd(result)
                 click.echo(
                     f'{len(result)} of {result.qx_unrestricted_len:,d} results shown.')
                 if pipe:
@@ -485,12 +499,12 @@ def new(directory, meta, recursive):
         LibraryContext.last_new = dfs
 
     if meta:
-        click.echo(fGT(dfs[['n', 'create', 'file_name', 'meta_author',
+        qd(dfs[['n', 'create', 'file_name', 'meta_author',
                             'meta_subject', 'meta_title', 'meta_crossref']]
                        .sort_values('create', ascending=False)
-                       ))
+                       )
     else:
-        click.echo(fGT(dfs[['n', 'file_name']]))
+        qd(dfs[['n', 'file_name']])
 
 
 # ========================================================================================
@@ -541,6 +555,69 @@ def import_(execute, partial, regex):
 
 # ========================================================================================
 
+@entry.command(name="import-bibtex")
+@click.argument(
+    "bibtex_path",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+)
+@click.option(
+    "-I",
+    "--imports-dir",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=None,
+    help="Root directory for import runs; defaults to config.imports_dir_name or BASE_DIR / 'imports'.",
+)
+@click.option(
+    "-P",
+    "--pdf-dir",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    default=None,
+    help="Directory containing PDFs referenced in the BibTeX file; "
+         "defaults to the library's pdf_dir_name.",
+)
+@click.option(
+    "--audit-mode",
+    is_flag=True,
+    help="Enable BibTeX import audit logging (delegated to Bib2df).",
+)
+def import_bibtex_cmd(bibtex_path, imports_dir, pdf_dir, audit_mode):
+    """
+    Import new references from a BibTeX file into the current library.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open -- cannot import.")
+        return
+
+    cfg = lib.config
+    if imports_dir is None:
+        # Prefer an explicit config field if present, otherwise fall back.
+        root = getattr(cfg, "imports_dir_name", None)
+        if root:
+            imports_dir = Path(root)
+        else:
+            imports_dir = lib.BASE_DIR / "imports"
+
+    print(f'{imports_dir = }')
+
+    result = lib.import_bibtex(
+        bibtex_path=bibtex_path,
+        imports_dir=imports_dir,
+        pdf_dir=pdf_dir,
+        audit_mode=audit_mode,
+    )
+
+    click.echo(
+        f"Imported {result.added_refs} references and {result.added_docs} documents."
+    )
+    click.echo(f"Import run directory: {result.run_dir}")
+
+
+
+
+
+# ========================================================================================
+
 
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
@@ -574,7 +651,14 @@ def rg(args, n):
     # otherwise all good - printout
     # for search and replace in resulting filenames
     prefix = str(lib.text_dir_full_name)
-    suffix = f'.{lib.extractor}.md'
+    print(lib)
+    try:
+        suffix = f'.{lib.extractor}.md'
+    except AttributeError:
+        print('ATTRIBUTE ERROR...here is dir lib')
+        print(dir(lib))
+        print('RETURNING')
+        return
     last_file = ''
     fc = 0
     for line in proc.stdout:
@@ -613,21 +697,20 @@ def rg(args, n):
             console.print('ERROR ' + line.strip(), style="dim")
 
     return
-    # lib = LibraryContext.get()
-    # if lib.is_empty:
-    #     click.echo("No library open...don't know where to look for files. Returning")
-    #     return
-    # text_dir_name = lib.text_dir_full_name
-    # print(type(args))
-    # args = list(args) + [f'-g "{text_dir_name}"']
-    # cmd = ["rg", pattern, *args]
-    # print(cmd)
-    # try:
-    #     subprocess.run(cmd, check=False)
-    # except FileNotFoundError:
-    #     click.echo("Error: ripgrep (rg) not found on PATH", err=True)
 
 
+# Uber using Gemini new technology Nov 2025
+@entry.command()
+@click.option("--debug", is_flag=True)
+def uber(debug):
+    """QT Standalone Shell."""
+    shell = UberShell("archivum", debug)
+    # Register QT commands, exclude 'uber' to prevent recursion
+    shell.register_click_group(entry, exclude=["uber"])
+    shell.start()
+
+
+# old manual uber loop
 # ========================================================================================
 @entry.command()
 @click.option(
@@ -655,7 +738,7 @@ def rg(args, n):
     nargs=-1,
     type=click.UNPROCESSED,
 )
-def uber(lib_name, start, logconfig, subcommand_args):
+def uber_old(lib_name, start, logconfig, subcommand_args):
     """
     Start an interactive REPL loop for issuing archivum commands.
 
