@@ -1,9 +1,10 @@
+# coding: utf-8
 """
 Code to port over a Mendeley generated bibtex file.
 
 Code in this module would be used once, and adjusted to your specific library.
 """
-
+import logging
 from pathlib import Path
 import re
 from types import MethodType
@@ -16,6 +17,8 @@ import pandas as pd
 from . import BASE_DIR
 from . trie import Trie
 from . utilities import remove_accents, accent_mapper_dict, safe_int, TagAllocator
+
+logger = logging.getLogger(__name__)
 
 
 def suggest_tag(df):
@@ -405,6 +408,9 @@ class Bib2df():
         Normalize each text-based field.
 
         Runs through each task in turn, see comments.
+
+        For the initial port choose run_add_hoc=True, but
+        for incremental updates use False.
         """
         print('Running port_mendeley_file to create ported_df')
         kept_fields = [i for i in self.df.columns if i not in self.omitted_menedely_fields]
@@ -413,6 +419,14 @@ class Bib2df():
         # ============================================================================================
         # author: initials, extend, accents
         self.map_authors('_ported_df')
+
+        # ensure other edited fields are present
+        # this may not be the case for small imports
+        for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
+                  'editor', 'mendeley-tags', 'edition']:
+            if f not in self._ported_df:
+                logger.info('Ported df missing %s - adding', f)
+                self._ported_df[f] = ""
 
         # ============================================================================================
         # de-tex other text fields
@@ -668,7 +682,9 @@ class Bib2df():
             df["mod"] = pd.to_datetime(df["mod"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
             df["access"] = pd.to_datetime(df["access"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
             self._doc_df = df
-            self._add_hashes()
+            # skipping
+            logger.warning('SKIPPING ADDING HASHES')
+            # self._add_hashes()
             print(f'Created doc_df with {len(ans)} files')
         return self._doc_df
 

@@ -79,8 +79,8 @@ def make_partial_GT(**kwargs):
             "default_formatter": default_formatter,
         }
     default_args = default_args | kwargs
-    qd = partial(GT, **default_args)
-    return qd
+    fGT = partial(GT, **default_args)
+    return fGT
 
 
 def remove_accents(s: str) -> str:
@@ -112,7 +112,7 @@ def suggest_filename(s):
     pass
 
 
-class TagAllocator:    # noqa
+class TagAllocator:
 
     def __init__(self, existing: set[str]):
         """Class to determine the next key (@AuthorYYYY) given a list of existing keys."""

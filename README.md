@@ -7,7 +7,7 @@ PDF reference manager.
 
 ## November 2025
 
-Path to use and update uber-library... 
+Path to use and update uber-library...
 
 1. Drop PDF into Mendeley.
 2. Let Mendeley extract metadata.
@@ -16,6 +16,18 @@ Path to use and update uber-library...
 5. Archivum adds reference, normalises names, stores PDF.
 6. Optional: remove entry from Mendeley.
 
+## File Structure
+
+Each user machine creates a directory link `~/AppData/Local/archivum` to `/S/AppData/archivum`, ensuring cloud sync between devices.
+
+Within `archivum` you have
+
+* `imports`: details of imports, time stamped.
+* `pdf-full-text`: full text of all pdfs
+* `LATER`: the actual pdfs ...
+* library files
+    * `library-name.archivum-config`
+    * various feather files - these are the underlying pd DataFrames.
 
 ## Lark
 

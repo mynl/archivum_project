@@ -43,14 +43,12 @@ def _get_local_folder():
         # raise FileNotFoundError("Application database does not exist.")
     return my_app_data
 
-
+# e.g. /users/steve/appdata/local/archivum
 BASE_DIR = _get_local_folder()
-# for imports QDFC?
-# (BASE_DIR / 'imports').mkdir(exist_ok=True)
 
 APP_NAME = __appname__
+
 DEFAULT_CONFIG_FILE = "uber-library"
-# BIBTEX_DIR = "\\s\\telos\\biblio\\"
 
 EMPTY_LIBRARY = type('EmptyLibrary', (), {'name': 'No library open', 'is_empty': True})
 
