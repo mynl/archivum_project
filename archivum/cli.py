@@ -32,7 +32,7 @@ from great2.shell import UberShell
 from . reference import Reference
 from . library import Library
 from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME, EMPTY_LIBRARY
-from . utilities import make_partial_GT
+from . utilities import make_qd
 from . document import find_pdfs, Document
 from . library import Library
 from . config import Configurator
@@ -43,17 +43,13 @@ DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
 EMPTY_DF = pd.DataFrame([])
 
 # for local display function
-partialGT = make_partial_GT(max_table_inch_width=10)
+qd = make_qd(max_table_inch_width=10, max_rows=50, display=click.echo)
 
 # logger
 logger = logging.getLogger(__name__)
 
 console = Console()
 
-
-# helper display function
-def qd(df, **kwargs):
-    click.echo(partialGT(df, **kwargs))
 
 
 # ========================================================================================

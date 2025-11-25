@@ -335,22 +335,33 @@ class Library():
                 )
 
     def next_tag(self, name, year):
-        """Return the next tag RELATIVE TO THE CURRENT DATA after name, year."""
-        try:
-            base_tag = f'{name}{year}'
-            m = [i for i in self.distinct('tag') if re.search(f'^{base_tag}', i)]
-            if m:
-                s = m[-1]
-                if s[-1].isdigit():
-                    # haven't gotten to letters yet
-                    return s + 'a'
-                s = s[:-1] + chr(ord(s[-1]) + 1)
-                return s
-            else:
-                # nothing close
-                return base_tag
-        except IndexError as e:
-            logger.error('ERROR in next tag ', e)
+        """
+        Return the next tag after name, year.
+
+        Remembers incremental tags handed out.
+        """
+        return self.tag_allocator.get_tag(name, year)
+        # this version did not remember what it handed out...
+        # try:
+        #     base_tag = f'{name}{year}'
+        #     m = [i for i in self.distinct('tag') if re.search(f'^{base_tag}', i)]
+        #     if m:
+        #         s = m[-1]
+        #         if s[-1].isdigit():
+        #             # haven't gotten to letters yet
+        #             return s + 'a'
+        #         s = s[:-1] + chr(ord(s[-1]) + 1)
+        #         return s
+        #     else:
+        #         # nothing close
+        #         return base_tag
+        # except IndexError as e:
+        #     logger.error('ERROR in next tag ', e)
+
+    def reset_tag_allocator(self):
+        """You want to remember new tags for each dry run but be
+        able to accept them. Hence this is useful."""
+        self._tag_allocator = None
 
     @property
     def tag_allocator(self):
@@ -359,8 +370,8 @@ class Library():
             # force build of database
             # TODO: should database normalize on editor too??
             d = self.database
-            names = set(d.author)
-            self._tag_allocator = TagAllocator(names)
+            tags = set(d.tag)
+            self._tag_allocator = TagAllocator(tags)
         return self._tag_allocator
 
     def get_new_documents(self, directory, meta, recursive):

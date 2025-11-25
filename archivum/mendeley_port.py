@@ -287,7 +287,7 @@ class Bib2df():
         using a Trie, adjusts for accents (guess work!)
         """
         if self._author_map_df is None:
-            df = pd.DataFrame({'original': self.distinct('author')})
+            df = pd.DataFrame({'original': self.distinct('author', self.df)})
             self.last_decode = []
             df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
             # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials

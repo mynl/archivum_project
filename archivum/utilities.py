@@ -4,7 +4,7 @@ from collections import defaultdict
 from functools import partial
 import re
 import unicodedata
-
+from IPython.display import display as ip_display
 import numpy as np
 import pandas as pd
 
@@ -55,21 +55,26 @@ def safe_file_size(s):
             return s
 
 
-def default_formatter(x):
-    """
-    For raw columns.
-
-    The issue is that cols with ints and '' strings are not recognized as int by GT.
-    """
-    if isinstance(x, int):
-        return f'{x:d}'
-    else:
-        return str(x)
-
-
 # make the library display function
-def make_partial_GT(**kwargs):
-    """Make a partial GT function with sensible defaults."""
+def make_qd(max_string_length=50, max_rows=10, display=None, **gt_kwargs):
+    """
+    Make a qd function with sensible defaults.
+
+    If display is None use IPython.display display.
+    """
+    def default_formatter(x):
+        """
+        For raw columns.
+
+        The issue is that cols with ints and '' strings are not recognized as int by GT.
+        """
+        if isinstance(x, int):
+            return f'{x:,d}'
+        elif isinstance(x, float):
+            return f'{x:,.2f}'
+        else:
+            return str(x)[:max_string_length]
+
     default_args = {
             "large_ok": True,
             "show_index": False,
@@ -78,9 +83,19 @@ def make_partial_GT(**kwargs):
             "aligners": {'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
             "default_formatter": default_formatter,
         }
-    default_args = default_args | kwargs
+    default_args = default_args | gt_kwargs
     fGT = partial(GT, **default_args)
-    return fGT
+    display = display or ip_display
+    caption_str = f'{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)'
+
+    def qd(df, **kwargs):
+        """Generic display function."""
+        caption = kwargs.get('caption', None)
+        if caption:
+            kwargs['caption'] = caption_str.format(caption=caption)
+        display(fGT(df.head(max_rows), **kwargs))
+
+    return qd
 
 
 def remove_accents(s: str) -> str:
@@ -148,7 +163,7 @@ class TagAllocator:
     def get_tag(self, name: str, year: str) -> str:
         """Create a tag for given name and year."""
         base = f"{name}{year}"
-        it = self.allocators[(name, year)]
+        it = self.allocators[(name, str(year))]
         while True:
             suffix = next(it)
             candidate = base + suffix
