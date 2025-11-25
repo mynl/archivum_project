@@ -53,8 +53,9 @@ class Trie:
             if char not in node.children:
                 if strict:
                     raise ValueError(f"Prefix '{prefix}' not found in trie.")
-                else:
-                    break
+                # else:
+                #     break
+                return prefix
             node = node.children[char]
 
         if strict and node.value is None:

@@ -17,9 +17,9 @@ import yaml
 import pandas as pd
 from pydantic import ValidationError
 
-from . import BASE_DIR, APP_NAME
+from . import BASE_DIR, APP_NAME, DEFAULT_CONFIG_FILE
 from . trie import Trie
-from . querex import querex_work, querex_help as querex_help_work
+from . querex import querex_work
 from . utilities import TagAllocator
 from . document import Document
 from . config import Configurator
@@ -27,7 +27,111 @@ from . config import Configurator
 logger = logging.getLogger(__name__)
 
 
-class Library():
+class LibraryBase:
+    """Some base class functions for Library."""
+    def refs_no_docs(self):
+        """Return tags to refs with no entries in ref_doc, indices missing an afile."""
+        idx = sorted(set(self.ref_df.tag) - set(self.ref_doc_df.tag))
+        return self.ref_df.query('tag in @idx')
+
+    def docs_no_refs(self):
+        """Return docs with no associated refs."""
+        paths = set(self.doc_df.path) - set(self.ref_doc_df.path)
+        df = self.doc_df.loc[self.doc_df.path.isin(paths)].copy()
+        df['filename'] = df.path.map(lambda x: Path(x).name)
+        df['parent'] = df.path.map(lambda x: Path(x).parent.name)
+        df = df[['name', 'filename', 'parent', 'path', 'mod', 'create', 'access', 'node', 'links', 'size',
+                       'suffix', 'hash']]
+        return df
+
+    def stats(self):
+        """Statistics about refs (tags), docs (paths)."""
+        data = {}
+
+        # Configuration for the two rows
+        views = [
+            ('references', len(self.ref_df), 'tag'),
+            ('documents', len(self.doc_df), 'path')
+        ]
+
+        for name, total, group_col in views:
+            # Calculate counts per group
+            counts = self.ref_doc_df.groupby(group_col).size()
+
+            # Frequency distribution of those counts
+            dist = counts.value_counts()
+
+            # specific row data
+            row = {
+                'objects': total,
+                'no children': total - len(counts),
+                'children': len(counts)
+            }
+
+            # Dynamically add columns for each count found (1, 2, 3, 4, 5...)
+            for num_children, freq in dist.items():
+                label = f"{num_children} child{'ren' if num_children != 1 else ''}"
+                row[label] = freq
+
+            data[name] = row
+
+        # Create DataFrame
+        df = pd.DataFrame.from_dict(data, orient='index').fillna(0).astype(int)
+
+        # Sort columns: fixed headers first, then numerical distribution
+        fixed_cols = ['objects', 'no children', 'children']
+        dist_cols = sorted(
+            [c for c in df.columns if c not in fixed_cols],
+            key=lambda x: int(str(x).split()[0])
+        )
+
+        return df[fixed_cols + dist_cols].T
+
+    def stats_ref_fields(self):
+        """Statistics on distinct values by field."""
+        ans = {}
+        for c in self.ref_df.columns:
+            vc = self.ref_df[c].value_counts()
+            if c == 'arc-citations':
+                ans[c] = [len(vc), vc.get(0, 0)]
+            else:
+                ans[c] = [len(vc), vc.get('', 0)]
+
+        stats = pd.DataFrame(ans.values(),
+                             columns=[ 'distinct', 'missing'],
+                             index=ans.keys())
+        return stats
+
+    def distinct_values_by_field(self):
+        """Statistics on distinct values by field."""
+        ans = {}
+        for c in self.ref_df.columns:
+            vc = self.ref_df[c].value_counts()
+            if c == 'arc-citations':
+                ans[c] = [len(vc), vc.get(0, 0)]
+            else:
+                ans[c] = [len(vc), vc.get('', 0)]
+
+        stats = pd.DataFrame(ans.values(),
+                             columns=[ 'distinct', 'missing'],
+                             index=ans.keys())
+        # c: len(self.distinct(c)) for c in self.ref_df.columns
+        # }, index=['Value']).T
+        return stats
+
+    def distinct_value_counts(self, field):
+        """Return the top 20 distinct value counts for field."""
+        return (None
+                if field not in self.database else
+                    self.database[field]
+                        .value_counts()
+                        .to_frame('count')
+                        .sort_values('count', ascending=False)
+                        .head(20)
+                )
+
+
+class Library(LibraryBase):
     """Library specified by config yaml (archivum-config) file."""
 
     # base columns used by the app for quick output displays
@@ -35,39 +139,45 @@ class Library():
 
     def __init__(self, config_file: Path | None = None, **overrides):
         """
-        Load YAML config from file.
+        Load YAML config from file. If None, defaults to DEFAULT_CONFIG_FILE.
 
         The archivum-config suffix optional and added if missing.
         If not found in current directory, looks in local (eg. for default config).
         """
         self.BASE_DIR = BASE_DIR.resolve()    # helpful externally, keep it all in the library
         logger.debug('config_file = %s', config_file)
-        if config_file:
-            # not none, but not necessarily the whole file name
-            self.config_path = Path(config_file)
-            if not self.config_path.exists():
-                self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
-            try:
-                raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
-                base_config = Configurator.model_validate(raw)
-            except (ValidationError, OSError) as e:
-                raise ValueError(
-                    f"Failed to load config from {config_file}") from e
-        else:
-            base_config = Configurator()
+        config_file = config_file or DEFAULT_CONFIG_FILE
+
+        # figure config path and load
+        self.config_path = Path(config_file)
+        if not self.config_path.exists():
+            self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
+        try:
+            raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+            base_config = Configurator.model_validate(raw)
+        except (ValidationError, OSError) as e:
+            raise ValueError(
+                f"Failed to load config from {config_file}") from e
 
         # access through config
         # update and validate; need to merge to avoid repeated args
         # merged = dict(base_config.model_dump(), **overrides)
         merged = base_config.model_dump() | overrides
         self.config = Configurator(**merged)
+        self.text_dir_path = self.BASE_DIR / self.config.text_dir_name
+        self.text_dir_full_name = str(self.text_dir_path)
+        self.reset()
 
+    def reset(self):
+        """Reset all cache variables."""
         self._last_query = None
         self._last_unrestricted = 0
         self._last_query_title = ''
         self._last_query_expr = ''
         self._config_df = pd.DataFrame([])
         self._doc_df = pd.DataFrame([])
+        # paths in doc df get mangled - this is the original
+        self._doc_read_df = pd.DataFrame([])
         self._ref_df = pd.DataFrame([])
         self._ref_doc_df = pd.DataFrame([])
         # fully blown up docs x refs x authors
@@ -76,17 +186,17 @@ class Library():
         self._tag_allocator = None
         self.is_dirty = False
         self.is_empty = False
-        self.text_dir_path = self.BASE_DIR / self.config.text_dir_name
-        self.text_dir_full_name = str(self.text_dir_path)
 
-    def close(self):
-        """Close library."""
-        logger.todo('Library.close()')
-        pass
+    def __repr__(self):
+        """Create simple string representation."""
+        return f'Library({self.config_path.name})'
 
-    def save(self):
-        """Save library if necessary."""
-        logger.todo('Library.save()')
+    @property
+    def config_df(self):
+        if self._config_df.empty:
+            self._config_df = pd.Series(self.config).to_frame('value')
+            self._config_df.index.name = 'key'
+        return self._config_df
 
     @property
     def name(self):
@@ -97,8 +207,10 @@ class Library():
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
 
-            self._doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
+            self._doc_read_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
             pdf_dir = Path(self.config.pdf_dir_name)
+            # mangle path names to make more readable
+            self._doc_df = self._doc_read_df.copy()
             self._doc_df['tpath'] = [
                 str(Path(i).relative_to(pdf_dir).parent)
                 for i in self._doc_df.path]
@@ -164,58 +276,35 @@ class Library():
             self._database.querex = MethodType(querex, self._database)
         return self._database
 
+    def update(self, ref_add, doc_add, ref_doc_add):
+        """
+        Update internal database and save.
+
+        Invalidate all caches to force clean re-load.
+
+        Called by the import routine, after figuring what needs to be added.
+        """
+        # Append to existing dataframes.
+        ref_out = pd.concat([self.ref_df, ref_add], ignore_index=True)
+        doc_out = pd.concat([self._doc_read_df, doc_add], ignore_index=True)
+        ref_doc_out = pd.concat([self.ref_doc_df, ref_doc_add], ignore_index=True)
+
+        self._ref_df = ref_out
+        self._doc_df = doc_out
+        self._ref_doc_df = ref_doc_out
+
+        self.save()
+        self.reset()
+
     def save(self):
-        """Save dictionary to yaml."""
-        backup = self.config_path.with_suffix(f'.{APP_NAME}-config-bak')
-        if backup.exists():
-            backup.unlink()
-        backup.hardlink_to(self.config_path)
-        self.config_path.unlink()
-        with self.config_path.open("w") as f:
-            yaml.safe_dump(self._config, f,
-                           sort_keys=False,                # preserve input order
-                           default_flow_style=False,       # block structure
-                           width=100,
-                           indent=2
-                           )
-        self._ref_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
-        self._doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
-        self._ref_doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
-
-    # def __getattr__(self, name):
-    #     """Provide access to config yaml dictionary."""
-    #     if name in self._config:
-    #         return self._config[name]
-    #     raise AttributeError(
-    #         f"{type(self).__name__!r} object has no attribute {name!r}")
-
-    # def __getitem__(self, name):
-    #     """Access to values of config dictionary."""
-    #     return self._config[name]
-
-    def __repr__(self):
-        """Create simple string representation."""
-        return f'Library({self.config_path.name})'
-
-    # @property
-    # def config(self):
-    #     """Return the config yaml dictionary."""
-    #     return self._config
-
-    @property
-    def config_df(self):
-        if self._config_df.empty:
-            self._config_df = pd.Series(self.config).to_frame('value')
-            self._config_df.index.name = 'key'
-        return self._config_df
-
-    # def set_attributes(self, **kwargs):
-    #     """Set new attributes of config yaml dictionary."""
-    #     for k, v in kwargs.items():
-    #         self._config[k] = v
+        """Save config and all dataframes."""
+        self._config.save(self.config_path, backup=True)
+        self._ref_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
+        self._doc_read_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
+        self._ref_doc_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
 
     def querex(self, expr):
-        """Run ``expr`` through the querier."""
+        """Run ``expr`` through the querex on database."""
         self._last_query_expr = expr
         try:
             self._last_query = self.database.querex(expr)
@@ -224,25 +313,10 @@ class Library():
             return None
         return self._last_query
 
-    @staticmethod
-    def querex_help():
-        """Print help for query syntax."""
-        return querex_help_work()
-
     def distinct(self, c):
         """Return distinct occurrences of col c."""
         # database is fully exploded so this is OK:
         return sorted(set([i for i in self.database[c] if i != '']))
-        # if c == 'author':
-        #     return sorted(
-        #         set(author.strip() for s in self.database.author.dropna() for author in s.split(" and "))
-        #     )
-        # else:
-        #     return sorted(set([i for i in self.database[c] if i != '']))
-
-    def no_file(self):
-        """Entries with no files listed."""
-        return self.df.loc[self.df.file == '', self.base_cols]
 
     @staticmethod
     def get_library_path_list():
@@ -279,61 +353,6 @@ class Library():
         name_ex = self._trie.longest_unique_completion(name, strict)
         return name_ex
 
-    def stats(self):
-        """Statistics about refs (tags), docs (paths)."""
-        docs_per_ref = self.ref_doc_df.groupby('tag').count()
-        # I know most is 3
-        ref_1_doc, ref_2_doc, ref_3_doc = docs_per_ref.value_counts().values
-        assert len(docs_per_ref) == ref_1_doc + ref_2_doc + ref_3_doc
-        ref_0_doc = len(self.ref_df) - len(docs_per_ref)
-
-        refs_per_doc = self.ref_doc_df.groupby('path').count()
-        # I know most is 4
-        doc_1_ref, doc_2_ref, doc_3_ref, *doc_4_ref = refs_per_doc.value_counts()
-        doc_4_ref = sum(doc_4_ref)
-        assert len(refs_per_doc) == doc_1_ref + doc_2_ref + doc_3_ref + doc_4_ref
-        doc_0_ref = len(self.doc_df) - len(refs_per_doc)
-
-        stats = pd.DataFrame({
-            'objects': [len(self.ref_df), len(self.doc_df)],
-            'no children': [ref_0_doc, doc_0_ref],
-            'children': [len(docs_per_ref), len(refs_per_doc)],
-            '1 child': [ref_1_doc, doc_1_ref],
-            '2 children': [ref_2_doc, doc_2_ref],
-            '3 children': [ref_3_doc, doc_3_ref],
-            '4+ children': [0, doc_4_ref],
-        }, index=['references', 'documents']).T
-
-        return stats
-
-    def distinct_values_by_field(self):
-        """Statistics on distinct values by field."""
-        ans = {}
-        for c in self.ref_df.columns:
-            vc = self.ref_df[c].value_counts()
-            if c == 'arc-citations':
-                ans[c] = [len(vc), vc.get(0, 0)]
-            else:
-                ans[c] = [len(vc), vc.get('', 0)]
-
-        stats = pd.DataFrame(ans.values(),
-                             columns=[ 'distinct', 'missing'],
-                             index=ans.keys())
-        # c: len(self.distinct(c)) for c in self.ref_df.columns
-        # }, index=['Value']).T
-        return stats
-
-    def distinct_value_counts(self, field):
-        """Return the top 20 distinct value counts for field."""
-        return (None
-                if field not in self.database else
-                    self.database[field]
-                        .value_counts()
-                        .to_frame('count')
-                        .sort_values('count', ascending=False)
-                        .head(20)
-                )
-
     def next_tag(self, name, year):
         """
         Return the next tag after name, year.
@@ -341,22 +360,6 @@ class Library():
         Remembers incremental tags handed out.
         """
         return self.tag_allocator.get_tag(name, year)
-        # this version did not remember what it handed out...
-        # try:
-        #     base_tag = f'{name}{year}'
-        #     m = [i for i in self.distinct('tag') if re.search(f'^{base_tag}', i)]
-        #     if m:
-        #         s = m[-1]
-        #         if s[-1].isdigit():
-        #             # haven't gotten to letters yet
-        #             return s + 'a'
-        #         s = s[:-1] + chr(ord(s[-1]) + 1)
-        #         return s
-        #     else:
-        #         # nothing close
-        #         return base_tag
-        # except IndexError as e:
-        #     logger.error('ERROR in next tag ', e)
 
     def reset_tag_allocator(self):
         """You want to remember new tags for each dry run but be
@@ -381,6 +384,8 @@ class Library():
         Note ``new`` requires an open library for name completion and
         timezone. You should always be working with an open library
         and they are easy to complete.
+
+        NOT USED??
         """
         if directory == '':
             directory = self.config.watched_dirs[0]
@@ -494,12 +499,3 @@ class Library():
     #         subprocess.run(cmd, check=True)
     #     else:
     #         print('Would execute\n\n', ' '.join(cmd))
-
-    # def duplicates(self, keep=False) -> pd.DataFrame:
-    #     """
-    #     Return rows that point share the same hash (i.e., duplicate content).
-
-    #     keep = 'first', 'last', False: keep first, last or all duplicates
-    #     """
-    #     df = self.database
-    #     return df[df.duplicated("hash", keep=keep)].sort_values("hash")

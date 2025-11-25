@@ -208,13 +208,14 @@ recent
 top n
 select (!|-)field1[, fields]
 regex [and regex]
-sql
+where sql
 order|sort by [-]field[, fields]
 
 * if recent an age column is added
 * select field, prefix by ! or - to drop a base column, eg select !dir drops (long) directory
 * regex not quoted,  ! ~ something or field ~ something
-* sql clause quoted for passing to df.query
+* sql clause must be preceded by where
+* sql clause strings must be quoted for passing to df.query
 * -field is descending order, else ascending.
 
 Query return fields

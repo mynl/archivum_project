@@ -36,7 +36,7 @@ from . utilities import make_qd
 from . document import find_pdfs, Document
 from . library import Library
 from . config import Configurator
-
+from . querex import querex_help
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
@@ -385,7 +385,7 @@ def query_library(start: str, ref):
             if expr.lower() in {"exit", "x", ".."}:
                 break
             elif expr == "?":
-                click.echo(lib.querex_help())
+                click.echo(querex_help())
                 continue
             elif expr == 'cls':
                 # clear screen
