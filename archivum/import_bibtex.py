@@ -210,7 +210,7 @@ class Bib2df_Incremental(LibraryBase):
         # for audit and debugging
         self._last_missing_vfiles = None
         self._last_decode = None
-        self._audit_dir_path = None
+        self.__audit_dir_path = None
         self._all_unicode_errors = None
         # for duplicate detection: normalized titles and doi
         self._existing_title_norm = None
@@ -220,29 +220,6 @@ class Bib2df_Incremental(LibraryBase):
         # timestamp for audit files and arc-source for imports
         self.timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
         self.qd = qd or print
-
-    @property
-    def audit_dir_path(self):
-        """
-        Time-stamped location to save audit data.
-
-        If created, copies the input bibtex file (hard link).
-        """
-        if self._audit_dir_path is None:
-            if self.debug_mode:
-                self._audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
-            else:
-                self._audit_dir_path = BASE_DIR / "imports" / self.timestamp
-            # ensure it exists
-            self._audit_dir_path.mkdir(parents=True, exist_ok=True)
-            logger.info('Created audit path at %s', str(self._audit_dir_path))
-            # audit the bibtex input file
-            p_ = self._audit_dir_path / self.bibtex_file_path.name
-            if p_.exists():
-                logger.warning('REALLY WEIRD - audit of input bibtex already exists.')
-                p_.unlink()
-            p_.hardlink_to(self.bibtex_file_path)
-        return self._audit_dir_path
 
     @property
     def raw_df(self):
@@ -269,439 +246,6 @@ class Bib2df_Incremental(LibraryBase):
             if self.fillna:
                 self._raw_df = self._raw_df.fillna('')
         return self._raw_df
-
-    @staticmethod
-    def parse_line(entry):
-        result = {}
-
-        # Step 1: Extract type and tag
-        # windows GS bibtex pastes come in with \r\n
-        entry = entry.replace('\r\n  ', '\n')
-        header_match = re.match(r'@?(\w+)\{([^,]+),', entry)
-        if not header_match:
-            logger.error("Error: Unable to parse entry header.")
-            return None
-        result['type'], result['tag'] = header_match.groups()
-
-        # Step 2: Remove header and final trailing '}'
-        body = entry[header_match.end():].strip()
-        if body.endswith('}'):
-            body = body[:-1].strip() + ",\n"
-
-        for m in re.finditer(r'([a-zA-Z\-]+) = {(.*?)},\n', body, flags=re.DOTALL):
-            try:
-                k, v = m.groups()
-                result[k] = v
-            except ValueError:
-                logger.info('going slow')
-                return Bib2df_Incremental.parse_line_slow(entry)
-        return result
-
-    @staticmethod
-    def parse_line_slow(entry):
-        result = {}
-
-        # Step 1: Extract type and tag
-        header_match = re.match(r'(\w+)\{([^,]+),', entry)
-        if not header_match:
-            logger.error("Error: Unable to parse entry header.")
-            return None
-        result['type'], result['tag'] = header_match.groups()
-
-        # Step 2: Remove header and final trailing '}'
-        body = entry[header_match.end():].strip()
-        if body.endswith('}'):
-            body = body[:-1].strip()
-
-        # Step 3: Find all key = { positions
-        matches = list(re.finditer(r'([a-zA-Z\-]+) = \{', body))
-        n = len(matches)
-
-        for i, match in enumerate(matches):
-            key = match.group(1)
-            val_start = match.end()
-            val_end = matches[i + 1].start() if i + 1 < n else len(body)
-
-            # Strip off the trailing "}," (assumes always ",\n" after value)
-            value = body[val_start:val_end].rstrip().rstrip(',')
-            if value.endswith('}'):
-                value = value[:-1].rstrip()
-
-            result[key] = value
-
-        return result
-
-    def contents(self, ported=False, verbose=False):
-        """Summary contents info on df - distinct values, fields etc."""
-        ans = []
-        if ported:
-            df = self.ported_df
-        else:
-            df = self.raw_df
-        for c in df.columns:
-            vc = df[c].value_counts()
-            nonna = len(df) - sum(df[c].isna())
-            ans.append([c, nonna, len(vc)])
-            if verbose:
-                print(c)
-                print('=' * len(c))
-                print(f'{len(vc)} distinct values')
-                print(vc.head(10))
-                print('-' * 80)
-                print()
-        cdf = pd.DataFrame(ans, columns=['column', 'nonna', 'distinct'])
-        return cdf
-
-    @property
-    def author_map_df(self):
-        """
-        DataFrame of author name showing a transition to a normalized form.
-
-        Adjusts for initials (puts periods in), takes the longest ! name
-        using a Trie, adjusts for accents (guess work!).
-
-        For a new import into an empty library, needs to be run
-        on the authors in raw_df to prime the pump
-        """
-        if self._author_map_df.empty:
-            df = pd.DataFrame({'original': self.distinct('author', self.raw_df)})
-            self._last_decode = []
-            df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
-            # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials
-            df['spaced'] = df.unicoded.str.replace(r'(?<=, )([A-Z]{2,3})\b',
-                                                   lambda m: ' '.join(m.group(1)),
-                                                   regex=True)
-
-            # diverge from Bib2df: use the reference library
-            t = Trie()
-            # distinct returns a set
-            if self.reference_library != EMPTY_LIBRARY and \
-                            not self.reference_library.ref_df.empty:
-
-                ref_authors = self.distinct("author", self.reference_library.ref_df)
-                logger.warning('Building author Trie from reference library, '
-                                f'{len(ref_authors)} distinct authors')
-            else:
-                # no reference authors in the reference library
-                # e.g., it could be a start from scratch library
-                # prime the pump with the author names we have
-                ref_authors = self.distinct("author", self.raw_df)
-                logger.warning('Building author Trie from self.raw_df - no reference library authors; '
-                                f'{len(ref_authors) = } distinct authors')
-            for name in ref_authors:
-                t.insert(name.strip('. '))
-            # mapping will go from name to longest completion
-            mapping = {}
-            # authors in self.raw_df
-            a = self.distinct("author", self.raw_df)
-            logger.info(f'Import contains {len(a)} distinct authors -> remapping')
-            for name in a:
-                try:
-                    m = t.longest_unique_completion(name.strip('.'), strict=False)
-                except ValueError:
-                    # in strict mode means prefix not found -> no change
-                    pass
-                else:
-                    if m != name:
-                        # have found a better version
-                        mapping[name] = m
-            df['longest'] = df.spaced.replace(mapping)
-            accent_mapper = accent_mapper_dict(df.longest)
-            df['accents'] = df.longest.replace(accent_mapper)
-            # initial  periods
-            df['proposed'] = df.accents.str.replace(r'(\b)([A-Z])( |$)', r'\1\2.\3', case=True, regex=True)
-            logger.info(f'Field: authors\nDecode errors: {len(self._last_decode) = }')
-            self._author_map_df = df
-            # debug
-            self.trie = t
-            self.mapping = mapping
-            self.accent_mapper = accent_mapper
-        return self._author_map_df
-
-    @staticmethod
-    def distinct(column_name, df):
-        """Return distinct occurrences of col c in df."""
-        # signature changed from mendeley version
-        if df is None or df.empty:
-            return []
-        if column_name == 'author':
-            return sorted(
-                set(author.strip() for s in df.author.dropna() for author in s.split(" and "))
-            )
-        else:
-            return sorted(set([i for i in df[column_name] if i != '']))
-
-    def tex_to_unicode(self, s_in: str) -> str:
-        """
-        Tex codes to Unicode for a string and removing braces with single character.
-
-        Errors are added to self._last_decode and looked up in the dictionary
-        self.errors_mapper. Work iteratively: run, look at errors, add or update
-        entries in self.errors_mapper.
-        """
-        if pd.isna(s_in):
-            return s_in
-        try:
-            s = self._r_brace2.sub(r'\1', s_in.encode('latin1').decode('latex'))
-            s = self._r_brace1.sub(r'\1', s)
-            if s.find(',') > 0 and s == s.upper():
-                # title case what appear to be names (comma) that are all caps
-                s = s.title()
-            return s
-        except ValueError as e:
-            s = self.errors_mapper.get(s_in, s_in)
-            if s_in not in self.errors_mapper:
-                self._last_decode.append(s_in)
-            return s
-
-    # def author_last_multiple_firsts(self):
-    #     """Last names with multiple firsts, showing the parts."""
-    #     df = self.author_map_df
-    #     df[['last', 'rest']] = df['proposed'].str.split(',', n=1, expand=True)
-    #     df['rest'] = df['rest'].str.strip()
-
-    #     return (df.fillna('')
-    #             .groupby('last')
-    #             .apply(lambda x:
-    #             pd.Series([len(x), sorted(set(x.rest))], index=('n', 'set')),
-    #             include_groups=False)
-    #             .query('n>1'))
-
-    def author_mapper(self):
-        """dict mapper for author name."""
-        # dropped manual fixes
-        return  {k: v for k, v in self.author_map_df[['original', 'proposed']].values}
-
-    def map_authors(self, df_name):
-        """Actually apply the author mapper to the author column."""
-        df = getattr(self, df_name)
-        am = self.author_mapper()
-
-        def f(x):
-            sx = x.split(' and ')
-            msx = map(lambda x: am.get(x, x), sx)
-            return ' and '.join(msx)
-
-        df.author = df.author.map(f)
-        # audit
-        amdf = pd.DataFrame(am.items(), columns=['key', 'value'])
-        self.save_audit_file(amdf, '.author-mapping')
-
-    def import_bibtex_file(self):
-        """
-        The work happens here! Do the actual import, and
-        normalize each text-based field.
-
-        Runs through each task in turn, see comments.
-
-        For the initial port choose run_add_hoc=True, but
-        for incremental updates use False.
-
-        Updated to remove ad_hoc adjustments, dropped extract citations
-        from abstract, tags use library, etc.
-
-        Called automatically by ported_df property if needed.
-        """
-        logger.info('Running import_bibtex_file to create ported_df')
-        kept_fields = [i for i in self.raw_df.columns if i not in self._omitted_bibtex_fields]
-        self._ported_df = self.raw_df[kept_fields].copy()
-
-        # ============================================================================================
-        # author: initials, extend, accents - either from reference library or self.raw_df
-        # if a new import
-        self.map_authors('_ported_df')
-
-        # ensure other edited fields are present
-        # this may not be the case for small imports
-        for f in self._base_fields:
-            if f not in self._ported_df:
-                logger.debug('Imported df missing %s - adding', f)
-                # probably a string?
-                self._ported_df[f] = ""
-
-        # ============================================================================================
-        # de-tex other text fields
-        self._all_unicode_errors = {}
-        for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
-                  'editor', 'mendeley-tags']:
-            self._last_decode = []
-            self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
-            if len(self._last_decode):
-                logger.info(f'\tField: {f}\t{len(self._last_decode) = }')
-                self._all_unicode_errors[f] = self._last_decode.copy()
-            logger.debug(f'Fixed {f}')
-
-        # audit unicode errors
-        ans = []
-        for k, v in self._all_unicode_errors.items():
-            for mc in v:
-                ans.append([k, mc])
-        temp = pd.DataFrame(ans, columns=['field', 'miscode'])
-        self.save_audit_file(temp, '.tex-unicode-errors')
-
-        # ============================================================================================
-        # keywords
-        # paper's key words - never used these, they are included in _omitted_bibtex_fields
-        # add code here for alternative treatment
-
-        # ============================================================================================
-        # mendeley-tags: these are things like my WangR or Delbaen or PMM
-        # nothing to do here --- just carry over
-
-        # ============================================================================================
-        # citations: figure number of citations from my notes in the abstract - DROPPED
-        # dict index -> number of citations, default = 0
-
-        # ============================================================================================
-        # edition: normalize edition field
-        self._ported_df.edition = self._ported_df.edition.replace(self._edition_mapper)
-
-        # ============================================================================================
-        # tags: normalize and resolve duplicate TAGS
-        self.map_tags()
-
-        # ============================================================================================
-        # files: files are entirely separately managed, field just pulled over
-        # see code in file_field_df
-
-        # set tag as the index
-        # self._ported_df = self._ported_df.set_index('tag')
-
-        # ============================================================================================
-        # final checks and balances, and write out info
-        self.save_audit_file(self.raw_df, '.raw-df')
-        self.save_audit_file(self._ported_df, '.ported-df')
-        import_info = pd.DataFrame({
-            'created': str(self.timestamp),
-            'bibtex_file': self.bibtex_file_path.absolute(),
-            'raw_entries': len(self.raw_df),
-            'ported_entries': len(self._ported_df)
-        }.items(), columns=['key', 'value'])
-        self.save_audit_file(import_info, '.audit-info')
-        return import_info
-
-    # def extract_citations(self):
-    #     """Extract manually entered citations from abstract field."""
-    # dropped
-
-    def show_unicode_errors(self):
-        """Accumulated Unicode errors."""
-        if self._all_unicode_errors is None:
-            return None
-        ans = set()
-        for k, v in self._all_unicode_errors.items():
-            ans = ans.union(set([c for line in v for c in line if len(c.encode('utf-8')) > 1]))
-        return ans
-
-    def no_file(self):
-        """Entries with no files listed."""
-        return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
-
-    def map_tags(self):
-        """
-        Remap the tags into standard AuthorYYYY[a-z] format for named df.
-
-        Saves a dataframe showing what was done as part of import.
-
-        Updated to use reference library.
-        """
-        # pattern to remove non-bibtex like characters
-        df = self.ported_df[['author', 'editor', 'year', 'tag', 'title']].copy()
-        # figure out what the tag "should be"
-        pat = r" |\.|\{|\}|\-|'"
-        a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
-        e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(pat, '', regex=True)
-        y = df['year'].map(safe_int)
-        # the standardized tag, standard_tag (stem)
-        df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
-
-        noans = df.standard_tag[df.standard_tag == 'NOTAG']
-        if len(noans):
-            logger.warning(f'WARNING: Suggested tags failed for {len(noans)} items')
-            logger.warning('YOU NEED TO FIX THIS!')
-            logger.info(noans)
-
-        # make the proposed tags, build lists as you go with no duplicates
-        if self.reference_library != EMPTY_LIBRARY:
-            # library is aware and returns tag allocator on [] if
-            # if has no database
-            self.reference_library.reset_tag_allocator()
-            df['proposed_tag'] = [self.reference_library.next_tag(a, y)
-                                for a, y in zip(np.where(a != '', a, e), y)]
-        else:
-            # make the proposed tags, build lists as you go with no duplicates
-            ta = TagAllocator([])
-            df['proposed_tag'] = df.standard_tag.map(ta)
-            df = df.sort_values('proposed_tag')
-
-        # check all unique
-        non_uq_tags = df.loc[df.proposed_tag.duplicated(keep=False)]
-        if len(non_uq_tags):
-            logger.warning(f'Non-unique tags {len(non_uq_tags) = }')
-            print(non_uq_tags)
-            logger.info(set(non_uq_tags.proposed_tag))
-            raise ValueError('Non-unique proposed tags')
-        # enforce unique
-        assert df.proposed_tag.is_unique, 'ERROR: proposed tags are not unique'
-
-        # save for audit purposes
-        self.save_audit_file(df, '.tag-mapping')
-
-        # actually make the change to ported_df
-        self.ported_df['tag'] = df['proposed_tag']
-
-    def save_audit_file(self, df, suffix):
-        """Save df audit file with a standard filename."""
-        fn = self.bibtex_file_path.stem + suffix + '.csv'
-        p = self.audit_dir_path / fn
-        df.to_csv(p, encoding='utf-8')
-        logger.info(f'Audit: dataFrame, {len(df) = }, saved to {p.name}.')
-        # check about errors mapper
-        if self.errors_mapper and not self._errors_mapper_saved:
-            fn = self.audit_dir_path / "errors_mapper.json"
-            with open(fn, 'w', encoding='utf-8') as f:
-                json.dump(self.errors_mapper, f, indent=4)
-            self._errors_mapper_saved = True
-
-    def show_audit_files(self, top=5, trim=100, bib=False):
-        """qd all the audit files."""
-        if bib:
-            for f in self.audit_dir_path.glob("*.bib"):
-                print(f.name)
-                print("=" * len(f.name))
-                print(f'Lines trimmed to {trim} characters.')
-                txt = f.read_text()
-                txt = '\n'.join([i[:trim] for i in txt.split('\n')])
-                print(txt)
-                print()
-
-        for f in self.audit_dir_path.glob("*.json"):
-            print(f.name)
-            print("=" * len(f.name))
-            print(f.read_text())
-            print()
-
-        if self.qd is None:
-            logger.error('Must provide qd to use show_ functions')
-            return
-        for f in self.audit_dir_path.glob("*.csv"):
-            df = pd.read_csv(f, encoding='utf-8-sig')
-            self.qd(df.head(top), caption=f.stem, tikz=False)
-
-    def show_generated_dfs(self):
-        """Use self.qd to display the main generated dfs."""
-        if self.qd is None:
-            logger.error('Must provide qd to use show_ functions')
-            return
-        for nm in ('df', 'ported_df', 'ref_df', 'doc_df', 'ref_doc_df'):
-            d = getattr(self, nm, None)
-            if d is not None:
-                self.qd(d, caption=nm)
-
-    @staticmethod
-    def to_windows_csv(df, file_name):
-        """Save to CSV in windows-compatible format. Can be read into Excel."""
-        df.to_csv(file_name, encoding='utf-8-sig')
 
     @property
     def ported_df(self):
@@ -840,6 +384,72 @@ class Bib2df_Incremental(LibraryBase):
         return self._ref_doc_df
 
     @property
+    def author_map_df(self):
+        """
+        DataFrame of author name showing a transition to a normalized form.
+
+        Adjusts for initials (puts periods in), takes the longest ! name
+        using a Trie, adjusts for accents (guess work!).
+
+        For a new import into an empty library, needs to be run
+        on the authors in raw_df to prime the pump
+        """
+        if self._author_map_df.empty:
+            df = pd.DataFrame({'original': self.distinct('author', self.raw_df)})
+            self._last_decode = []
+            df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
+            # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials
+            df['spaced'] = df.unicoded.str.replace(r'(?<=, )([A-Z]{2,3})\b',
+                                                   lambda m: ' '.join(m.group(1)),
+                                                   regex=True)
+
+            # diverge from Bib2df: use the reference library
+            t = Trie()
+            # distinct returns a set
+            if self.reference_library != EMPTY_LIBRARY and \
+                            not self.reference_library.ref_df.empty:
+
+                ref_authors = self.distinct("author", self.reference_library.ref_df)
+                logger.warning('Building author Trie from reference library, '
+                                f'{len(ref_authors)} distinct authors')
+            else:
+                # no reference authors in the reference library
+                # e.g., it could be a start from scratch library
+                # prime the pump with the author names we have
+                ref_authors = self.distinct("author", self.raw_df)
+                logger.warning('Building author Trie from self.raw_df - no reference library authors; '
+                                f'{len(ref_authors) = } distinct authors')
+            for name in ref_authors:
+                t.insert(name.strip('. '))
+            # mapping will go from name to longest completion
+            mapping = {}
+            # authors in self.raw_df
+            a = self.distinct("author", self.raw_df)
+            logger.info(f'Import contains {len(a)} distinct authors -> remapping')
+            for name in a:
+                try:
+                    m = t.longest_unique_completion(name.strip('.'), strict=False)
+                except ValueError:
+                    # in strict mode means prefix not found -> no change
+                    pass
+                else:
+                    if m != name:
+                        # have found a better version
+                        mapping[name] = m
+            df['longest'] = df.spaced.replace(mapping)
+            accent_mapper = accent_mapper_dict(df.longest)
+            df['accents'] = df.longest.replace(accent_mapper)
+            # initial  periods
+            df['proposed'] = df.accents.str.replace(r'(\b)([A-Z])( |$)', r'\1\2.\3', case=True, regex=True)
+            logger.info(f'Field: authors\nDecode errors: {len(self._last_decode) = }')
+            self._author_map_df = df
+            # debug
+            self.trie = t
+            self.mapping = mapping
+            self.accent_mapper = accent_mapper
+        return self._author_map_df
+
+    @property
     def database(self):
         """Merged database, with exploded authors."""
         if self._database.empty:
@@ -856,6 +466,415 @@ class Bib2df_Incremental(LibraryBase):
                 self._database[c] = self._database[c].fillna(0)
             self._database.fillna('')
         return self._database
+
+    @staticmethod
+    def parse_line(entry):
+        result = {}
+
+        # Step 1: Extract type and tag
+        # windows GS bibtex pastes come in with \r\n
+        entry = entry.replace('\r\n  ', '\n')
+        header_match = re.match(r'@?(\w+)\{([^,]+),', entry)
+        if not header_match:
+            logger.error("Error: Unable to parse entry header.")
+            return None
+        result['type'], result['tag'] = header_match.groups()
+
+        # Step 2: Remove header and final trailing '}'
+        body = entry[header_match.end():].strip()
+        if body.endswith('}'):
+            body = body[:-1].strip() + ",\n"
+
+        for m in re.finditer(r'([a-zA-Z\-]+) = {(.*?)},\n', body, flags=re.DOTALL):
+            try:
+                k, v = m.groups()
+                result[k] = v
+            except ValueError:
+                logger.info('going slow')
+                return Bib2df_Incremental.parse_line_slow(entry)
+        return result
+
+    @staticmethod
+    def parse_line_slow(entry):
+        result = {}
+
+        # Step 1: Extract type and tag
+        header_match = re.match(r'(\w+)\{([^,]+),', entry)
+        if not header_match:
+            logger.error("Error: Unable to parse entry header.")
+            return None
+        result['type'], result['tag'] = header_match.groups()
+
+        # Step 2: Remove header and final trailing '}'
+        body = entry[header_match.end():].strip()
+        if body.endswith('}'):
+            body = body[:-1].strip()
+
+        # Step 3: Find all key = { positions
+        matches = list(re.finditer(r'([a-zA-Z\-]+) = \{', body))
+        n = len(matches)
+
+        for i, match in enumerate(matches):
+            key = match.group(1)
+            val_start = match.end()
+            val_end = matches[i + 1].start() if i + 1 < n else len(body)
+
+            # Strip off the trailing "}," (assumes always ",\n" after value)
+            value = body[val_start:val_end].rstrip().rstrip(',')
+            if value.endswith('}'):
+                value = value[:-1].rstrip()
+
+            result[key] = value
+
+        return result
+
+    @staticmethod
+    def distinct(column_name, df):
+        """Return distinct occurrences of col c in df."""
+        # signature changed from mendeley version
+        if df is None or df.empty:
+            return []
+        if column_name == 'author':
+            return sorted(
+                set(author.strip() for s in df.author.dropna() for author in s.split(" and "))
+            )
+        else:
+            return sorted(set([i for i in df[column_name] if i != '']))
+
+    def tex_to_unicode(self, s_in: str) -> str:
+        """
+        Tex codes to Unicode for a string and removing braces with single character.
+
+        Errors are added to self._last_decode and looked up in the dictionary
+        self.errors_mapper. Work iteratively: run, look at errors, add or update
+        entries in self.errors_mapper.
+        """
+        if pd.isna(s_in):
+            return s_in
+        try:
+            s = self._r_brace2.sub(r'\1', s_in.encode('latin1').decode('latex'))
+            s = self._r_brace1.sub(r'\1', s)
+            if s.find(',') > 0 and s == s.upper():
+                # title case what appear to be names (comma) that are all caps
+                s = s.title()
+            return s
+        except ValueError as e:
+            s = self.errors_mapper.get(s_in, s_in)
+            if s_in not in self.errors_mapper:
+                self._last_decode.append(s_in)
+            return s
+
+    def map_tags(self):
+        """
+        Remap the tags into standard AuthorYYYY[a-z] format for named df.
+
+        Saves a dataframe showing what was done as part of import.
+
+        Updated to use reference library.
+        """
+        # pattern to remove non-bibtex like characters
+        df = self.ported_df[['author', 'editor', 'year', 'tag', 'title']].copy()
+        # figure out what the tag "should be"
+        pat = r" |\.|\{|\}|\-|'"
+        a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
+        e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(pat, '', regex=True)
+        y = df['year'].map(safe_int)
+        # the standardized tag, standard_tag (stem)
+        df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
+
+        noans = df.standard_tag[df.standard_tag == 'NOTAG']
+        if len(noans):
+            logger.warning(f'WARNING: Suggested tags failed for {len(noans)} items')
+            logger.warning('YOU NEED TO FIX THIS!')
+            logger.info(noans)
+
+        # make the proposed tags, build lists as you go with no duplicates
+        if self.reference_library != EMPTY_LIBRARY:
+            # library is aware and returns tag allocator on [] if
+            # if has no database
+            self.reference_library.reset_tag_allocator()
+            df['proposed_tag'] = [self.reference_library.next_tag(a, y)
+                                for a, y in zip(np.where(a != '', a, e), y)]
+        else:
+            # make the proposed tags, build lists as you go with no duplicates
+            ta = TagAllocator([])
+            df['proposed_tag'] = df.standard_tag.map(ta)
+            df = df.sort_values('proposed_tag')
+
+        # check all unique
+        non_uq_tags = df.loc[df.proposed_tag.duplicated(keep=False)]
+        if len(non_uq_tags):
+            logger.warning(f'Non-unique tags {len(non_uq_tags) = }')
+            print(non_uq_tags)
+            logger.info(set(non_uq_tags.proposed_tag))
+            raise ValueError('Non-unique proposed tags')
+        # enforce unique
+        assert df.proposed_tag.is_unique, 'ERROR: proposed tags are not unique'
+
+        # save for audit purposes
+        self.save_audit_file(df, '.tag-mapping')
+
+        # actually make the change to ported_df
+        self.ported_df['tag'] = df['proposed_tag']
+
+    def author_mapper(self):
+        """dict mapper for author name."""
+        # dropped manual fixes
+        return  {k: v for k, v in self.author_map_df[['original', 'proposed']].values}
+
+    def map_authors(self, df_name):
+        """Actually apply the author mapper to the author column."""
+        df = getattr(self, df_name)
+        am = self.author_mapper()
+
+        def f(x):
+            sx = x.split(' and ')
+            msx = map(lambda x: am.get(x, x), sx)
+            return ' and '.join(msx)
+
+        df.author = df.author.map(f)
+        # audit
+        amdf = pd.DataFrame(am.items(), columns=['key', 'value'])
+        self.save_audit_file(amdf, '.author-mapping')
+
+    def import_bibtex_file(self):
+        """
+        The work happens here! Do the actual import, and
+        normalize each text-based field.
+
+        Runs through each task in turn, see comments.
+
+        For the initial port choose run_add_hoc=True, but
+        for incremental updates use False.
+
+        Updated to remove ad_hoc adjustments, dropped extract citations
+        from abstract, tags use library, etc.
+
+        Called automatically by ported_df property if needed.
+        """
+        logger.info('Running import_bibtex_file to create ported_df')
+        kept_fields = [i for i in self.raw_df.columns if i not in self._omitted_bibtex_fields]
+        self._ported_df = self.raw_df[kept_fields].copy()
+
+        # ============================================================================================
+        # author: initials, extend, accents - either from reference library or self.raw_df
+        # if a new import
+        self.map_authors('_ported_df')
+
+        # ensure other edited fields are present
+        # this may not be the case for small imports
+        for f in self._base_fields:
+            if f not in self._ported_df:
+                logger.debug('Imported df missing %s - adding', f)
+                # probably a string?
+                self._ported_df[f] = ""
+
+        # ============================================================================================
+        # de-tex other text fields
+        self._all_unicode_errors = {}
+        for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
+                  'editor', 'mendeley-tags']:
+            self._last_decode = []
+            self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
+            if len(self._last_decode):
+                logger.info(f'\tField: {f}\t{len(self._last_decode) = }')
+                self._all_unicode_errors[f] = self._last_decode.copy()
+            logger.debug(f'Fixed {f}')
+
+        # audit unicode errors
+        ans = []
+        for k, v in self._all_unicode_errors.items():
+            for mc in v:
+                ans.append([k, mc])
+        temp = pd.DataFrame(ans, columns=['field', 'miscode'])
+        self.save_audit_file(temp, '.tex-unicode-errors')
+
+        # ============================================================================================
+        # keywords
+        # paper's key words - never used these, they are included in _omitted_bibtex_fields
+        # add code here for alternative treatment
+
+        # ============================================================================================
+        # mendeley-tags: these are things like my WangR or Delbaen or PMM
+        # nothing to do here --- just carry over
+
+        # ============================================================================================
+        # citations: figure number of citations from my notes in the abstract - DROPPED
+        # dict index -> number of citations, default = 0
+
+        # ============================================================================================
+        # edition: normalize edition field
+        self._ported_df.edition = self._ported_df.edition.replace(self._edition_mapper)
+
+        # ============================================================================================
+        # tags: normalize and resolve duplicate TAGS
+        self.map_tags()
+
+        # ============================================================================================
+        # files: files are entirely separately managed, field just pulled over
+        # see code in file_field_df
+
+        # set tag as the index
+        # self._ported_df = self._ported_df.set_index('tag')
+
+        # ============================================================================================
+        # final checks and balances, and write out info
+        self.save_audit_file(self.raw_df, '.raw-df')
+        self.save_audit_file(self._ported_df, '.ported-df')
+        import_info = pd.DataFrame({
+            'created': str(self.timestamp),
+            'bibtex_file': self.bibtex_file_path.absolute(),
+            'raw_entries': len(self.raw_df),
+            'ported_entries': len(self._ported_df)
+        }.items(), columns=['key', 'value'])
+        self.save_audit_file(import_info, '.audit-info')
+        return import_info
+
+    def raw_no_file(self):
+        """Raw entries with no files listed."""
+        return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
+
+    def import_analysis(self, strict=False):
+        """
+        Prepare for import of references/documents from a BibTeX file into
+        self.reference_library (may be None for a new library).
+
+        Does the same work as interactive_import, but guesses. Nothing
+        is actually imported or written.
+
+        If strict, counts adding columns (which is done as part of the
+        import as a change.) Usually don't want this.
+        """
+        results = []
+        for (left, raw_input), (right, revised) in zip(
+                self.raw_df.iterrows(), self.ported_df.reset_index(drop=False).iterrows()):
+            tag_in = raw_input.tag
+            # trim for ligo problem
+            tag = revised.tag[:20]
+            title = revised.title
+            dup_msg = self._possible_duplicate(revised, right) or ""
+            change = "-" if self._compare(raw_input, revised) else "CHANGED"
+            if change == "CHANGED":
+                temp = []
+                for c in revised.index:
+                    if c in raw_input.index and revised[c] != raw_input[c]:
+                        temp.append(c)
+                if temp:
+                    change_cols = ','.join(temp)
+                else:
+                    # ? must be an index change
+                    change = '-'
+                    if strict:
+                        index_change = set(revised.index) - set(raw_input.index)
+                        change_cols = 'idx: ' + ','.join(index_change)
+                    else:
+                        change_cols = ''
+            else:
+                change_cols = " no chg "
+            #
+            results.append([tag_in, tag,
+                        title, dup_msg,
+                        raw_input.author, revised.author,
+                        change, change_cols])
+        result_df = pd.DataFrame(results,
+            columns=[
+                'tag_in', 'tag_ported',
+                'title', 'dup_msg',
+                'author_in', 'author_ported',
+                'change',
+                'change_cols',
+            ]).sort_values(['dup_msg','change', 'change_cols'], ascending=[True, False, True])
+
+        return result_df
+
+    def update_library(self, save=True):
+        """
+        Update self.library underlying files and save.
+
+        This will add ALL rows discovered...so make sure they are
+        what you want before you run! Look at import_analysis!
+        """
+        self.reference_library.update(self)
+
+    def save_audit_file(self, df, suffix):
+        """Save df audit file with a standard filename."""
+        fn = self.bibtex_file_path.stem + suffix + '.csv'
+        p = self._audit_dir_path / fn
+        df.to_csv(p, encoding='utf-8')
+        logger.info(f'Audit: dataFrame, {len(df) = }, saved to {p.name}.')
+        # check about errors mapper
+        if self.errors_mapper and not self._errors_mapper_saved:
+            fn = self._audit_dir_path / "errors_mapper.json"
+            with open(fn, 'w', encoding='utf-8') as f:
+                json.dump(self.errors_mapper, f, indent=4)
+            self._errors_mapper_saved = True
+
+    def show_audit_files(self, top=5, trim=100, bib=False):
+        """qd all the audit files."""
+        if bib:
+            for f in self._audit_dir_path.glob("*.bib"):
+                print(f.name)
+                print("=" * len(f.name))
+                print(f'Lines trimmed to {trim} characters.')
+                txt = f.read_text()
+                txt = '\n'.join([i[:trim] for i in txt.split('\n')])
+                print(txt)
+                print()
+
+        for f in self._audit_dir_path.glob("*.json"):
+            print(f.name)
+            print("=" * len(f.name))
+            print(f.read_text())
+            print()
+
+        if self.qd is None:
+            logger.error('Must provide qd to use show_ functions')
+            return
+        for f in self._audit_dir_path.glob("*.csv"):
+            df = pd.read_csv(f, encoding='utf-8-sig')
+            self.qd(df.head(top), caption=f.stem, tikz=False)
+
+    def show_generated_dfs(self):
+        """Use self.qd to display the main generated dfs."""
+        if self.qd is None:
+            logger.error('Must provide qd to use show_ functions')
+            return
+        for nm in ('df', 'ported_df', 'ref_df', 'doc_df', 'ref_doc_df'):
+            d = getattr(self, nm, None)
+            if d is not None:
+                self.qd(d, caption=nm)
+
+    def show_unicode_errors(self):
+        """Accumulated Unicode errors."""
+        if self._all_unicode_errors is None:
+            return None
+        ans = set()
+        for k, v in self._all_unicode_errors.items():
+            ans = ans.union(set([c for line in v for c in line if len(c.encode('utf-8')) > 1]))
+        return ans
+
+    @property
+    def _audit_dir_path(self):
+        """
+        Time-stamped location to save audit data.
+
+        If created, copies the input bibtex file (hard link).
+        """
+        if self.__audit_dir_path is None:
+            if self.debug_mode:
+                self.__audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
+            else:
+                self.__audit_dir_path = BASE_DIR / "imports" / self.timestamp
+            # ensure it exists
+            self.__audit_dir_path.mkdir(parents=True, exist_ok=True)
+            logger.info('Created audit path at %s', str(self.__audit_dir_path))
+            # audit the bibtex input file
+            p_ = self.__audit_dir_path / self.bibtex_file_path.name
+            if p_.exists():
+                logger.warning('REALLY WEIRD - audit of input bibtex already exists.')
+                p_.unlink()
+            p_.hardlink_to(self.bibtex_file_path)
+        return self.__audit_dir_path
 
     # GEMINI CODE for interactive update library
     @staticmethod
@@ -933,64 +952,3 @@ class Bib2df_Incremental(LibraryBase):
             return False
         return revised.equals(orig.loc[revised.index])
 
-    def import_analysis(self, strict=False):
-        """
-        Prepare for import of references/documents from a BibTeX file into
-        self.reference_library (may be None for a new library).
-
-        Does the same work as interactive_import, but guesses. Nothing
-        is actually imported or written.
-
-        If strict, counts adding columns (which is done as part of the
-        import as a change.) Usually don't want this.
-        """
-        results = []
-        for (left, raw_input), (right, revised) in zip(
-                self.raw_df.iterrows(), self.ported_df.reset_index(drop=False).iterrows()):
-            tag_in = raw_input.tag
-            # trim for ligo problem
-            tag = revised.tag[:20]
-            title = revised.title
-            dup_msg = self._possible_duplicate(revised, right) or ""
-            change = "-" if self._compare(raw_input, revised) else "CHANGED"
-            if change == "CHANGED":
-                temp = []
-                for c in revised.index:
-                    if c in raw_input.index and revised[c] != raw_input[c]:
-                        temp.append(c)
-                if temp:
-                    change_cols = ','.join(temp)
-                else:
-                    # ? must be an index change
-                    change = '-'
-                    if strict:
-                        index_change = set(revised.index) - set(raw_input.index)
-                        change_cols = 'idx: ' + ','.join(index_change)
-                    else:
-                        change_cols = ''
-            else:
-                change_cols = " no chg "
-            #
-            results.append([tag_in, tag,
-                        title, dup_msg,
-                        raw_input.author, revised.author,
-                        change, change_cols])
-        result_df = pd.DataFrame(results,
-            columns=[
-                'tag_in', 'tag_ported',
-                'title', 'dup_msg',
-                'author_in', 'author_ported',
-                'change',
-                'change_cols',
-            ]).sort_values(['dup_msg','change', 'change_cols'], ascending=[True, False, True])
-
-        return result_df
-
-    def update_library(self, save=True):
-        """
-        Update self.library underlying files and save.
-
-        This will add ALL rows discovered...so make sure they are
-        what you want before you run! Look at import_analysis!
-        """
-        self.reference_library.update(self)

@@ -88,15 +88,15 @@ class Library(LibraryBase):
         return f'Library({self.config_path.name})'
 
     @property
+    def name(self):
+        return self.config.name if self.config else "~~no name~~"
+
+    @property
     def config_df(self):
         if self._config_df.empty:
             self._config_df = pd.Series(self.config.model_dump()).to_frame('value')
             self._config_df.index.name = 'key'
         return self._config_df
-
-    @property
-    def name(self):
-        return self.config.name if self.config else "~~no name~~"
 
     @property
     def doc_df(self):
