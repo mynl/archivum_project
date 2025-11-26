@@ -29,12 +29,12 @@ from rapidfuzz import distance, fuzz
 import numpy as np
 import pandas as pd
 
-from . import BASE_DIR, APP_NAME, EMPTY_LIBRARY
-from .utilities import (remove_accents, make_qd,
+from . import BASE_DIR, APP_NAME, EMPTY_LIBRARY, DEBUG_DIR
+from . utilities import (remove_accents, make_qd,
                         accent_mapper_dict, safe_int,
                         TagAllocator)
 from . trie import Trie
-from .library import LibraryBase
+from . library_base import LibraryBase
 
 # set to True to override where audit files are stored to tmp
 # False is default
@@ -182,33 +182,42 @@ class Bib2df_Incremental(LibraryBase):
 
         Audit mode is just ALWAYS ON - you can delete the files if you like!
         """
-        self.bibtex_file_path = bibtex_file_path
+        self.bibtex_file_path = Path(bibtex_file_path)
+        self.name = self.bibtex_file_path.stem
         assert self.bibtex_file_path.exists(), 'Bibtex file must exist'
-        self.pdf_dir = pdf_dir
+        self.pdf_dir = Path(pdf_dir)
         assert self.pdf_dir.exists(), 'PDF directory does not exist'
         self.debug_mode = debug_mode
         self.reference_library = reference_library or EMPTY_LIBRARY
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
         self.remap_dashes = remap_dashes
+
         # if you write audits, also save  - this is a flag
         self._errors_mapper_saved = False
         # for properties
-        self._raw_df = None
-        self._author_map_df = None
-        self.all_unicode_errors = None
-        self._vfile_df = None
-        self._doc_df = None
-        self._ref_doc_df = None
-        self._ref_df = None
-        self._best_match_df = None
-        self._ref_no_doc = None
-        self._ported_df = None    # the "raw" ported df, includes file column, but otherwise like ref_df
-        self._database = None
-        self.last_missing_vfiles = None
-        self._audit_dir_path = None
+        self._raw_df = pd.DataFrame()
+        self._author_map_df = pd.DataFrame()
+        self._vfile_df = pd.DataFrame()
+        self._doc_df = pd.DataFrame()
+        self._ref_doc_df = pd.DataFrame()
+        self._ref_df = pd.DataFrame()
+        self._best_match_df = pd.DataFrame()
+        self._ref_no_doc = pd.DataFrame()
+        self._ported_df = pd.DataFrame()    # the "raw" ported df, includes file column, but otherwise like ref_df
+        self._database = pd.DataFrame()
 
-        # timestamp for audit files
+        # for audit and debugging
+        self._last_missing_vfiles = None
+        self._last_decode = None
+        self._audit_dir_path = None
+        self._all_unicode_errors = None
+        # for duplicate detection: normalized titles and doi
+        self._existing_title_norm = None
+        self._dois = None
+        self._self_test = False
+
+        # timestamp for audit files and arc-source for imports
         self.timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
         self.qd = qd or print
 
@@ -221,7 +230,7 @@ class Bib2df_Incremental(LibraryBase):
         """
         if self._audit_dir_path is None:
             if self.debug_mode:
-                self._audit_dir_path = Path('\\tmp\\archivum_debug') / "imports" / self.timestamp
+                self._audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
             else:
                 self._audit_dir_path = BASE_DIR / "imports" / self.timestamp
             # ensure it exists
@@ -238,8 +247,8 @@ class Bib2df_Incremental(LibraryBase):
     @property
     def raw_df(self):
         """DataFrame of raw(ish) information read directly from bibtex file."""
-        if self._raw_df is None:
-            logger.info('df creating property ***************************************')
+        if self._raw_df.empty:
+            logger.info('===>> creating raw_df property <<====')
             # read text
             self.txt = self.bibtex_file_path.read_text(encoding='utf-8').translate(self._char_map)
             if self.remap_dashes:
@@ -349,11 +358,14 @@ class Bib2df_Incremental(LibraryBase):
         DataFrame of author name showing a transition to a normalized form.
 
         Adjusts for initials (puts periods in), takes the longest ! name
-        using a Trie, adjusts for accents (guess work!)
+        using a Trie, adjusts for accents (guess work!).
+
+        For a new import into an empty library, needs to be run
+        on the authors in raw_df to prime the pump
         """
-        if self._author_map_df is None:
+        if self._author_map_df.empty:
             df = pd.DataFrame({'original': self.distinct('author', self.raw_df)})
-            self.last_decode = []
+            self._last_decode = []
             df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
             # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials
             df['spaced'] = df.unicoded.str.replace(r'(?<=, )([A-Z]{2,3})\b',
@@ -363,12 +375,19 @@ class Bib2df_Incremental(LibraryBase):
             # diverge from Bib2df: use the reference library
             t = Trie()
             # distinct returns a set
-            if self.reference_library != EMPTY_LIBRARY:
+            if self.reference_library != EMPTY_LIBRARY and \
+                            not self.reference_library.ref_df.empty:
+
                 ref_authors = self.distinct("author", self.reference_library.ref_df)
+                logger.warning('Building author Trie from reference library, '
+                                f'{len(ref_authors)} distinct authors')
             else:
-                # no reference authors
-                ref_authors = []
-            logger.warning(f'Building author Trie from reference library, {len(ref_authors)} distinct authors')
+                # no reference authors in the reference library
+                # e.g., it could be a start from scratch library
+                # prime the pump with the author names we have
+                ref_authors = self.distinct("author", self.raw_df)
+                logger.warning('Building author Trie from self.raw_df - no reference library authors; '
+                                f'{len(ref_authors) = } distinct authors')
             for name in ref_authors:
                 t.insert(name.strip('. '))
             # mapping will go from name to longest completion
@@ -391,7 +410,7 @@ class Bib2df_Incremental(LibraryBase):
             df['accents'] = df.longest.replace(accent_mapper)
             # initial  periods
             df['proposed'] = df.accents.str.replace(r'(\b)([A-Z])( |$)', r'\1\2.\3', case=True, regex=True)
-            logger.info(f'Field: authors\nDecode errors: {len(self.last_decode) = }')
+            logger.info(f'Field: authors\nDecode errors: {len(self._last_decode) = }')
             self._author_map_df = df
             # debug
             self.trie = t
@@ -403,8 +422,8 @@ class Bib2df_Incremental(LibraryBase):
     def distinct(column_name, df):
         """Return distinct occurrences of col c in df."""
         # signature changed from mendeley version
-        if df is None:
-            return None
+        if df is None or df.empty:
+            return []
         if column_name == 'author':
             return sorted(
                 set(author.strip() for s in df.author.dropna() for author in s.split(" and "))
@@ -416,7 +435,7 @@ class Bib2df_Incremental(LibraryBase):
         """
         Tex codes to Unicode for a string and removing braces with single character.
 
-        Errors are added to self.last_decode and looked up in the dictionary
+        Errors are added to self._last_decode and looked up in the dictionary
         self.errors_mapper. Work iteratively: run, look at errors, add or update
         entries in self.errors_mapper.
         """
@@ -432,21 +451,21 @@ class Bib2df_Incremental(LibraryBase):
         except ValueError as e:
             s = self.errors_mapper.get(s_in, s_in)
             if s_in not in self.errors_mapper:
-                self.last_decode.append(s_in)
+                self._last_decode.append(s_in)
             return s
 
-    def author_last_multiple_firsts(self):
-        """Last names with multiple firsts, showing the parts."""
-        df = self.author_map_df
-        df[['last', 'rest']] = df['proposed'].str.split(',', n=1, expand=True)
-        df['rest'] = df['rest'].str.strip()
+    # def author_last_multiple_firsts(self):
+    #     """Last names with multiple firsts, showing the parts."""
+    #     df = self.author_map_df
+    #     df[['last', 'rest']] = df['proposed'].str.split(',', n=1, expand=True)
+    #     df['rest'] = df['rest'].str.strip()
 
-        return (df.fillna('')
-                .groupby('last')
-                .apply(lambda x:
-                pd.Series([len(x), sorted(set(x.rest))], index=('n', 'set')),
-                include_groups=False)
-                .query('n>1'))
+    #     return (df.fillna('')
+    #             .groupby('last')
+    #             .apply(lambda x:
+    #             pd.Series([len(x), sorted(set(x.rest))], index=('n', 'set')),
+    #             include_groups=False)
+    #             .query('n>1'))
 
     def author_mapper(self):
         """dict mapper for author name."""
@@ -470,7 +489,8 @@ class Bib2df_Incremental(LibraryBase):
 
     def import_bibtex_file(self):
         """
-        Normalize each text-based field.
+        The work happens here! Do the actual import, and
+        normalize each text-based field.
 
         Runs through each task in turn, see comments.
 
@@ -479,13 +499,16 @@ class Bib2df_Incremental(LibraryBase):
 
         Updated to remove ad_hoc adjustments, dropped extract citations
         from abstract, tags use library, etc.
+
+        Called automatically by ported_df property if needed.
         """
         logger.info('Running import_bibtex_file to create ported_df')
         kept_fields = [i for i in self.raw_df.columns if i not in self._omitted_bibtex_fields]
         self._ported_df = self.raw_df[kept_fields].copy()
 
         # ============================================================================================
-        # author: initials, extend, accents
+        # author: initials, extend, accents - either from reference library or self.raw_df
+        # if a new import
         self.map_authors('_ported_df')
 
         # ensure other edited fields are present
@@ -498,19 +521,19 @@ class Bib2df_Incremental(LibraryBase):
 
         # ============================================================================================
         # de-tex other text fields
-        self.all_unicode_errors = {}
+        self._all_unicode_errors = {}
         for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
                   'editor', 'mendeley-tags']:
-            self.last_decode = []
+            self._last_decode = []
             self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
-            if len(self.last_decode):
-                logger.info(f'\tField: {f}\t{len(self.last_decode) = }')
-                self.all_unicode_errors[f] = self.last_decode.copy()
+            if len(self._last_decode):
+                logger.info(f'\tField: {f}\t{len(self._last_decode) = }')
+                self._all_unicode_errors[f] = self._last_decode.copy()
             logger.debug(f'Fixed {f}')
 
         # audit unicode errors
         ans = []
-        for k, v in self.all_unicode_errors.items():
+        for k, v in self._all_unicode_errors.items():
             for mc in v:
                 ans.append([k, mc])
         temp = pd.DataFrame(ans, columns=['field', 'miscode'])
@@ -550,7 +573,7 @@ class Bib2df_Incremental(LibraryBase):
         self.save_audit_file(self._ported_df, '.ported-df')
         import_info = pd.DataFrame({
             'created': str(self.timestamp),
-            'bibtex_file': self.bibtex_file_path.resolve(),
+            'bibtex_file': self.bibtex_file_path.absolute(),
             'raw_entries': len(self.raw_df),
             'ported_entries': len(self._ported_df)
         }.items(), columns=['key', 'value'])
@@ -563,10 +586,10 @@ class Bib2df_Incremental(LibraryBase):
 
     def show_unicode_errors(self):
         """Accumulated Unicode errors."""
-        if self.all_unicode_errors is None:
+        if self._all_unicode_errors is None:
             return None
         ans = set()
-        for k, v in self.all_unicode_errors.items():
+        for k, v in self._all_unicode_errors.items():
             ans = ans.union(set([c for line in v for c in line if len(c.encode('utf-8')) > 1]))
         return ans
 
@@ -574,7 +597,7 @@ class Bib2df_Incremental(LibraryBase):
         """Entries with no files listed."""
         return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
 
-    def map_tags(self, df_name='ported_df'):
+    def map_tags(self):
         """
         Remap the tags into standard AuthorYYYY[a-z] format for named df.
 
@@ -583,7 +606,7 @@ class Bib2df_Incremental(LibraryBase):
         Updated to use reference library.
         """
         # pattern to remove non-bibtex like characters
-        df = getattr(self, df_name)[['author', 'editor', 'year', 'tag', 'title']].copy()
+        df = self.ported_df[['author', 'editor', 'year', 'tag', 'title']].copy()
         # figure out what the tag "should be"
         pat = r" |\.|\{|\}|\-|'"
         a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
@@ -600,7 +623,8 @@ class Bib2df_Incremental(LibraryBase):
 
         # make the proposed tags, build lists as you go with no duplicates
         if self.reference_library != EMPTY_LIBRARY:
-            # reset ref lib tag gen
+            # library is aware and returns tag allocator on [] if
+            # if has no database
             self.reference_library.reset_tag_allocator()
             df['proposed_tag'] = [self.reference_library.next_tag(a, y)
                                 for a, y in zip(np.where(a != '', a, e), y)]
@@ -610,8 +634,6 @@ class Bib2df_Incremental(LibraryBase):
             df['proposed_tag'] = df.standard_tag.map(ta)
             df = df.sort_values('proposed_tag')
 
-        # df = df.sort_values('proposed_tag')
-
         # check all unique
         non_uq_tags = df.loc[df.proposed_tag.duplicated(keep=False)]
         if len(non_uq_tags):
@@ -619,22 +641,21 @@ class Bib2df_Incremental(LibraryBase):
             print(non_uq_tags)
             logger.info(set(non_uq_tags.proposed_tag))
             raise ValueError('Non-unique proposed tags')
+        # enforce unique
+        assert df.proposed_tag.is_unique, 'ERROR: proposed tags are not unique'
 
         # save for audit purposes
         self.save_audit_file(df, '.tag-mapping')
 
-        # actually make the change
-        working_df = getattr(self, df_name)
-        working_df['tag'] = df['proposed_tag']
-        # check unique
-        assert working_df.tag.is_unique, 'ERROR: proposed tags are not unique'
+        # actually make the change to ported_df
+        self.ported_df['tag'] = df['proposed_tag']
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
-        fn = self.bibtex_file_path.name + suffix + '.csv'
+        fn = self.bibtex_file_path.stem + suffix + '.csv'
         p = self.audit_dir_path / fn
         df.to_csv(p, encoding='utf-8')
-        logger.info(f'Audit DataFrame {len(df) = } saved to {p.name}.')
+        logger.info(f'Audit: dataFrame, {len(df) = }, saved to {p.name}.')
         # check about errors mapper
         if self.errors_mapper and not self._errors_mapper_saved:
             fn = self.audit_dir_path / "errors_mapper.json"
@@ -684,18 +705,18 @@ class Bib2df_Incremental(LibraryBase):
 
     @property
     def ported_df(self):
-        if self._ported_df is None:
-            logger.info('ported_df creating property ***************************************')
+        if self._ported_df.empty:
+            logger.info('===>> creating ported_df property <<====')
             self.import_bibtex_file()
         return self._ported_df
 
     @property
     def ref_df(self):
         """The reference df contains no file information and has tag NOT as the index."""
-        if self._ref_df is None:
-            logger.info('ref_df creating property ***************************************')
+        if self._ref_df.empty:
+            logger.info('===>> creating ref_df property <<====')
             self._ref_df = self.ported_df.drop(columns='file')#.reset_index(drop=False)
-            self._ref_df['arc-source'] = 'mendeley'
+            self._ref_df['arc-source'] = f"bibtex {self.name} at {self.timestamp}"
         return self._ref_df
 
     @property
@@ -707,13 +728,13 @@ class Bib2df_Incremental(LibraryBase):
         be referenced in library.database.
         Currently only PDFs.
         """
-        if self._doc_df is None:
-            logger.info('doc_df creating property ***************************************')
+        if self._doc_df.empty:
+            logger.info('===>> creating doc_df property <<====')
             pdfs = list(self.pdf_dir.rglob('*.pdf'))
             logger.warning('Found %s afiles (actual pdf files).', len(pdfs))
             ans = []
             for p in pdfs:
-                p = p.resolve()
+                p = p.absolute()
                 stat = p.stat(follow_symlinks=True)
                 ans.append({
                     "name": p.name,
@@ -751,8 +772,8 @@ class Bib2df_Incremental(LibraryBase):
         :C\\:/S/new-papers/Blackwell/1953_Equivalent Comparisons of Experiments.pdf:pdf
         Oddly, empty vfiles are ::
         """
-        if self._vfile_df is None:
-            logger.info('vfile_df creating property ***************************************')
+        if self._vfile_df.empty:
+            logger.info('===>> creating vfile_df property <<====')
             ans = []
             self._file_errs = []
             df = self.ported_df.set_index('tag')
@@ -776,7 +797,7 @@ class Bib2df_Incremental(LibraryBase):
                     self._file_errs.append([tag, 'Attribute', *ref])
             self._vfile_df = pd.DataFrame(ans, columns=['tag', 'drive', 'vfile', 'type'])
             # resolve the file names
-            self._vfile_df.vfile = [str(Path(vf).resolve().as_posix()) for vf in self._vfile_df.vfile]
+            self._vfile_df.vfile = [str(Path(vf).absolute().as_posix()) for vf in self._vfile_df.vfile]
             logger.info(f'Created vfile_df with {len(self._vfile_df)} rows.')
         return self._vfile_df
 
@@ -790,8 +811,8 @@ class Bib2df_Incremental(LibraryBase):
         afiles are actual files that exist in the pdf_path directory.
         """
         # columns are ref_id=tag and afile name
-        if self._ref_doc_df is None:
-            logger.info('ref_doc_df creating property ***************************************')
+        if self._ref_doc_df.empty:
+            logger.info('===>> creating ref_doc_df property <<====')
             actual_files = set(self.doc_df.path)
             logger.info(f'\tFound {len(actual_files)} actual files')
             missing_vfiles = []
@@ -815,13 +836,13 @@ class Bib2df_Incremental(LibraryBase):
                 'path': self.vfile_df['vfile'].replace(matcher).values
             })
             # for ref.
-            self.last_missing_vfiles = missing_vfiles
+            self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
 
     @property
     def database(self):
         """Merged database, with exploded authors."""
-        if self._database is None:
+        if self._database.empty:
             exploded_authors = (
                 self.ref_df.assign(author=self.ref_df.author.str.split(" and "))
                 .explode("author", ignore_index=True)
@@ -846,7 +867,7 @@ class Bib2df_Incremental(LibraryBase):
         s = re.sub(r"[^a-z0-9]+", " ", s)
         return " ".join(s.split())
 
-    def _possible_duplicate(self, ref_row) -> str | None:
+    def _possible_duplicate(self, ref_row, ref_row_idx) -> str | None:
         """
         Heuristic duplicate check: by DOI (if present) and by normalized title.
         Returns a short message if something looks like a duplicate.
@@ -854,7 +875,22 @@ class Bib2df_Incremental(LibraryBase):
         doi = str(ref_row.get("doi", "") or "").strip().lower()
         title = ref_row.get("title", "")
         title_norm = self._normalize_title(title)
-        existing_title_norm = self.reference_library.ref_df.title.map(self._normalize_title)
+
+        # what are we checking against?
+        if self._existing_title_norm is None or self._dois is None:
+            if self.reference_library != EMPTY_LIBRARY and \
+                not self.reference_library.ref_df.empty:
+                self._existing_title_norm = self.reference_library.ref_df.title.map(self._normalize_title)
+                self._dois = self.reference_library.ref_df.doi.astype(str).str.lower().str.strip() if \
+                        'doi' in self.reference_library.ref_df else []
+                self._self_test = False
+            else:
+                # check against itself?
+                logger.info('No reference library...checking duplicates relative to import.')
+                self._existing_title_norm = self.ref_df.title.map(self._normalize_title)
+                self._dois = self.ref_df.doi.astype(str).str.lower().str.strip() if \
+                        'doi' in self.ref_df else []
+                self._self_test = True
 
         def create_message(mask, kind):
             tags = self.reference_library.ref_df.loc[mask, "tag"].tolist()
@@ -873,12 +909,15 @@ class Bib2df_Incremental(LibraryBase):
 
         # DOI check
         if doi and "doi" in self.reference_library.ref_df.columns:
-            mask = self.reference_library.ref_df["doi"].astype(str).str.lower().str.strip() == doi
+            mask = self._dois == doi
+            # when run against itself (import into empty library), not match yourself!
+            if self._self_test: mask[ref_row_idx] = False
             if mask.any():
                 return create_message(mask, 'DOI')
         # Title check
         if title_norm:
-            mask = existing_title_norm == title_norm
+            mask = self._existing_title_norm == title_norm
+            if self._self_test: mask[ref_row_idx] = False
             if mask.any():
                 return create_message(mask, 'Title')
 
@@ -912,7 +951,7 @@ class Bib2df_Incremental(LibraryBase):
             # trim for ligo problem
             tag = revised.tag[:20]
             title = revised.title
-            dup_msg = self._possible_duplicate(revised) or ""
+            dup_msg = self._possible_duplicate(revised, right) or ""
             change = "-" if self._compare(raw_input, revised) else "CHANGED"
             if change == "CHANGED":
                 temp = []
@@ -948,99 +987,10 @@ class Bib2df_Incremental(LibraryBase):
         return result_df
 
     def update_library(self, save=True):
-        """Update self.library underlying files and optionally save."""
+        """
+        Update self.library underlying files and save.
+
+        This will add ALL rows discovered...so make sure they are
+        what you want before you run! Look at import_analysis!
+        """
         self.reference_library.update(self)
-
-    def interactive_import(self):
-        """
-        Interactive import of references/documents from a BibTeX file into
-        self.reference_library (may be None for a new library).
-
-        For each candidate reference:
-          * display the "raw" view as input,
-          * display the normalized view (ref_df row),
-          * indicate which rows have changed,
-          * flag possible duplicates,
-          * prompt user to [a]ccept / [s]kip / [q]uit.
-
-        Accepted items are appended to the library. Skipped items are written
-        to a BibTeX file in the run directory for later manual editing.
-        """
-        accepted_tags: list[str] = []
-        skipped_raw_rows: list[pd.Series] = []
-        qdp = make_qd(max_string_length=60, display=print, max_rows=10, tikz=False)
-        count = 0
-        total = len(self.ported_df)
-        for (left, raw_input), (right, revised) in zip(
-                self.raw_df.iterrows(), self.ported_df.reset_index(drop=False).iterrows()):
-            tag = revised.tag
-            dup_msg = self._possible_duplicate(revised)
-            if self._compare(raw_input, revised) and not dup_msg:
-                print(f'{tag = } no changes and no obvious duplicates found; ACCEPTED.')
-                accepted_tags.append(tag)
-                continue
-            c = pd.concat((raw_input, revised), axis=1, keys=['Original', 'Revised'])
-            c = c.loc[~c.Revised.isna()]
-            c['Equal'] = c.Original == c.Revised
-            c['Equal'] = ['~yes~' if i else 'CHANGE!' for i in c['Equal']]
-            count += 1
-            print(f'{count} / {total} ({count/total:.0%}): {tag}')
-            qdp(c, show_index=True)
-            if dup_msg:
-                m = f"WARNING: {dup_msg}"
-                print('*' * len(m))
-                print(m)
-                print('*' * len(m))
-                print()
-            while True:
-                ans = input("[a]ccept / [s]kip / [q]uit? [a/s/q]: ").strip().lower()
-                if ans in {"", "a", "s", "q"}:
-                    break
-                print("Please enter 'a', 's', or 'q' for accept, skip, or quit.")
-            if ans in {"", "a"}:
-                accepted_tags.append(tag)
-            elif ans == "s":
-                skipped_raw_rows.append(raw_input)
-            elif ans == "q":
-                # break out of the outer loop
-                break
-
-        # deal with the skipped rows
-        skipped_df = pd.concat(skipped_raw_rows, axis=1).T
-        self.save_audit_file(skipped_df, "skipped_raw_rows")
-
-        # If nothing accepted, just write skipped bibtex (if any) and return.
-        if not accepted_tags:
-            print(f'No new references added, {len(skipped_df)} rows unprocessed')
-            return None, None, None, skipped_df
-
-        accepted_tags_set = set(accepted_tags)
-        assert len(accepted_tags_set) == len(accepted_tags), 'Set accepted != accepted?'
-
-        # Build ref/doc/ref_doc additions based on accepted tags.
-        # ref and ported differ only in dropping the file column
-        ref_add = self.ref_df.loc[self.ref_df["tag"].isin(accepted_tags_set)].copy()
-
-        # Restrict ref_doc and doc_df to the accepted refs.
-        rd_candidates = self.ref_doc_df[self.ref_doc_df["tag"].isin(accepted_tags_set)].copy()
-        new_paths = set(rd_candidates["path"])
-        doc_add_candidates = self.doc_df[self.doc_df["path"].isin(new_paths)].copy()
-
-        # Drop any docs we already know about.
-        existing_paths = set(self.reference_library.doc_df["path"])
-        doc_add = doc_add_candidates[~doc_add_candidates["path"].isin(existing_paths)].copy()
-
-        # And restrict ref_doc to only the retained docs.
-        kept_paths = set(doc_add["path"])
-        rd_add = rd_candidates[rd_candidates["path"].isin(kept_paths)].copy()
-
-
-        #?? presumably
-        # self.reference_library.save()
-
-        # Write skipped entries (if any) to a "pip" BibTeX file.
-        print(f'{len(ref_add) = } references and {len(doc_add) = } documents added.')
-        if skipped_raw_rows:
-            print(f'{len(skipped_raw_rows)} skipped rows written to .skipped_raw_rows.csv audit file.')
-
-        return ref_add, doc_add, rd_add, skipped_df

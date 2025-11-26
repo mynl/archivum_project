@@ -1,12 +1,16 @@
 """
 Configuration model for archivum.
 """
+import datetime as dt
+import logging
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import List, Literal, Optional, Callable, Any
 from pydantic import BaseModel, Field, ConfigDict
 import yaml
 
-from . import APP_NAME
+from . import APP_NAME, BASE_DIR
+
+logger = logging.getLogger(__name__)
 
 class Configurator(BaseModel):
     model_config = ConfigDict(
@@ -78,3 +82,71 @@ class Configurator(BaseModel):
                     width=100,
                     indent=2
                 )
+
+
+def create_config_interactive(
+    target_path: Path,
+    input_func: Callable[[str], str] = input
+) -> None:
+    """
+    Interactively create a Configurator instance and save it.
+
+    Saved to BASE_DIR unless target_path has a root (i.e., starts /).
+
+    Args:
+        target_path: Destination for the config file.
+        input_func: Function to capture input (allows injection of mock
+                    for testing or rich.prompt).
+    """
+
+    def rooted(path):
+        """If path not rooted, make relative to BASE_DIR."""
+        path = Path(path)
+        if not path.root:
+            path = BASE_DIR / path
+        return path.absolute()
+
+    def prompt(label: str, default: Any) -> str:
+        """Helper to handle defaults in the prompt."""
+        response = input_func(f"{label} [{default}]: ")
+        return response.strip() or str(default)
+
+    target_path = rooted(target_path).with_suffix(f".{APP_NAME}-config")
+    logger.info(f"Generating configuration at: {target_path}")
+
+    # Only prompt for critical paths that likely vary per user
+    # Rely on Pydantic defaults for the rest
+    name = prompt("Library Name", target_path.stem.replace("-", " "))
+
+    timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
+    description = prompt("Description", f"New library created {timestamp}")
+
+    pdf_input = prompt("PDF Directory", "pdfs")
+    pdf_dir = str(rooted(pdf_input))
+
+    name_ = target_path.with_suffix(".bib")
+    bib_input = prompt("BibTeX output file", name_)
+    bib_file = str(rooted(bib_input))
+
+    # Create instance
+    config = Configurator(
+        name=name,
+        ref_columns=["tag", "type", "title", "year", "author", "journal", "volume",
+                    "number", "month", "pages", "booktitle", "editor", "edition",
+                    "chapter", "doi", "isbn", "publisher", "institution", "address",
+                    "url", "mendeley-tags", "arc-citations", "arc-source"],
+        description=description,
+        pdf_dir_name=pdf_dir,
+        bibtex_file=bib_file,
+        # Add other fields here if you want to prompt for them
+    )
+
+    # Save
+    try:
+        config.save(target_path, backup=False)
+        print(f"Success. Config saved to {target_path}")
+    except Exception as e:
+        print(f"Error saving config: {e}")
+
+    return config
+

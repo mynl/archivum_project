@@ -23,112 +23,8 @@ from . querex import querex_work
 from . utilities import TagAllocator
 from . document import Document
 from . config import Configurator
-
+from . library_base import LibraryBase
 logger = logging.getLogger(__name__)
-
-
-class LibraryBase:
-    """Some base class functions for Library."""
-    def refs_no_docs(self):
-        """Return tags to refs with no entries in ref_doc, indices missing an afile."""
-        idx = sorted(set(self.ref_df.tag) - set(self.ref_doc_df.tag))
-        return self.ref_df.query('tag in @idx')
-
-    def docs_no_refs(self):
-        """Return docs with no associated refs."""
-        paths = set(self.doc_df.path) - set(self.ref_doc_df.path)
-        df = self.doc_df.loc[self.doc_df.path.isin(paths)].copy()
-        df['filename'] = df.path.map(lambda x: Path(x).name)
-        df['parent'] = df.path.map(lambda x: Path(x).parent.name)
-        df = df[['name', 'filename', 'parent', 'path', 'mod', 'create', 'access', 'node', 'links', 'size',
-                       'suffix', 'hash']]
-        return df
-
-    def stats(self):
-        """Statistics about refs (tags), docs (paths)."""
-        data = {}
-
-        # Configuration for the two rows
-        views = [
-            ('references', len(self.ref_df), 'tag'),
-            ('documents', len(self.doc_df), 'path')
-        ]
-
-        for name, total, group_col in views:
-            # Calculate counts per group
-            counts = self.ref_doc_df.groupby(group_col).size()
-
-            # Frequency distribution of those counts
-            dist = counts.value_counts()
-
-            # specific row data
-            row = {
-                'objects': total,
-                'no children': total - len(counts),
-                'children': len(counts)
-            }
-
-            # Dynamically add columns for each count found (1, 2, 3, 4, 5...)
-            for num_children, freq in dist.items():
-                label = f"{num_children} child{'ren' if num_children != 1 else ''}"
-                row[label] = freq
-
-            data[name] = row
-
-        # Create DataFrame
-        df = pd.DataFrame.from_dict(data, orient='index').fillna(0).astype(int)
-
-        # Sort columns: fixed headers first, then numerical distribution
-        fixed_cols = ['objects', 'no children', 'children']
-        dist_cols = sorted(
-            [c for c in df.columns if c not in fixed_cols],
-            key=lambda x: int(str(x).split()[0])
-        )
-
-        return df[fixed_cols + dist_cols].T
-
-    def stats_ref_fields(self):
-        """Statistics on distinct values by field."""
-        ans = {}
-        for c in self.ref_df.columns:
-            vc = self.ref_df[c].value_counts()
-            if c == 'arc-citations':
-                ans[c] = [len(vc), vc.get(0, 0)]
-            else:
-                ans[c] = [len(vc), vc.get('', 0)]
-
-        stats = pd.DataFrame(ans.values(),
-                             columns=[ 'distinct', 'missing'],
-                             index=ans.keys())
-        return stats
-
-    def distinct_values_by_field(self):
-        """Statistics on distinct values by field."""
-        ans = {}
-        for c in self.ref_df.columns:
-            vc = self.ref_df[c].value_counts()
-            if c == 'arc-citations':
-                ans[c] = [len(vc), vc.get(0, 0)]
-            else:
-                ans[c] = [len(vc), vc.get('', 0)]
-
-        stats = pd.DataFrame(ans.values(),
-                             columns=[ 'distinct', 'missing'],
-                             index=ans.keys())
-        # c: len(self.distinct(c)) for c in self.ref_df.columns
-        # }, index=['Value']).T
-        return stats
-
-    def distinct_value_counts(self, field):
-        """Return the top 20 distinct value counts for field."""
-        return (None
-                if field not in self.database else
-                    self.database[field]
-                        .value_counts()
-                        .to_frame('count')
-                        .sort_values('count', ascending=False)
-                        .head(20)
-                )
 
 
 class Library(LibraryBase):
@@ -174,14 +70,14 @@ class Library(LibraryBase):
         self._last_unrestricted = 0
         self._last_query_title = ''
         self._last_query_expr = ''
-        self._config_df = pd.DataFrame([])
-        self._doc_df = pd.DataFrame([])
+        self._config_df = pd.DataFrame()
+        self._doc_df = pd.DataFrame()
         # paths in doc df get mangled - this is the original
-        self._doc_read_df = pd.DataFrame([])
-        self._ref_df = pd.DataFrame([])
-        self._ref_doc_df = pd.DataFrame([])
+        self._doc_read_df = pd.DataFrame()
+        self._ref_df = pd.DataFrame()
+        self._ref_doc_df = pd.DataFrame()
         # fully blown up docs x refs x authors
-        self._database = pd.DataFrame([])
+        self._database = pd.DataFrame()
         self._trie = None
         self._tag_allocator = None
         self.is_dirty = False
@@ -194,7 +90,7 @@ class Library(LibraryBase):
     @property
     def config_df(self):
         if self._config_df.empty:
-            self._config_df = pd.Series(self.config).to_frame('value')
+            self._config_df = pd.Series(self.config.model_dump()).to_frame('value')
             self._config_df.index.name = 'key'
         return self._config_df
 
@@ -206,8 +102,10 @@ class Library(LibraryBase):
     def doc_df(self):
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
-
-            self._doc_read_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
+            try:
+                self._doc_read_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
+            except FileNotFoundError:
+                return self._doc_df
             pdf_dir = Path(self.config.pdf_dir_name)
             # mangle path names to make more readable
             self._doc_df = self._doc_read_df.copy()
@@ -227,7 +125,10 @@ class Library(LibraryBase):
     def ref_df(self):
         """Return the document df, loading if needed."""
         if self._ref_df.empty:
-            self._ref_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
+            try:
+                self._ref_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
+            except FileNotFoundError:
+                return self._ref_df
             # set base cols
             base_cols = ['tag', 'author', 'title', 'journal']
             querex = partial(querex_work,
@@ -241,7 +142,10 @@ class Library(LibraryBase):
     def ref_doc_df(self):
         """Return the document df, loading if needed."""
         if self._ref_doc_df.empty:
-            self._ref_doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
+            try:
+                self._ref_doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
+            except FileNotFoundError:
+                return self._ref_doc_df
             # set base cols
             base_cols = ['tag', 'path']
             querex = partial(querex_work,
@@ -255,6 +159,8 @@ class Library(LibraryBase):
     def database(self):
         """Merged database, with exploded authors."""
         if self._database.empty:
+            if self.ref_df.empty:
+                return self._database
             exploded_authors = (
                 self.ref_df.assign(author=self.ref_df.author.str.split(" and "))
                 .explode("author", ignore_index=True)
@@ -276,25 +182,41 @@ class Library(LibraryBase):
             self._database.querex = MethodType(querex, self._database)
         return self._database
 
-    def update(self, ref_add, doc_add, ref_doc_add):
+    def update(self, importer):
         """
         Update internal database and save.
 
         Invalidate all caches to force clean re-load.
 
         Called by the import routine, after figuring what needs to be added.
+
+        importer is an import_bibtex.Bib2df_Incremental object.
         """
+        # extract additions
+        ref_add = importer.ref_df
+        doc_add = importer.doc_df
+        ref_doc_add = importer.ref_doc_df
+
+        logger.info(f'Appending {len(ref_add) = } references')
+        logger.info(f'Appending {len(doc_add) = } documents')
+        logger.info(f'Appending {len(ref_doc_add) = } ref-doc mappings')
+
         # Append to existing dataframes.
         ref_out = pd.concat([self.ref_df, ref_add], ignore_index=True)
         doc_out = pd.concat([self._doc_read_df, doc_add], ignore_index=True)
         ref_doc_out = pd.concat([self.ref_doc_df, ref_doc_add], ignore_index=True)
 
+        # make these the reference object
         self._ref_df = ref_out
         self._doc_df = doc_out
         self._ref_doc_df = ref_doc_out
 
+        # save
         self.save()
+
+        # invalidate to force cache refresh
         self.reset()
+        logger.info('save library and invalidated cache')
 
     def save(self):
         """Save config and all dataframes."""
@@ -316,6 +238,7 @@ class Library(LibraryBase):
     def distinct(self, c):
         """Return distinct occurrences of col c."""
         # database is fully exploded so this is OK:
+        if self.database.empty: return []
         return sorted(set([i for i in self.database[c] if i != '']))
 
     @staticmethod
@@ -336,7 +259,7 @@ class Library(LibraryBase):
         df = pd.concat(
             [Library(p).config_df for p in Library.get_library_path_list()],
             axis=1).T.fillna('')
-        df = df[['name', 'description', 'bibtex_file', 'pdf_dir_name', 'text_dir_name', 'extractor', ]]
+        # df = df[['name', 'description', 'bibtex_file', 'pdf_dir_name', 'text_dir_name', 'extractor', ]]
         df = df.reset_index(drop=True)
         return df
 
@@ -372,9 +295,12 @@ class Library(LibraryBase):
         if self._tag_allocator is None:
             # force build of database
             # TODO: should database normalize on editor too??
-            d = self.database
-            tags = set(d.tag)
-            self._tag_allocator = TagAllocator(tags)
+            if self.database.empty:
+                self._tag_allocator = TagAllocator([])
+            else:
+                d = self.database
+                tags = set(d.tag)
+                self._tag_allocator = TagAllocator(tags)
         return self._tag_allocator
 
     def get_new_documents(self, directory, meta, recursive):

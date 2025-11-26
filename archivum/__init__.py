@@ -2,6 +2,11 @@
 archivum project.
 ===================
 
+v 0.8.0
+    LibraryBase
+    Work on import_bibtex
+    Creator for Config class
+
 v 0.7.0
     moved to Library having a qd function in place of older fGT
 
@@ -16,11 +21,11 @@ import sys
 import os
 from pathlib import Path
 
-
-__version__ = "0.7.0"
 __appname__ = 'archivum'
-__author__ = 'Stephen Mildenhall'
-__date__ = '2025-05-22'
+__author__ = 'Stephen J. Mildenhall'
+
+__version__ = "0.8.0"
+__date__ = '2025-11-26'
 
 
 # def _get_local_folder():
@@ -46,8 +51,13 @@ def _get_local_folder():
 # e.g. /users/steve/appdata/local/archivum
 BASE_DIR = _get_local_folder()
 
+# TODO NAUGHTY
+DEBUG_DIR = Path('\\tmp\\archivum_debug')
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+
 APP_NAME = __appname__
 
+# TODO NAUGHTY
 DEFAULT_CONFIG_FILE = "uber-library"
 
 EMPTY_LIBRARY = type('EmptyLibrary', (), {'name': 'No library open', 'is_empty': True})

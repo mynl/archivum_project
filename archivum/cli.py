@@ -23,6 +23,7 @@ from prompt_toolkit.completion import (
 )
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.document import Document
+from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
@@ -171,60 +172,72 @@ def save_library():
     if lib.is_empty:
         click.echo("No library open...nothing to save. Returning")
         return
-    logger.todo("Saving library %s", lib)
     lib.save()
+    click.echo(f"{lib.name} saved")
 
 
 # ========================================================================================
 @entry.command()
 def close_library():
-    """Close the currently open library."""
-    # TODO THINK ABOUT SAVING??
+    """
+    Close the currently open library.
+
+    This is a command line concept; the Library class has no close
+    method. You just delete it. It does NOT track if it is dirty and
+    needs to change.
+    """
     lib = LibraryContext.get()
     if lib.is_empty:
         click.secho('No library open; ignoring.')
         return
     logger.info('Closing library %s', lib)
-    logger.todo('SHOULD WE SAVE on CLOSE??')
     lib = LibraryContext.get()
-    lib.close()
+    del lib
     LibraryContext.clear()
 
 
 # ========================================================================================
-@entry.command()
-@click.argument('other_lib_name', type=str)
-def merge_library(other_lib_name):
-    """Merge another library into the current library."""
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        return
+# @entry.command()
+# @click.argument('other_lib_name', type=str)
+# def merge_library(other_lib_name):
+#     """Merge another library into the current library."""
+#     lib = LibraryContext.get()
+#     if lib.is_empty:
+#         return
 
-    logger.info("Merging %s into %s", other_lib_name, lib)
-    logger.todo('Implement merge_library!')
-    # TODO: Implement merge logic
-    # try:
-    #     other = Library(other_lib_name)
-    # except Exception as e:
-    #     logger.error(e)
-    # else:
-    #     logger.todo('PERFORM MERGE!!')
+#     logger.info("Merging %s into %s", other_lib_name, lib)
+#     logger.todo('Implement merge_library!')
+#     # TODO: Implement merge logic
+#     # try:
+#     #     other = Library(other_lib_name)
+#     # except Exception as e:
+#     #     logger.error(e)
+#     # else:
+#     #     logger.todo('PERFORM MERGE!!')
 
 
 # ========================================================================================
 @entry.command()
 @click.argument('lib_name', type=str)
 def create_library(lib_name):
-    """Interactively create a YAML config file for a new library called lib_name."""
+    """
+    Create and open a new library. SEE ALSO THE CONFIG VERSION
+
+    Interactively create a YAML config file for a new library
+    called lib_name. Save config. Then open and return the library.
+
+    Library must not already exist.
+    """
     lib_file_name = lib_name.replace(' ', '-')
 
     # sort the file out
     lib_path = BASE_DIR / f'{lib_file_name}.{APP_NAME}-config'
+    if lib_path.exists():
+        click.secho('Error: Library file already exists: %s', lib_path)
+        click.secho('Pick another name. Returning, no library created.')
+        return
     click.secho("=== Library Config Creator ===", fg='cyan')
     click.secho(f'Creating Library {lib_name} at {lib_path}')
-    if lib_path.exists():
-        click.secho('Library file already exists: %s', lib_path)
-        return
 
     def pr(x):
         """Make the prompt string."""
@@ -233,39 +246,40 @@ def create_library(lib_name):
     tablefmt_completer = FuzzyCompleter(WordCompleter(
         ['mixed_grid', 'simple_grid', 'outline', 'simple_outline', 'mixed_outline', 'rst'],
         ignore_case=True))
+    while True:
+        config = {
+            "name": lib_name,
+            "description": click.prompt(pr('Description')),
+            "columns": ['type', 'tag', 'author', 'doi', 'file', 'journal', 'pages', 'title',
+                        'volume', 'year', 'publisher', 'url', 'institution', 'number',
+                        'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
+                        'arc-citations', 'arc-source'],
+            # TODO
+            "bibtex_file": click.prompt(pr('BibTeX File'), default=f'\\S\\Telos\\biblio\\{lib_file_name}-test.bib'),
+            "pdf_dir_name": click.prompt(pr('PDF Directory'), default='\\S\\Telos\\Library'),
+            "full_text": "true",
+            "text_dir_name": click.prompt(pr('PDF Directory'), default='\\temp\\pdf-full-text'),
+            "file_formats": ["*.pdf"],
+            "hash_files": click.confirm(pr("Hash files?"), default=False),
+            "hash_workers": click.prompt(pr("Number of hash workers"), default=6, type=int),
+            "last_indexed": 0,
+            "timezone": click.prompt(pr("Timezone"), default=local_timezone()),
+            "tablefmt": click.prompt(pr("Table format"), completer=tablefmt_completer),
+        }
+        try:
+            con = Configurator(**config)
+            break
+        except ValidationError as e:
+            logger.error('configuration error %s', e)
+            click.secho('Error in config, no file written. Adjust!')
+            # todo  - a quit option!
 
-    config = {
-        "name": lib_name,
-        "description": click.prompt(pr('Description')),
-        "columns": ['type', 'tag', 'author', 'doi', 'file', 'journal', 'pages', 'title',
-                    'volume', 'year', 'publisher', 'url', 'institution', 'number',
-                    'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
-                    'arc-citations', 'arc-source'],
-        # TODO
-        "bibtex_file": click.prompt(pr('BibTeX File'), default=f'\\S\\Telos\\biblio\\{lib_file_name}-test.bib'),
-        "pdf_dir_name": click.prompt(pr('PDF Directory'), default='\\S\\Telos\\Library'),
-        "full_text": "true",
-        "text_dir_name": click.prompt(pr('PDF Directory'), default='\\temp\\pdf-full-text'),
-        "file_formats": ["*.pdf"],
-        "hash_files": click.confirm(pr("Hash files?"), default=True),
-        "hash_workers": click.prompt(pr("Number of hash workers"), default=6, type=int),
-        "last_indexed": 0,
-        "timezone": click.prompt(pr("Timezone"), default=local_timezone()),
-        "tablefmt": click.prompt(pr("Table format"), completer=tablefmt_completer),
-    }
-    try:
-        con = Configurator(**config)
-    except ValidationError as e:
-        logger.error('configuration error %s', e)
-        click.secho('Error in config, no file written')
-    else:
-        with lib_path.open("w", encoding="utf-8") as f:
-            yaml.dump(config, f, sort_keys=False)
-
-        lib = Library(lib_file_name)
-        LibraryContext.set(lib)
-
-        click.secho(f"\nConfig written to {lib_path}", fg="green")
+    # con must be valid
+    con.save(lib_path)
+    #o open the library
+    lib = Library(lib_file_name)
+    LibraryContext.set(lib)
+    click.secho(f"\nConfig written to {lib_path}", fg="green")
 
 
 # ========================================================================================
