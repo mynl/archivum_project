@@ -220,7 +220,7 @@ class Library(LibraryBase):
 
     def save(self):
         """Save config and all dataframes."""
-        self._config.save(self.config_path, backup=True)
+        self.config.save(self.config_path, backup=True)
         self._ref_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
         self._doc_read_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
         self._ref_doc_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
@@ -371,6 +371,9 @@ class Library(LibraryBase):
             return "None", "[red]Failed to read rg output[/red]"
 
         return 0, proc
+
+    # def write_bibtex(self, path: Path) -> None:
+    #     """Write out the current library to a bibtex file."""
 
     def import_bibtex(
         self,

@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 from types import MethodType
 from typing import Optional
+from difflib import SequenceMatcher
 
 import datetime as dt
 import shutil
@@ -467,6 +468,10 @@ class Bib2df_Incremental(LibraryBase):
             self._database.fillna('')
         return self._database
 
+    def raw_no_file(self):
+        """Raw entries with no files listed."""
+        return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
+
     @staticmethod
     def parse_line(entry):
         result = {}
@@ -730,11 +735,7 @@ class Bib2df_Incremental(LibraryBase):
         self.save_audit_file(import_info, '.audit-info')
         return import_info
 
-    def raw_no_file(self):
-        """Raw entries with no files listed."""
-        return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
-
-    def import_analysis(self, strict=False):
+    def import_analysis(self, lib_test=False, strict=False):
         """
         Prepare for import of references/documents from a BibTeX file into
         self.reference_library (may be None for a new library).
@@ -747,12 +748,15 @@ class Bib2df_Incremental(LibraryBase):
         """
         results = []
         for (left, raw_input), (right, revised) in zip(
-                self.raw_df.iterrows(), self.ported_df.reset_index(drop=False).iterrows()):
+                self.raw_df.iterrows(), self.ported_df.iterrows()):
             tag_in = raw_input.tag
             # trim for ligo problem
-            tag = revised.tag[:20]
+            # tag = revised.tag[:20]
+            tag = revised.tag
             title = revised.title
-            dup_msg = self._possible_duplicate(revised, right) or ""
+            kind, score_title, score_tag, match_title, match_tag = \
+                self._possible_duplicate(revised, right, lib_test=lib_test) or ("", "", "", 0, 0)
+
             change = "-" if self._compare(raw_input, revised) else "CHANGED"
             if change == "CHANGED":
                 temp = []
@@ -773,17 +777,19 @@ class Bib2df_Incremental(LibraryBase):
                 change_cols = " no chg "
             #
             results.append([tag_in, tag,
-                        title, dup_msg,
+                        title,
+                        kind, score_title, score_tag, match_title, match_tag,
                         raw_input.author, revised.author,
                         change, change_cols])
         result_df = pd.DataFrame(results,
             columns=[
                 'tag_in', 'tag_ported',
-                'title', 'dup_msg',
+                'title',
+                "kind", "score_title", "score_tag", "match_title", "match_tag",
                 'author_in', 'author_ported',
                 'change',
                 'change_cols',
-            ]).sort_values(['dup_msg','change', 'change_cols'], ascending=[True, False, True])
+            ]).sort_values(['kind','change', 'change_cols'], ascending=[True, False, True])
 
         return result_df
 
@@ -886,59 +892,84 @@ class Bib2df_Incremental(LibraryBase):
         s = re.sub(r"[^a-z0-9]+", " ", s)
         return " ".join(s.split())
 
-    def _possible_duplicate(self, ref_row, ref_row_idx) -> str | None:
+    def _possible_duplicate(self, ref_row, ref_row_idx, lib_test: bool = True) -> str | None:
         """
         Heuristic duplicate check: by DOI (if present) and by normalized title.
         Returns a short message if something looks like a duplicate.
+
+        lib_test = test against the library, else self test (dups within the import).
         """
+        # basic checks
         doi = str(ref_row.get("doi", "") or "").strip().lower()
         title = ref_row.get("title", "")
+        tag = ref_row.get("tag", "")
         title_norm = self._normalize_title(title)
 
         # what are we checking against?
         if self._existing_title_norm is None or self._dois is None:
-            if self.reference_library != EMPTY_LIBRARY and \
-                not self.reference_library.ref_df.empty:
+            if lib_test and self.reference_library != EMPTY_LIBRARY and \
+                        not self.reference_library.ref_df.empty:
                 self._existing_title_norm = self.reference_library.ref_df.title.map(self._normalize_title)
                 self._dois = self.reference_library.ref_df.doi.astype(str).str.lower().str.strip() if \
                         'doi' in self.reference_library.ref_df else []
                 self._self_test = False
+                # temporary storage - note titles are non-normalized
+                self._possible_duplicate_tags = self.reference_library.ref_df.tag
+                self._possible_duplicate_titles = self.reference_library.ref_df.title
             else:
-                # check against itself?
+                # check against self - new import with no library or lib_test == False
                 logger.info('No reference library...checking duplicates relative to import.')
                 self._existing_title_norm = self.ref_df.title.map(self._normalize_title)
                 self._dois = self.ref_df.doi.astype(str).str.lower().str.strip() if \
                         'doi' in self.ref_df else []
                 self._self_test = True
+                # temporary storage
+                self._possible_duplicate_tags = self.ref_df.tag
+                self._possible_duplicate_titles = self.ref_df.title
+
+        assert len(self._existing_title_norm) == len(self._dois), "WRONG SIZES"
 
         def create_message(mask, kind):
-            tags = self.reference_library.ref_df.loc[mask, "tag"].tolist()
-            titles = self.reference_library.ref_df.loc[mask, "title"].tolist()
-            ans = [f'{kind}']
+            tags = self._possible_duplicate_tags.loc[mask].tolist()
+            titles = self._possible_duplicate_titles.loc[mask].tolist()
+            score_title = 0  # similarity score
+            score_tag = 0  # similarity score
+            match_tag = ""
+            match_title = ""
             for tg, tl in zip(tags, titles):
-                similarity = fuzz.ratio(title, tl)
-                if similarity >= 90:
-                    ans.append('possible DUPLICATE')
-                elif similarity >= 80:
-                    ans.append('possible duplicate')
-                elif similarity >= 50:
-                    ans.append('maybe dup')
-                ans.append(f' {tg}->{tl} @ {similarity:.1f}')
-            return ' '.join(ans)
+                #
+                # title_similarity = fuzz.ratio(title, tl)
+                # tag_similarity = fuzz.ratio(tag, tg)
+                # gemini recommends
+                title_similarity = SequenceMatcher(None, title, tl).ratio() * 100
+                tag_similarity = SequenceMatcher(None, tag, tg).ratio() * 100
+                if title_similarity > score_title:
+                    score_title = title_similarity
+                    score_tag = tag_similarity
+                    match_tag = tg
+                    match_title = title
+            if score_title > 66 and score_tag > 80:
+                return kind, score_title, score_tag, match_title, match_tag
+            else:
+                return
 
         # DOI check
-        if doi and "doi" in self.reference_library.ref_df.columns:
+        if doi:
             mask = self._dois == doi
             # when run against itself (import into empty library), not match yourself!
             if self._self_test: mask[ref_row_idx] = False
             if mask.any():
+                if (t:=sum(mask)) > 1:
+                    logger.debug('MULTI TITLE: %s, %s', ref_row.tag, t)
                 return create_message(mask, 'DOI')
         # Title check
         if title_norm:
             mask = self._existing_title_norm == title_norm
             if self._self_test: mask[ref_row_idx] = False
             if mask.any():
-                return create_message(mask, 'Title')
+                if (t:=sum(mask)) > 1:
+                    logger.debug('MULTI TITLE: %s, %s', ref_row.tag, t)
+                return create_message(mask, 'title')
 
         return None
 
