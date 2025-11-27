@@ -195,8 +195,8 @@ def _parse_sort_fields(spec: str):
 
 def querex_help():
     return """
-Help on querex function
-=======================
+querex Function Help
+====================
 
 Query syntax
 ------------
@@ -204,43 +204,19 @@ All rows optional. Must be in order shown.
 An empty query returns all rows.
 
 verbose
-recent
+recent                             age column added]
 top n
-select (!|-)field1[, fields]
-regex [and regex]
-where sql
-order|sort by [-]field[, fields]
-
-* if recent an age column is added
-* select field, prefix by ! or - to drop a base column, eg select !dir drops (long) directory
-* regex not quoted,  ! ~ something or field ~ something
-* sql clause must be preceded by where
-* sql clause strings must be quoted for passing to df.query
-* -field is descending order, else ascending.
+select (!|-)field1[, fields]       prefix drops field
+regex [and regex]                  !=author, eg ! Wang, !/Wang, R/
+where sql                          where author=="Quoted, Name"
+order|sort by [-]field[, fields]   - for decreasing order
 
 Query return fields
 -------------------
-name
-dir
-mod
-size
-suffix
-...plus selected columns
+name dir mod size suffix ... plus any selected columns
 
 Database fields
 ---------------
-name
-dir
-drive
-path
-mod
-create
-node
-size,
-suffix
-vol_serial
-drive_model
-drive_serial
-hash
-
+name dir drive path mod create node size, suffix
+vol_serial drive_model drive_serial hash
 """

@@ -17,7 +17,7 @@ import yaml
 import pandas as pd
 from pydantic import ValidationError
 
-from . import BASE_DIR, APP_NAME, DEFAULT_CONFIG_FILE
+from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
 from . trie import Trie
 from . querex import querex_work
 from . utilities import TagAllocator
@@ -33,34 +33,38 @@ class Library(LibraryBase):
     # base columns used by the app for quick output displays
     base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
 
-    def __init__(self, config_file: Path | None = None, **overrides):
+    def __init__(self, library_dir_name: str = "", **overrides):
         """
-        Load YAML config from file. If None, defaults to DEFAULT_CONFIG_FILE.
+        Load YAML config from file. If None, defaults to DEFAULT_LIBRARY.
 
         The archivum-config suffix optional and added if missing.
         If not found in current directory, looks in local (eg. for default config).
         """
-        self.BASE_DIR = BASE_DIR.resolve()    # helpful externally, keep it all in the library
-        logger.debug('config_file = %s', config_file)
-        config_file = config_file or DEFAULT_CONFIG_FILE
+        library_dir_name = library_dir_name or DEFAULT_LIBRARY
+        logger.debug('library_dir_name = %s', library_dir_name)
 
         # figure config path and load
-        self.config_path = Path(config_file)
+        self.config_path = LIBRARIES_DIR / library_dir_name
         if not self.config_path.exists():
-            self.config_path = self.BASE_DIR / f'{config_file}.{APP_NAME}-config'
+            # one other idea
+            self.config_path = LIBRARIES_DIR / library_dir_name.replace(' ', '-')
+            if not self.config_path.exists():
+                raise FileNotFoundError('Library directory does not exist. Create first.')
         try:
-            raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+            raw = yaml.safe_load((self.config_path / "config.yaml").read_text(encoding="utf-8"))
             base_config = Configurator.model_validate(raw)
+        except FileNotFoundError:
+            raise
         except (ValidationError, OSError) as e:
             raise ValueError(
-                f"Failed to load config from {config_file}") from e
+                f"Failed to load config {self.config_path}") from e
 
         # access through config
         # update and validate; need to merge to avoid repeated args
         # merged = dict(base_config.model_dump(), **overrides)
         merged = base_config.model_dump() | overrides
         self.config = Configurator(**merged)
-        self.text_dir_path = self.BASE_DIR / self.config.text_dir_name
+        self.text_dir_path = BASE_DIR / self.config.text_dir_name
         self.text_dir_full_name = str(self.text_dir_path)
         self.reset()
 
@@ -85,7 +89,7 @@ class Library(LibraryBase):
 
     def __repr__(self):
         """Create simple string representation."""
-        return f'Library({self.config_path.name})'
+        return f'Library({self.config.name})'
 
     @property
     def name(self):
@@ -98,20 +102,26 @@ class Library(LibraryBase):
             self._config_df.index.name = 'key'
         return self._config_df
 
+
     @property
     def doc_df(self):
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
             try:
-                self._doc_read_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
+                self._doc_read_df = pd.read_feather(self.config_path / 'doc.feather')
             except FileNotFoundError:
                 return self._doc_df
             pdf_dir = Path(self.config.pdf_dir_name)
-            # mangle path names to make more readable
+
+            def get_rel_parent(p: Path) -> str:
+                if p.is_relative_to(pdf_dir):
+                    return str(p.relative_to(pdf_dir).parent)
+                return str(p.parent) # Fallback: keep absolute parent
+
+            # truncate path names to make more readable
             self._doc_df = self._doc_read_df.copy()
-            self._doc_df['tpath'] = [
-                str(Path(i).relative_to(pdf_dir).parent)
-                for i in self._doc_df.path]
+            self._doc_df['tpath'] = [get_rel_parent(p) for p in map(Path, self._doc_df.path)]
+
             # set base cols
             base_cols = ['name', 'create', 'size', 'tpath']
             querex = partial(querex_work,
@@ -126,7 +136,7 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._ref_df.empty:
             try:
-                self._ref_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
+                self._ref_df = pd.read_feather(self.config_path / 'ref.feather')
             except FileNotFoundError:
                 return self._ref_df
             # set base cols
@@ -138,12 +148,13 @@ class Library(LibraryBase):
             self._ref_df.querex = MethodType(querex, self._ref_df)
         return self._ref_df
 
+
     @property
     def ref_doc_df(self):
         """Return the document df, loading if needed."""
         if self._ref_doc_df.empty:
             try:
-                self._ref_doc_df = pd.read_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
+                self._ref_doc_df = pd.read_feather(self.config_path / 'ref-doc.feather')
             except FileNotFoundError:
                 return self._ref_doc_df
             # set base cols
@@ -197,18 +208,34 @@ class Library(LibraryBase):
         doc_add = importer.doc_df
         ref_doc_add = importer.ref_doc_df
 
+        len_ref_add = len(ref_add)
+        len_doc_add = len(doc_add)
+        len_ref_doc_add = len(ref_doc_add)
+
         logger.info(f'Appending {len(ref_add) = } references')
         logger.info(f'Appending {len(doc_add) = } documents')
         logger.info(f'Appending {len(ref_doc_add) = } ref-doc mappings')
+
+        pre_ref = len(self.ref_df)
+        pre_doc = len(self.doc_df)
+        pre_ref_doc = len(self.ref_doc_df)
 
         # Append to existing dataframes.
         ref_out = pd.concat([self.ref_df, ref_add], ignore_index=True)
         doc_out = pd.concat([self._doc_read_df, doc_add], ignore_index=True)
         ref_doc_out = pd.concat([self.ref_doc_df, ref_doc_add], ignore_index=True)
 
+        post_ref = len(ref_out)
+        post_doc = len(doc_out)
+        post_ref_doc = len(ref_doc_out)
+
+        print(f'{pre_ref = } + {len_ref_add = } = {pre_ref+ len_ref_add} vs {post_ref = }')
+        print(f'{pre_doc = } + {len_doc_add = } = {pre_doc+ len_doc_add} vs {post_doc = }')
+        print(f'{pre_ref_doc = } + {len_ref_doc_add = } = {pre_ref_doc+ len_ref_doc_add} vs {post_ref_doc = }')
+
         # make these the reference object
         self._ref_df = ref_out
-        self._doc_df = doc_out
+        self._doc_read_df = doc_out
         self._ref_doc_df = ref_doc_out
 
         # save
@@ -216,14 +243,15 @@ class Library(LibraryBase):
 
         # invalidate to force cache refresh
         self.reset()
-        logger.info('save library and invalidated cache')
+        logger.info('saved library and invalidated cache')
 
     def save(self):
         """Save config and all dataframes."""
+        # config.save handles the
         self.config.save(self.config_path, backup=True)
-        self._ref_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-feather'))
-        self._doc_read_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-doc-feather'))
-        self._ref_doc_df.to_feather(self.config_path.with_suffix(f'.{APP_NAME}-ref-doc-feather'))
+        self._ref_df.to_feather(self.config_path / 'ref.feather')
+        self._doc_read_df.to_feather(self.config_path / 'doc.feather')
+        self._ref_doc_df.to_feather(self.config_path / 'ref-doc.feather')
 
     def querex(self, expr):
         """Run ``expr`` through the querex on database."""
@@ -244,7 +272,7 @@ class Library(LibraryBase):
     @staticmethod
     def get_library_path_list():
         """Get a list of available libraries (no suffix) as list of Paths (see also ``list``)."""
-        return list(BASE_DIR.glob(f'*.{APP_NAME}-config'))
+        return [f for f in LIBRARIES_DIR.glob('*') if f.is_dir()]
 
     @staticmethod
     def list():
@@ -302,45 +330,6 @@ class Library(LibraryBase):
                 tags = set(d.tag)
                 self._tag_allocator = TagAllocator(tags)
         return self._tag_allocator
-
-    def get_new_documents(self, directory, meta, recursive):
-        """
-        Scan a directory for new PDF files and optionally extract metadata.
-
-        Note ``new`` requires an open library for name completion and
-        timezone. You should always be working with an open library
-        and they are easy to complete.
-
-        NOT USED??
-        """
-        if directory == '':
-            directory = self.config.watched_dirs[0]
-        directory = Path(directory)
-        if not directory.exists():
-            raise FileNotFoundError('Directory directory does not exist')
-        if recursive:
-            pdfs = directory.rglob('*.pdf')
-        else:
-            pdfs = directory.glob('*.pdf')
-        pdfs = sorted(pdfs)
-        dfs = pd.DataFrame({
-            'Document': [Document(p, self) for p in pdfs],
-            'file_name': [d.name for d in pdfs],
-            'path': pdfs,
-            'create': [
-                pd.to_datetime(p.stat().st_ctime_ns, unit='ns').tz_localize('UTC').tz_convert(self.config.timezone)
-                for p in pdfs]
-        }).sort_values('create', ascending=False)
-        dfs['n'] = range(1, len(dfs) + 1)
-        dfs = dfs.reset_index(drop=True)
-        if meta:
-            dfs.Document.map(lambda x: x.add_meta_data())
-            dfs['meta_author'] = dfs.Document.map(lambda md: md.meta_author)
-            dfs['meta_subject'] = dfs.Document.map(lambda md: md.meta_subject)
-            dfs['meta_title'] = dfs.Document.map(lambda md: md.meta_title)
-            dfs['meta_author_ex'] = dfs.Document.map(lambda md: md.meta_author_ex)
-            dfs['meta_crossref'] = dfs.Document.map(lambda md: md.meta_crossref)
-        return dfs
 
     def run_ripgrep(self, pattern, args):
         """Execute and format ripgrep search against library full text extracts."""

@@ -27,6 +27,7 @@ dependencies = [
     "rapidfuzz",
     "requests",
     "tqdm",
+    "arxiv",
 ]
 
 classifiers = [

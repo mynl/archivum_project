@@ -23,7 +23,11 @@ class LibraryBase:
         return df
 
     def stats(self):
-        """Statistics about refs (tags), docs (paths)."""
+        """
+        Statistics about refs (tags), docs (paths).
+
+        For refs, figures how many
+        """
         if self.ref_df.empty: return pd.DataFrame()
 
         data = {}
@@ -85,7 +89,7 @@ class LibraryBase:
 
     def distinct_values_by_field(self):
         """Statistics on distinct values by field."""
-        if self.ref_df.emtpy: return pd.DataFrame()
+        if self.ref_df.empty: return pd.DataFrame()
         ans = {}
         for c in self.ref_df.columns:
             vc = self.ref_df[c].value_counts()

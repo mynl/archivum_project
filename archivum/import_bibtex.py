@@ -30,7 +30,7 @@ from rapidfuzz import distance, fuzz
 import numpy as np
 import pandas as pd
 
-from . import BASE_DIR, APP_NAME, EMPTY_LIBRARY, DEBUG_DIR
+from . import EMPTY_LIBRARY, DEBUG_DIR
 from . utilities import (remove_accents, make_qd,
                         accent_mapper_dict, safe_int,
                         TagAllocator)
@@ -134,7 +134,7 @@ class Bib2df_Incremental(LibraryBase):
 
     def __init__(self, *, bibtex_file_path, pdf_dir, reference_library,
                 fillna=True, errors_mapper=None, remap_dashes=False, qd=None,
-                debug_mode=True):
+                ):
         """
         Read Path p into bibtex df, pdf_dir is a Path to pdf files (must exist)
 
@@ -182,13 +182,14 @@ class Bib2df_Incremental(LibraryBase):
 
 
         Audit mode is just ALWAYS ON - you can delete the files if you like!
+        Files saved to /tmp for nightly delete. On update they are committed
+        to the library import folder.
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
         assert self.bibtex_file_path.exists(), 'Bibtex file must exist'
         self.pdf_dir = Path(pdf_dir)
         assert self.pdf_dir.exists(), 'PDF directory does not exist'
-        self.debug_mode = debug_mode
         self.reference_library = reference_library or EMPTY_LIBRARY
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
@@ -801,6 +802,17 @@ class Bib2df_Incremental(LibraryBase):
         what you want before you run! Look at import_analysis!
         """
         self.reference_library.update(self)
+        # create audit trail
+        import_path = self.reference_library.config_path / "import-audit" / self.timestamp
+        import_path.mkdir(parents=True, exist_ok=True)
+        count = 0
+        for f in self._audit_dir_path.glob('*.*'):
+            newf = import_path / f.name
+            if newf.exists():
+                newf.unlink()
+            newf.hardlink_to(f)
+            count += 1
+        logger.info('UPDATE AUDIT: %s files copied to %s', count, import_path)
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
@@ -867,10 +879,7 @@ class Bib2df_Incremental(LibraryBase):
         If created, copies the input bibtex file (hard link).
         """
         if self.__audit_dir_path is None:
-            if self.debug_mode:
-                self.__audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
-            else:
-                self.__audit_dir_path = BASE_DIR / "imports" / self.timestamp
+            self.__audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
             # ensure it exists
             self.__audit_dir_path.mkdir(parents=True, exist_ok=True)
             logger.info('Created audit path at %s', str(self.__audit_dir_path))

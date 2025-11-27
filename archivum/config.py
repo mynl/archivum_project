@@ -8,7 +8,7 @@ from typing import List, Literal, Optional, Callable, Any
 from pydantic import BaseModel, Field, ConfigDict
 import yaml
 
-from . import APP_NAME, BASE_DIR
+from . import LIBRARIES_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -56,24 +56,22 @@ class Configurator(BaseModel):
         path.write_text(yaml_str, encoding="utf-8")
 
     def save(self, config_path: Path, backup: bool = True) -> None:
-            """Save config to Path and optionally back up."""
-            # Ensure parent exists
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-
+            """Save config into Path as config.yaml and optionally back up."""
+            file_path = config_path / "config.yaml"
             # 1. Handle Backup (Only if source exists)
             if backup and config_path.exists():
-                bak_path = config_path.with_suffix(f'.{APP_NAME}-config-bak')
+                bak_path = config_path / 'config.bak'
                 # Windows allows overwriting hardlinks only if we remove the target first
                 if bak_path.exists():
                     bak_path.unlink()
                 # Create hardlink (atomic-ish on Windows NTFS)
-                bak_path.hardlink_to(config_path)
+                bak_path.hardlink_to(file_path)
 
             # 2. Write File
             # Do not unlink() first; "w" truncates.
             # For true atomicity on Windows, write to temp and replace,
             # but direct write is usually sufficient for configs.
-            with config_path.open("w", encoding="utf-8") as f:
+            with file_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(
                     self.model_dump(),
                     f,
@@ -91,7 +89,7 @@ def create_config_interactive(
     """
     Interactively create a Configurator instance and save it.
 
-    Saved to BASE_DIR unless target_path has a root (i.e., starts /).
+    Saved to LIBRARIES_DIR unless target_path has a root (i.e., starts /).
 
     Args:
         target_path: Destination for the config file.
@@ -100,10 +98,9 @@ def create_config_interactive(
     """
 
     def rooted(path):
-        """If path not rooted, make relative to BASE_DIR."""
-        path = Path(path)
-        if not path.root:
-            path = BASE_DIR / path
+        """If path not rooted, make relative to LIBRARIES_DIR."""
+        path = LIBRARIES_DIR / path
+        path.mkdir(parents=True, exist_ok=True)
         return path.absolute()
 
     def prompt(label: str, default: Any) -> str:
@@ -111,7 +108,7 @@ def create_config_interactive(
         response = input_func(f"{label} [{default}]: ")
         return response.strip() or str(default)
 
-    target_path = rooted(target_path).with_suffix(f".{APP_NAME}-config")
+    target_path = rooted(target_path)
     logger.info(f"Generating configuration at: {target_path}")
 
     # Only prompt for critical paths that likely vary per user
@@ -121,12 +118,10 @@ def create_config_interactive(
     timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
     description = prompt("Description", f"New library created {timestamp}")
 
-    pdf_input = prompt("PDF Directory", "pdfs")
-    pdf_dir = str(rooted(pdf_input))
+    # is what now??
+    pdf_dir = prompt("PDF Directory", "pdfs")
 
-    name_ = target_path.with_suffix(".bib")
-    bib_input = prompt("BibTeX output file", name_)
-    bib_file = str(rooted(bib_input))
+    bib_output = prompt("BibTeX output file", f"{target_path.name}.bib")
 
     # Create instance
     config = Configurator(
@@ -137,7 +132,7 @@ def create_config_interactive(
                     "url", "mendeley-tags", "arc-citations", "arc-source"],
         description=description,
         pdf_dir_name=pdf_dir,
-        bibtex_file=bib_file,
+        bibtex_file=bib_output,
         # Add other fields here if you want to prompt for them
     )
 

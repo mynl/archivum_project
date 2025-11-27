@@ -56,11 +56,11 @@ def safe_file_size(s):
 
 
 # make the library display function
-def make_qd(max_string_length=50, max_rows=10, display=None, **gt_kwargs):
+def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
     """
     Make a qd function with sensible defaults.
 
-    If display is None use IPython.display display.
+    If display_func is None use IPython.display display.
     """
     def default_formatter(x):
         """
@@ -81,11 +81,14 @@ def make_qd(max_string_length=50, max_rows=10, display=None, **gt_kwargs):
             "formatters": {'size': safe_file_size, },
             "raw_cols": ['year', 'index', 'node', 'links', 'number'],
             "aligners": {'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
-            "default_formatter": default_formatter,
         }
+    if max_string_length > 0:
+        default_args["default_formatter"] = default_formatter,
+
     default_args = default_args | gt_kwargs
+
     fGT = partial(GT, **default_args)
-    display = display or ip_display
+    display_func = display_func or ip_display
     caption_str = f'{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)'
 
     def qd(df, **kwargs):
@@ -93,7 +96,11 @@ def make_qd(max_string_length=50, max_rows=10, display=None, **gt_kwargs):
         caption = kwargs.get('caption', None)
         if caption:
             kwargs['caption'] = caption_str.format(caption=caption)
-        display(fGT(df.head(max_rows), **kwargs))
+        if isinstance(df, list):
+            df = df[:max_rows]
+        else:
+            df = df.head(max_rows)
+        display_func(fGT(df, **kwargs))
 
     return qd
 

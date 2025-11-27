@@ -32,10 +32,9 @@ from great2.shell import UberShell
 
 from . reference import Reference
 from . library import Library
-from . import DEFAULT_CONFIG_FILE, BASE_DIR, APP_NAME, EMPTY_LIBRARY
+from . document import Document
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR
 from . utilities import make_qd
-from . document import find_pdfs, Document
-from . library import Library
 from . config import Configurator
 from . querex import querex_help
 
@@ -44,7 +43,10 @@ DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
 EMPTY_DF = pd.DataFrame([])
 
 # for local display function
-qd = make_qd(max_table_inch_width=10, max_rows=50, display=click.echo)
+qd = make_qd(max_table_inch_width=18,
+            max_string_length=-1, # no string truncation
+            max_rows=50,
+            display_func=click.echo)
 
 # logger
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ def get_prompt(cmd):
     try:
         lib_name = lib.name
         return HTML(
+            '<ansired>archivum </ansired>'
             f'<ansigreen>[{lib_name}] > </ansigreen>'
             f'<ansiyellow>{cmd} > </ansiyellow>'
         )
@@ -150,7 +153,6 @@ def entry():
 
 # ========================================================================================
 
-
 @entry.command()
 @click.argument('lib_name', type=str)
 def open_library(lib_name):
@@ -158,7 +160,7 @@ def open_library(lib_name):
     try:
         lib = Library(lib_name)
         LibraryContext.set(lib)
-        logger.debug(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
+        logger.info(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
     except Exception as e:
         logger.error('Open library error: %s', e)
 
@@ -228,10 +230,10 @@ def create_library(lib_name):
 
     Library must not already exist.
     """
-    lib_file_name = lib_name.replace(' ', '-')
+    lib_dir_name = lib_name.replace(' ', '-')
 
     # sort the file out
-    lib_path = BASE_DIR / f'{lib_file_name}.{APP_NAME}-config'
+    lib_path = LIBRARIES_DIR / lib_dir_name
     if lib_path.exists():
         click.secho('Error: Library file already exists: %s', lib_path)
         click.secho('Pick another name. Returning, no library created.')
@@ -255,7 +257,7 @@ def create_library(lib_name):
                         'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
                         'arc-citations', 'arc-source'],
             # TODO
-            "bibtex_file": click.prompt(pr('BibTeX File'), default=f'\\S\\Telos\\biblio\\{lib_file_name}-test.bib'),
+            "bibtex_file": click.prompt(pr('BibTeX File'), default=f'\\S\\Telos\\biblio\\{lib_dir_name}-test.bib'),
             "pdf_dir_name": click.prompt(pr('PDF Directory'), default='\\S\\Telos\\Library'),
             "full_text": "true",
             "text_dir_name": click.prompt(pr('PDF Directory'), default='\\temp\\pdf-full-text'),
@@ -277,7 +279,7 @@ def create_library(lib_name):
     # con must be valid
     con.save(lib_path)
     #o open the library
-    lib = Library(lib_file_name)
+    lib = Library(lib_dir_name)
     LibraryContext.set(lib)
     click.secho(f"\nConfig written to {lib_path}", fg="green")
 
@@ -289,7 +291,7 @@ def create_library(lib_name):
     is_flag=True,
     help='Show detailed information about each library.'
 )
-def list_libraries(details):
+def list(details):
     """List all available libraries."""
     logger.debug("Listing libraries...")
     # TODO: Implement listing logic
@@ -306,7 +308,7 @@ def list_libraries(details):
 
 # ========================================================================================
 @entry.command()
-def get_library_stats():
+def stats():
     """Display library stats library."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -369,16 +371,6 @@ def query_library(start: str, ref):
         df = lib.database
 
     click.echo(df.columns)
-
-    # click.echo(
-    #     "Enter querex expression [verbose] [recent] [top n] [select field[, fields]\n"
-    #     "column ~ /regex/ where sql_expression sort field1, -field2\n"
-    #     " or type 'exit', 'x', 'quit' or 'q' to stop and ? for help).\n")
-
-    # keywords = ['cls', 'and', 'or'] + list(lib.database.columns)
-    # word_completer = FuzzyCompleter(WordCompleter(keywords, sentence=True))
-    # session = PromptSession(completer=word_completer)
-    # result = None
     result = EMPTY_DF
     base_completer = make_query_completer_static(df)
 
@@ -468,53 +460,62 @@ def query_library(start: str, ref):
 
 # ========================================================================================
 @entry.command()
-@click.option(
-    '-d', '--directory',
-    type=click.Path(exists=True),
-    default=DEFAULT_NEW_DIR,
-    show_default=True,
-    help='Directory to scan for new PDFs.'
-)
-@click.option(
-    '-m', '--meta',
-    is_flag=True,
-    help='Display metadata information for each PDF.'
-)
+# file_okay=False ensures autocomplete prefers directories
+@click.argument('directory', type=click.Path(exists=True, file_okay=False), default='.')
 @click.option(
     '-r', '--recursive',
     is_flag=True,
-    help='Recursive search of DIRECTORY and its sub-directories, default is single.'
+    show_default=True,
+    help='Recursive search of DIRECTORY and its sub-directories.'
 )
-def new(directory, meta, recursive):
+@click.option(
+    "-s", "--save-path",
+    type=click.Path(dir_okay=False, writable=True),
+    default=None,  # Set to None to handle dynamic default logic below
+    help="Output path for bibtex file. Defaults to {directory}/bibliography.bib"
+)
+def new_docs(directory, recursive, save_path):
     """
-    Scan a directory for new PDF files and optionally display metadata.
+    Scan a directory for new [PDF] document files and optionally display metadata.
 
     Note ``new`` requires an open library for timezone and name completion.
     Optionally: look for duplicates!
     """
-    logger.info("Scanning directory %s", directory)
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo('No open library...exiting')
-        LibraryContext.last_new = EMPTY_DF
+    directory = Path(directory).absolute()
+    click.echo(f'Scanning {directory}')
+    if not directory.exists():
+        click.echo("Input directory must exist.")
         return
-    try:
-        dfs = lib.get_new_documents(directory, meta, recursive)
-    except FileNotFoundError:
-        click.echo('%s directory not found', directory)
-        LibraryContext.last_new = EMPTY_DF
-        return
-    else:
-        # store it away in the context
-        LibraryContext.last_new = dfs
 
-    if meta:
-        qd(dfs[['n', 'create', 'file_name', 'meta_author',
-                            'meta_subject', 'meta_title', 'meta_crossref']]
-                       .sort_values('create', ascending=False)
-                       )
+    docs = []
+    bibs = []
+    file_generator = directory.rglob("*.pdf") if recursive else directory.glob("*.pdf")
+    for f in file_generator:
+        if not f.is_file():
+            continue
+        click.echo(f'Scanning {f.name}')
+        try:
+            doc = Document(f)
+            doc.process()
+            docs.append(doc)
+            blob = doc.bibtex()
+            bibs.append(blob)
+        except Exception as e:
+            click.echo(f'Error: {e}')
+
+    click.echo(f'Found {len(docs)} docs and created {len(bibs)} bib entries:\n')
+    s = '\n\n'.join(bibs)
+    click.echo(s)
+    click.echo()
+
+    # Dynamic default: if not provided, save to bibliography.bib in the target dir
+    if save_path is None:
+        save_path = directory / "bibliography.bib"
     else:
-        qd(dfs[['n', 'file_name']])
+        save_path = Path(save_path)
+    click.echo(f'Saving bib file to {save_path.absolute()}')
+    # actually save
+    save_path.write_text(s, encoding='utf-8')
 
 
 # ========================================================================================
@@ -708,6 +709,13 @@ def rg(args, n):
 
     return
 
+# helpers =--------------------------
+def get_available_libraries():
+    """Return list of library directory names."""
+    if not LIBRARIES_DIR.exists():
+        return []
+    return
+
 
 # Uber using Gemini new technology Nov 2025
 @entry.command()
@@ -715,200 +723,19 @@ def rg(args, n):
 def uber(debug):
     """QT Standalone Shell."""
     shell = UberShell("archivum", debug)
+
+    # figure completers
+    completers = {}
+    completers['open-library'] = DynamicCompleter(lambda: WordCompleter(Library.list()))
+
     # Register QT commands, exclude 'uber' to prevent recursion
-    shell.register_click_group(entry, exclude=["uber"])
-    shell.start()
+    shell.register_click_group(entry, exclude=["uber"], completers=completers)
 
+    def prompt_function():
+        lib = LibraryContext.get()
+        return HTML(f"<ansired>archivum <ansigreen>[{lib.name}]</ansigreen> > </ansired>")
 
-# old manual uber loop
-# ========================================================================================
-@entry.command()
-@click.option(
-    "-l", "lib_name",
-    default='',
-    required=False,
-    type=str,
-    help="Starting library name, default 'Uber-Library'"
-)
-@click.option(
-    '-c', '--logconfig',
-    type=str,
-    default='',
-    help='Log config file, default uses default',
-)
-@click.option(
-    '-s', '--start',
-    type=str,
-    required=False,
-    default='',
-    help='Starting command, e.g., uber query-library.'
-)
-@click.argument(
-    "subcommand_args",
-    nargs=-1,
-    type=click.UNPROCESSED,
-)
-def uber_old(lib_name, start, logconfig, subcommand_args):
-    """
-    Start an interactive REPL loop for issuing archivum commands.
-
-    If given, open lib_name, otherwise open the default library.
-
-    \b
-    Examples:
-        - archivum uber
-        - archivum uber "query-library"
-        - archivum uber "open-library mylib"
-        - archivum uber -d -s query-library -- "recent top 10 !/Wang, R/"
-
-    \b
-    Arguments
-        - argument: argument to pass to the subcommand."
-    """
-    # fire up logging
-    if logconfig == '':
-        with (files("archivum.configurations") / "logging-default.yaml").open("r") as f:
-            cfg = yaml.safe_load(f)
-    else:
-        p = Path(logconfig)
-        assert p.exists()
-        with p.open('r') as f:
-            cfg = yaml.safe_load(f)
-
-    logging.config.dictConfig(cfg)
-    logger.info('logging loaded')
-
-    commands = [
-        'open-library',
-        'save-library',
-        'close-library',
-        'create-library',
-        'merge-library',
-        'query-library',
-        'list-libraries',
-        'get-library-stats',
-        'get-distinct-values',
-        'new',
-        'import',
-        'rg',
-        'cls',
-        'exit',
-    ]
-    safe_on_empty_libraries = [
-        'open-library',
-        'create-library',
-        'list-libraries',
-        'new',
-        'cls',
-        'exit',
-    ]
-
-    # Hybrid resolver: prefix match first, fallback to fuzzy
-    fuzzy_completer = FuzzyCompleter(WordCompleter(commands))
-
-    def resolve_command_hybrid(cmd: str) -> str:
-        prefix_matches = [c for c in commands if c.startswith(cmd)]
-        if len(prefix_matches) == 1:
-            return prefix_matches[0]
-        doc = Document(text=cmd)
-        completions = list(fuzzy_completer.get_completions(doc, complete_event=None))
-        return completions[0].text if len(completions) == 1 else cmd
-
-    # Interactive prompt with fuzzy + nested completer for UI
-    # session = PromptSession(
-    #     completer=FuzzyCompleter(NestedCompleter({c: None for c in commands}))
-    # )
-    session = PromptSession(
-        completer=FuzzyCompleter(WordCompleter(commands, sentence=True))
-    )
-
-    lib_name = lib_name or DEFAULT_CONFIG_FILE
-    logger.info('Opening "%s" and starting interactive loop.', lib_name)
-    entry(args=["open-library", lib_name], standalone_mode=False)
-
-    if len(subcommand_args) == 1:
-        subcommand_args = list(subcommand_args)
-    elif len(subcommand_args):
-        subcommand_args = [' '.join(subcommand_args)]
-    else:
-        subcommand_args = []
-
-    while True:
-        try:
-            lib = LibraryContext.get()
-            q = start or session.prompt(get_prompt('uber'))
-            start = ''
-            # dispatch call
-            if q in {'exit', ';', 'x', '..'}:
-                break
-            elif q in {'?', 'h'}:
-                click.echo("Available commands:\n * " + "\n * ".join(commands) + "\n")
-                entry(args=['uber', '--help'], standalone_mode=False)
-            elif q == 'cls':
-                os.system('cls' if os.name == 'nt' else 'clear')
-            elif q:
-                try:
-                    args = q.split()
-                    if args:
-                        args[0] = resolve_command_hybrid(args[0])
-                    logger.info('uber dispatch, resolved args = %s, sub = %s', args, subcommand_args)
-                    # only query-library function takes debug arg
-                    if len(args) > 1 and 'debug' in args and 'query-library' not in args:
-                        args.remove('debug')
-                    cmd = args[0]
-                    if lib.is_empty and cmd not in safe_on_empty_libraries:
-                        click.echo(f'No library open, cannot execute {cmd}.')
-                    else:
-                        print(args + subcommand_args)
-                        entry(args=args + subcommand_args, standalone_mode=False)
-                        subcommand_args = []
-                    logger.info('REPL loop completed.')
-                except Exception as e:
-                    logger.error(f"Error: {e}")
-        except (KeyboardInterrupt, EOFError):
-            break
-
-
-# ========================================================================================
-# ========================================================================================
-def repl_help():
-    """Help string for repl loop."""
-    return """
-Repl Help
-=========
-
-[select top regex order etc] > output file
-
-* > pipe output NYI.
-
-cls     clear screen
-?       show help
-x       exit
-
-"""
-
-
-# ========================================================================================
-def uber_help():
-    h = '''
-Meta
-====
-.. ; x               exit
-? h                  help
---help               Built in help (always available)
-
-Help for Archivum Scripts
-==========================
-query-repl          enter query REPL loop
-new                 display new PDFs in watched folders
-upload              upload new pdf(s)
-list                list all archivum libraries
-deets               details on all archivum libraries
-uber                Uber search, access to all archivum functions
-cls                 clear screen
-
-'''
-    click.echo(h)
+    shell.start(prompt_function=prompt_function)
 
 
 if __name__ == '__main__':

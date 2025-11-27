@@ -318,12 +318,8 @@ class Bib2df():
             self.accent_mapper = accent_mapper
         return self._author_map_df
 
-    def distinct(self, c, source='ref_df'):
+    def distinct(self, c, df):
         """Return distinct occurrences of col c."""
-        if source == 'ref_df' and self._ref_df is None:
-            print('*** distinct with ref_df not set, defaulting to df')
-            source = 'df'
-        df = getattr(self, source)
         if df is None:
             return df
         if c == 'author':

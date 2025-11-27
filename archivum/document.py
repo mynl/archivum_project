@@ -1,406 +1,356 @@
-"""
-Document class: manages physical document file.
-
-Meta data, full text extraction etc. For pdf and (?) epub, djvu, dvi and
-other formats.
-"""
-
-from collections import namedtuple
-from functools import partial
-from multiprocessing import Pool
-from pathlib import Path
+import logging
 import re
 import subprocess
 import unicodedata
+from pathlib import Path
+from datetime import datetime
+from typing import Optional, Dict, List, Tuple
 
-import pymupdf
-import pandas as pd
-from pypdf import PdfReader
+import pymupdf  # fitz
 from rapidfuzz.fuzz import ratio
-from tqdm import tqdm
 
-from . import EMPTY_LIBRARY
+from .arxiv import lookup_arxiv
+from .crossref import lookup_doi, search as xref_search
 
+logger = logging.getLogger(__name__)
 
-class Document():
-    """Manage physical document files."""
+# Mapping Crossref types to BibTeX types
+CROSSREF_TO_BIBTEX = {
+    'journal-article': 'article',
+    'book-chapter': 'incollection',
+    'proceedings-article': 'inproceedings',
+    'monograph': 'book',
+    'book': 'book',
+    'report': 'techreport',
+    'dissertation': 'phdthesis',
+    'preprint': 'article', # Often best fit for arXiv
+}
 
-    def __init__(self, doc_path, library):
-        """Create Documents class based on file path."""
-        self.library = library
-        self.text_dir_path = library.text_dir_path if library else None
-        self.extractor = library.config.extractor if library else None
-        self.tz = library.config.timezone if library else "Europe/London"
-        self.doc_path = doc_path
-        self.meta_author = ''
-        self.meta_author_ex = ''
-        self.meta_title = ''
-        self.meta_subject = ''
-        self.meta_raw = None
-        self.meta_crossref = ''
-        self.title_similarity = 0
-        self.best_guess_title = ''
-        self.best_guess_query = ''
-        # from page 1, the cover page
-        self.cover_author = ''
-        self.cover_title = ''
-        self._stats = None
-        self._text = ''
+class Document:
+    """
+    Manages a physical PDF document (an afile).
+    Handles text extraction, metadata discovery, and BibTeX generation.
+    """
+
+    def __init__(self, doc_path: Path):
+        self.doc_path = Path(doc_path)
+        self._text: str = ""
+
+        # The central source of truth for the best-guess info
+        self.bib: Dict[str, str] = {
+            "entry_type": "article",  # default
+            "title": "",
+            "author": "",  # Normalized string "Last, First and Last, First"
+            "year": "",
+            "month": "",
+            "day": "",
+            "doi": "",
+            "arxiv_id": "",
+            "journal": "",      # For articles
+            "booktitle": "",    # For chapters/proceedings
+            "publisher": "",
+            "volume": "",
+            "number": "",
+            "pages": "",
+        }
 
     def __repr__(self):
-        return f'Document({self.doc_path.name})'
+        return f"Document({self.doc_path.name})"
 
     @property
-    def has_text(self):
-        return self._text != ""
+    def has_text(self) -> bool:
+        return bool(self._text)
 
-    def exists(self):
-        return self.doc_path.exists()
-
-    @property
-    def name(self):
-        return self.doc_path.name
-
-    @property
-    def stats(self):
+    def extract_text(self) -> str:
         """
-        Read file information for the current document.
-
-        Currently PDFs only.
+        Extracts text using pdftotext.
+        Stores result in self._text and returns it.
         """
-        if self._stats is None:
-            stat = self.doc_path.stat(follow_symlinks=True)
-            self._stats = {
-                "name": self.doc_path.name,
-                "path": str(self.doc_path.as_posix()),
-                "mod": stat.st_mtime_ns,
-                "create": stat.st_ctime_ns,
-                "access": stat.st_atime_ns,
-                "node": stat.st_ino,
-                "links": stat.st_nlink,
-                "size": stat.st_size,
-                "suffix": self.doc_path.suffix[1:],
-            }
-            self._stats["create"] = pd.to_datetime(self._stats["create"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
-            self._stats["mod"] = pd.to_datetime(self._stats["mod"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
-            self._stats["access"] = pd.to_datetime(self._stats["access"], unit="ns").tz_localize("UTC").tz_convert(self.tz)
-        return self._stats
-
-    def add_meta_data(self):
-        """
-        Extract meta data from pdf.
-
-        Return author(ex), subject, title and raw output in namedtuple.
-        """
-        with pymupdf.open(self.doc_path) as doc:
-            self.meta_raw = doc.metadata
-        meta_keys = [
-            'author',
-            'subject',
-            'title',
-        ]
-        a = self.meta_raw.get('author', '').strip()
-        self.meta_author_ex = ''
-        title = self.meta_raw.get('title', '').strip()
-        title = re.sub(r'Microsoft (PowerPoint|Word)( - )?|Presentation title', '', title, flags=re.IGNORECASE)
-        self.meta_title = title
-        self.meta_subject = self.meta_raw.get('subject', '').strip()
-
-        # deal with author
-        if a != '':
-            if a.find(',') < 0:
-                # proba first last
-                *f, l = a.split(' ')
-                a = l + ', ' + ' '.join(f)
-        self.meta_author = a
-        if not self.library.is_empty and a != '':
-            self.meta_author_ex = self.library.to_name_ex(a, strict=False)
-        else:
-            self.meta_author_ex = ''
-        self.meta_crossref = self.get_guess_crossref_query()
-
-    def _meta_data_debug(self):
-        """Extract meta data from pdf, verbose testing version."""
-        # this confirms the two are about the same...we'll use pymupdf
-        reader = PdfReader(self.doc_path)
-        raw_meta = reader.metadata
-        ans = {}
-        m1 = {k.strip("/"): v for k, v in raw_meta.items()}
-        m1_keys = ['Author',
-                   'Category',
-                   'Subject',
-                   'Title',
-                   'doi',
-                   ]
-        for k in m1_keys:
-            v = m1.get(k, None)
-            if v:
-                ans[f'm1_{k.lower()}'] = v
-
-        with pymupdf.open(self.doc_path) as doc:
-            m2 = doc.metadata
-        m2_keys = [
-            'author',
-            'subject',
-            'title',
-        ]
-        for k in m2_keys:
-            v = m2.get(k, None)
-            if v.title() in m1:
-                assert m1[v.title()] == v
-            if v:
-                ans[f'm2_{k}'] = v
-        return ans, m1, m2
-        # return {'pdf_reader': m1, 'frtiz': m2}
-
-    def text_path(self):
-        """Return Path to where text is or will be stored."""
-        if self.text_dir_path is None:
-            return None
-        else:
-            return (self.text_dir_path
-                    / self.doc_path.with_suffix(f'.{self.extractor}.md')
-                    .relative_to(self.doc_path.anchor))
-
-    def text_path_exists(self):
-        """Check if text file exists."""
-        return False if self.text_path() is None else self.text_path().exists()
-
-    def extract_text(self):
-        """Current best-efforts extraction."""
-        if self._text != "":
+        if self._text:
             return self._text
-        if self.has_text:
-            txt_out = self.text_path()
-            if txt_out.exists():
-                self._text = txt_out.read_text(encoding='utf-8')
-                return self._text
-        self._text = self._extract_text_pdftotext()
-        if self.text_dir_path is not None:
-            txt_out.parent.mkdir(parents=True, exist_ok=True)
-            txt_out.write_text(self._text, encoding='utf-8')
-        return self._text
 
-    def _extract_text_compare(self):
-        """Compare both methods."""
-        fr = self._extract_text_pymupdf()
-        fr = ''
-        tt = self._extract_text_pdftotext()
-        self.doc_path.with_suffix('.pymupdf.md').write_text(fr, encoding='utf-8')
-        self.doc_path.with_suffix('.pdftotext.md').write_text(tt, encoding='utf-8')
-        DocText = namedtuple('DocText', 'pymupdf,pdftotext')
-        return DocText(fr, tt)
+        try:
+            logger.info('extract text: %s', self.doc_path)
+            # -raw: content stream order, -nopgbrk: no page breaks
+            result = subprocess.run(
+                ["pdftotext", "-raw", "-nopgbrk", str(self.doc_path), "-"],
+                capture_output=True,
+                check=True
+            )
+            text = result.stdout.decode("utf-8", errors="replace").replace('\r', '')
 
-    def _extract_text_pymupdf(self):
-        """Cross referencing between docs and refs."""
-        with pymupdf.open(self.doc_path) as doc:
-            return "\n".join(page.get_text("text", sort=True) for page in doc)
+            # Fix hyphenation (word-\nword -> wordword)
+            text = re.sub(r'(\w+)-\n(\w+)', r'\1\2', text)
+            # Normalize unicode
+            text = unicodedata.normalize("NFC", text)
 
-    def _extract_text_pdftotext_old(self):
-        """Cross referencing between docs and refs."""
-        result = subprocess.run(
-            ["pdftotext", "-layout", "-raw", "-nopgbrk", str(self.doc_path), "-"],
-            capture_output=True,
-            check=True
-        )
-        text = result.stdout.decode("utf-8", errors="replace")
-        text = re.sub(r'\r', r'', text)
-        return text
+            self._text = text
+            return text
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.error(f"Error extracting text for {self.doc_path.name}: {e}")
+            return ""
 
-    def _extract_text_pdftotext(self) -> str:
-        """Extract and clean text from a PDF using pdftotext."""
-
-        # Run pdftotext with UTF-8 output to stdout, suppressing page breaks.
-        result = subprocess.run(
-            ["pdftotext", "-raw", "-nopgbrk", str(self.doc_path), "-"],
-            capture_output=True,
-            check=True
-        )
-
-        # Decode and normalize line endings to Unix style (\n).
-        text = result.stdout.decode("utf-8", errors="replace").replace('\r', '')
-
-        # Remove hyphenated line breaks: "hyphen-\nated" → "hyphenated"
-        text = re.sub(r'(\w+)-\n(\w+)', r'\1\2', text)
-
-        # Normalize Unicode (e.g., é as a single composed character).
-        text = unicodedata.normalize("NFC", text)
-
-        return text
-
-    @staticmethod
-    def _looks_like_title(text):
-        """Test if text looks like a title."""
-        if not text or not isinstance(text, str):
-            return False
-        text = text.strip()
-        # Reject if mostly digits, file junk, or boilerplate
-        if re.fullmatch(r"[\d\s\-_.]+", text):
-            return False
-        if len(text) < 5 or len(text.split()) < 2:
-            return False
-        return True
-
-    @staticmethod
-    def _extract_year(text):
-        """Extract year from text."""
-        if not isinstance(text, str):
-            return None
-        m = re.search(r"\b(19|20)\d{2}\b", text)
-        return m.group() if m else None
-
-    @staticmethod
-    def _de_slugify(text):
-        return text.replace('_', ' ').strip()
-
-    def get_best_guess_title(self):
-        """Extract best guess for a title using meta data, page 1, and file name."""
-        self.title_similarity = ratio(self.meta_title, self.cover_title)
-        if self.title_similarity > 90:
-            return self.meta_title
-        elif len(self.meta_title) > len(self.cover_title) and len(self.meta_title) > 10:
-            return self.meta_title
-        elif len(self.cover_title) > len(self.meta_title) and len(self.cover_title) > 10:
-            return self.cover_title
-        # no obvious contender
-        fn = self.doc_path.name.replace('.pdf', '').replace('_', ' ')
-        if len(fn.split(' ')) > 3:
-            return fn
-        else:
-            return ''
-
-    def get_guess_crossref_query(self):
-        """Tried to guess a reasonable cross ref query search from the metadata and filename."""
-        # Try clean metadata title first
-        title = self.meta_title
-        author = self.meta_author_ex or self.meta_author
-        subject = self.meta_subject
-        fname = self.doc_path.stem
-
-        year = self._extract_year(subject) or self._extract_year(title) or self._extract_year(fname)
-
-        author = query = ''
-        if self._looks_like_title(title):
-            query = title
-        elif self._looks_like_title(subject):
-            query = subject
-        elif self._looks_like_title(self._de_slugify(fname)):
-            query = self._de_slugify(fname)
-        else:
-            return ''  # nothing usable
-
-        # Prefer to include author if it's more than 1 word
-        if author and len(author.split()) >= 2:
-            query = f"{author} {query}"
-
-        if year:
-            query = f"{query} {year}"
-
-        return query
-
-    def add_cover_title_author(self):
+    def process(self):
         """
-        Try to guess authors and title from first page of pdf
-
-        Heuristics for finding title and author
-            Title is usually the largest text block near the top.
-            Authors often follow the title and may include email/affiliations.
-            Try regular expressions for email/domain to help anchor authors.
+        Run the full discovery pipeline to populate self.bib.
+        Order of operations increases in 'trust':
+        1. File Metadata / Filename
+        2. Visual Inspection (Cover Page)
+        3. Identifier Scrape (DOI/Arxiv found in text)
+        4. External API Enhancement (Crossref/Arxiv)
         """
-        doc = pymupdf.open(self.doc_path)
-        first_page = doc[0]
-        blocks = first_page.get_text("dict")["blocks"]
+        # 1. Base Metadata
+        self._step_metadata()
 
-        texts = []
+        # 2. Visual/Text Inspection of Page 1
+        self._step_cover_page()
+
+        # 3. Enhance with External APIs
+        self._step_external_enhancement()
+
+        # Final cleanup
+        if not self.bib["title"]:
+            self.bib["title"] = self.doc_path.stem.replace('_', ' ')
+            self.bib["entry_type"] = "misc"
+
+    def bibtex(self) -> str:
+        """Generates a BibTeX entry blob."""
+        if not self.bib["title"]:
+            return ""
+
+        # Generate Citation Key: LastNameYYYY
+        last_name = "Unknown"
+        if self.bib["author"]:
+            # Assume "Last, First" or "First Last".
+            # Simple heuristic: take the first word of the string if no comma,
+            # or pre-comma if comma exists.
+            first_auth = self.bib["author"].split(" and ")[0].strip()
+            if "," in first_auth:
+                last_name = first_auth.split(",")[0].strip()
+            else:
+                last_name = first_auth.split(" ")[-1].strip()
+
+        # Remove non-alphanumeric from key
+        last_name = re.sub(r'\W+', '', last_name)
+        year = self.bib["year"] or "XXXX"
+        cite_key = f"{last_name}{year}"
+
+        entry_type = self.bib["entry_type"]
+        lines = [f"@{entry_type}{{{cite_key},"]
+
+        # Fields to exclude from output
+        exclude = {'entry_type', 'arxiv_id'}
+
+        # Logic to swap journal/booktitle based on type
+        display_bib = self.bib.copy()
+        if entry_type == 'article' and not display_bib['journal'] and display_bib['booktitle']:
+             display_bib['journal'] = display_bib.pop('booktitle')
+        elif entry_type in ['inproceedings', 'incollection'] and not display_bib['booktitle'] and display_bib['journal']:
+             display_bib['booktitle'] = display_bib.pop('journal')
+
+        for key, val in display_bib.items():
+            if val and key not in exclude:
+                safe_val = str(val).replace("{", "\\{").replace("}", "\\}")
+                if key == 'title':
+                    # double braces for title
+                    lines.append(f"  {key} = {{{{{safe_val}}}}},")
+                else:
+                    lines.append(f"  {key} = {{{safe_val}}},")
+
+        if self.bib['arxiv_id']:
+            lines.append(f"  eprint = {{{self.bib['arxiv_id']}}},")
+            lines.append("  archivePrefix = {arXiv},")
+
+        p = self.doc_path
+        mendeley_file_str = f':{p.drive[0]}\\:{str(p.absolute().as_posix())[2:]}:{p.suffix[1:]}'
+        lines.append(f'  file = {{{mendeley_file_str}}},')
+
+        lines.append("}")
+        return "\n".join(lines)
+
+    # ----------------------------------------------------------------------
+    # Pipeline Steps
+    # ----------------------------------------------------------------------
+
+    def _step_metadata(self):
+        """Extract embedded PDF metadata."""
+        try:
+            with pymupdf.open(self.doc_path) as doc:
+                meta = doc.metadata
+        except Exception:
+            return
+
+        title = meta.get('title', '').strip()
+        author = meta.get('author', '').strip()
+        subject = meta.get('subject', '').strip()
+
+        # Clean garbage titles
+        if title:
+            clean_title = re.sub(r'Microsoft (PowerPoint|Word)( - )?|Presentation title', '', title, flags=re.IGNORECASE)
+            self.bib["title"] = clean_title.strip()
+
+        if author:
+            self.bib["author"] = author
+
+        # Attempt to find year in subject or creation date
+        if not self.bib["year"]:
+            year_match = re.search(r'\b(19|20)\d{2}\b', subject)
+            if year_match:
+                self.bib["year"] = year_match.group(0)
+            else:
+                # Fallback to file creation date from metadata
+                cdate = meta.get('creationDate', '')
+                if cdate.startswith('D:'):
+                    self.bib["year"] = cdate[2:6]
+
+    def _step_cover_page(self):
+        """Scrape Page 1 for identifiers and 'Largest Font' title."""
+        try:
+            with pymupdf.open(self.doc_path) as doc:
+                page = doc[0]
+                text_dict = page.get_text("dict")
+                raw_text = page.get_text("text")
+        except Exception:
+            return
+
+        # A. Identifier Scraping (High Trust)
+        # Arxiv ID
+        arxiv_match = re.search(r'arXiv:(\d{4}\.\d{4,5})', raw_text, re.IGNORECASE)
+        if arxiv_match:
+            self.bib["arxiv_id"] = arxiv_match.group(1)
+
+        # DOI
+        doi_match = re.search(r'10\.\d{4,9}/[-._;()/:A-Z0-9]+', raw_text, re.IGNORECASE)
+        if doi_match:
+            self.bib["doi"] = doi_match.group(0)
+
+        # B. Visual Title Extraction (Medium Trust)
+        # Only override metadata title if metadata looked garbage (short) or empty
+        # and this visual title looks good.
+        visual_title = self._find_largest_text(text_dict)
+
+        current_title = self.bib["title"]
+        if not current_title or len(current_title) < 5 or "Microsoft" in current_title:
+             if visual_title and len(visual_title) > 5:
+                 self.bib["title"] = visual_title
+        elif visual_title:
+             # If we have both, trust visual if it's significantly longer
+             # (Metadata often truncates) or very similar
+             sim = ratio(current_title.lower(), visual_title.lower())
+             if sim < 90 and len(visual_title) > len(current_title):
+                 self.bib["title"] = visual_title
+
+    def _step_external_enhancement(self):
+        """Use found IDs or Title/Author query to fetch clean data."""
+
+        # 1. Arxiv Lookup
+        if self.bib["arxiv_id"]:
+            logger.info('arxiv lookup %s', self.bib["arxiv_id"])
+            data = lookup_arxiv(self.bib["arxiv_id"])
+            # Assuming data returns a dict or list of dicts.
+            # Adjust based on your actual arxiv module return signature.
+            if data:
+                # If lookup_arxiv returns a dict keyed by ID, or a single result
+                res = data if isinstance(data, dict) else data[0]
+                self.bib["title"] = res.get('title', self.bib["title"])
+                self.bib["author"] = res.get('author', self.bib["author"]) # format list to string if needed
+                self.bib["year"] = str(res.get('year', self.bib["year"]))
+                self.bib["journal"] = "arXiv preprint"
+                return # Stop if we found it via Arxiv
+
+        # 2. DOI Lookup
+        if self.bib["doi"]:
+            logger.info('doi lookup %s', self.bib["doi"])
+            data = lookup_doi(self.bib["doi"])
+            if data:
+                self._update_from_crossref(data)
+                return
+
+        # 3. Crossref Search (Last Resort)
+        # Construct query
+        q_title = self.bib["title"]
+        q_auth = self.bib["author"]
+        if q_title and len(q_title) > 10:
+            logger.info('xref lookup %s, %s', self.bib["author"], self.bib["title"])
+            results = xref_search(title=q_title, author=q_auth)
+
+            if results:
+                # Validate the top result
+                top = results[0] # assuming list of results
+                top_title = top.get('title', [''])[0] if isinstance(top.get('title'), list) else top.get('title', '')
+
+                # Only accept if titles match reasonably well (>85%)
+                if ratio(q_title.lower(), top_title.lower()) > 85:
+                    self._update_from_crossref(top)
+
+    def _update_from_crossref(self, data: Dict):
+        """Map Crossref API response to internal bib dict."""
+        # Titles in crossref are often lists
+        t = data.get('title', '')
+        self.bib["title"] = t[0] if isinstance(t, list) and t else t
+
+        # Authors: Crossref usually returns list of dicts [{'given':, 'family':}]
+        authors = data.get('author', [])
+        if isinstance(authors, list):
+            auth_strs = []
+            for a in authors:
+                if 'family' in a:
+                    auth_strs.append(f"{a.get('family')}, {a.get('given', '')}".strip(', '))
+            self.bib["author"] = " and ".join(auth_strs)
+
+        # Date
+        # Crossref 'published-print' or 'published-online' -> 'date-parts' [[2020, 1, 1]]
+        pub = data.get('published-print') or data.get('published-online') or data.get('created')
+        if pub and 'date-parts' in pub:
+            self.bib["year"] = str(pub['date-parts'][0][0])
+
+        self.bib["doi"] = data.get('DOI', self.bib["doi"])
+
+        # Container (Journal/Proceedings)
+        j = data.get('container-title', [])
+        container = j[0] if j else ""
+
+        if self.bib['entry_type'] in ['inproceedings', 'incollection']:
+            self.bib["booktitle"] = container
+        else:
+            self.bib["journal"] = container
+
+        # Extended Fields
+        self.bib["publisher"] = data.get('publisher', "")
+        self.bib["volume"] = data.get('volume', "")
+        self.bib["number"] = data.get('issue', "") or data.get('journal-issue', {}).get('issue', "")
+        self.bib["pages"] = data.get('page', "")
+
+    def _find_largest_text(self, text_dict: Dict) -> str:
+        """
+        Heuristic: The title is usually the text span with the largest font size
+        on the first page.
+        """
+        blocks = text_dict.get("blocks", [])
+        candidates = []
+
         for b in blocks:
             for line in b.get("lines", []):
-                for span in line["spans"]:
-                    texts.append((span["size"], span["text"]))
+                for span in line.get("spans", []):
+                    text = span["text"].strip()
+                    if len(text) > 1: # Ignore artifacts
+                        candidates.append((span["size"], text))
+
+        if not candidates:
+            return ""
 
         # Sort by size descending
-        texts.sort(reverse=True)
+        candidates.sort(key=lambda x: x[0], reverse=True)
 
-        title = texts[0][1].strip() if texts else ""
-        possible_authors = [t[1].strip() for t in texts[1:4]]
-        self.cover_author = possible_authors
-        self.cover_title = title
+        # Take the largest. If the next few are same size (multiline title), join them.
+        largest_size = candidates[0][0]
+        title_parts = []
 
-    def uber(self):
-        """
-        Run all edits to enhance a Document.
+        for size, text in candidates:
+            # Allow small float tolerance for "same size"
+            if abs(size - largest_size) < 0.5:
+                title_parts.append(text)
+            else:
+                break
 
-        Read meta data, extract title and author from cover page,
-        determine best guess title, and best guess query.
-        """
-        self.stats;
-        self.add_meta_data()
-        self.add_cover_title_author()
-        bgt = self.get_best_guess_title()
-        crc = self.get_guess_crossref_query()
-        return bgt, crc
-
-# extract text
-def _process_single_pdf(doc_path: Path, text_dir_path: Path, extractor: str):
-    try:
-        doc = Document(doc_path, text_dir_path=text_dir_path, extractor=extractor)
-        doc.extract_text()
-        return doc_path, True
-    except Exception as e:
-        return doc_path, False, str(e)
-
-
-def extract_text(pdf_paths: list[Path], text_dir_path: Path, extractor: str = 'pdftotext', workers: int = None):
-    """Extract text from all pdfs using multiprocessing with tqdm."""
-    with Pool(processes=workers) as pool:
-        func = partial(_process_single_pdf, text_dir_path=text_dir_path, extractor=extractor)
-        results = list(tqdm(pool.imap_unordered(func, pdf_paths), total=len(pdf_paths)))
-
-    # summary
-    success = [p for p, ok, *_ in results if ok]
-    failure = [(p, err) for p, ok, *err in results if not ok]
-    TextResult = namedtuple('TextResult', 'success,failure')
-    return TextResult(success, failure)
-
-
-def pdf_dir_to_text(lib_dir_name, text_dir_name='\\temp\\pdf-full-text', extractor='pdftotext'):
-    """Extract text from all PDFs in lib_dir_name (recursive)."""
-    pdfs = list(Path(lib_dir_name).rglob('*.pdf'))
-    print(f'PDFs found: {len(pdfs)=}')
-
-    text_dir_path = Path(text_dir_name)
-    pDocument = partial(Document, text_dir_path=text_dir_path, extractor=extractor)
-
-    docs = [pDocument(p) for p in pdfs]
-    print(f'doc object created: {len(docs)=} and {len(pdfs)=}')
-
-    # do the extraction
-    result = extract_text(pdfs, text_dir_path)
-
-    return pdfs, docs, result
-
-
-def find_pdfs(*dir_names):
-    """Find all pdfs in list dir_names, return list of Paths."""
-    ans = []
-    # size of list before and after each directory to show progress
-    lb = la = 0
-    for dn in dir_names:
-        lb = len(ans)
-        p = Path(dn)
-        if p.exists():
-            ans.extend(p.rglob('*.pdf'))
-            la = len(ans)
-            print(f'Found {la - lb} files in {p.name} and subfolders')
-        else:
-            print(f'{p} does not exist; skipping')
-    return ans
-
-
-def find_missing_txt(pdf_paths, text_dir_name='\\temp\\pdf-full-text', extractor='pdftotext'):
-    """Find pdfs with missing text files."""
-    text_dir_path = Path(text_dir_name)
-    pDocument = partial(Document, text_dir_path=text_dir_path, extractor=extractor)
-
-    docs = [pDocument(p) for p in pdf_paths]
-    docs_wo_text = [d for d in docs if not d.text_path_exists()]
-    return docs_wo_text
+        return " ".join(title_parts)
