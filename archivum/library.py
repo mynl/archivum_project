@@ -24,6 +24,7 @@ from . utilities import TagAllocator
 from . document import Document
 from . config import Configurator
 from . library_base import LibraryBase
+from . bibtex import dict_to_bibtex
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +69,10 @@ class Library(LibraryBase):
         self.text_dir_full_name = str(self.text_dir_path)
         self.reset()
 
+    def __repr__(self):
+        """Create simple string representation."""
+        return f'Library({self.config.name})'
+
     def reset(self):
         """Reset all cache variables."""
         self._last_query = None
@@ -86,10 +91,9 @@ class Library(LibraryBase):
         self._tag_allocator = None
         self.is_dirty = False
         self.is_empty = False
-
-    def __repr__(self):
-        """Create simple string representation."""
-        return f'Library({self.config.name})'
+        self._tag_cache = None
+        self._title_cache = None
+        self._tag_title_cache = None
 
     @property
     def name(self):
@@ -304,12 +308,43 @@ class Library(LibraryBase):
         name_ex = self._trie.longest_unique_completion(name, strict)
         return name_ex
 
+    @property
+    def all_tags(self):
+        if self._tag_cache is None:
+            if self.ref_doc_df.empty:
+                self._tag_cache = []
+            else:
+                self._tag_cache = sorted(self.ref_doc_df['tag'].dropna().unique().astype(str).tolist())
+        return self._tag_cache
+
+    @property
+    def all_titles(self):
+        if self._title_cache is None:
+            if self.ref_df.empty:
+                self._title_cache = []
+            else:
+                self._title_cache = sorted(self.ref_df['title'].dropna().unique().astype(str).tolist())
+        return self._title_cache
+
+    @property
+    def all_tag_titles(self):
+        if self._tag_title_cache is None:
+            if self.ref_df.empty:
+                self._tag_title_cache = []
+            else:
+                tt = [f'{tg}-{ttl}' for tg, ttl in zip(
+                    self.ref_df['tag'],
+                    self.ref_df['title'])]
+                self._tag_title_cache = sorted(tt)
+        return self._tag_title_cache
+
     def next_tag(self, name, year):
         """
         Return the next tag after name, year.
 
         Remembers incremental tags handed out.
         """
+        # TODO Here somewhere, put Casualty Actuarial Society -> CAS etc.
         return self.tag_allocator.get_tag(name, year)
 
     def reset_tag_allocator(self):
@@ -361,39 +396,28 @@ class Library(LibraryBase):
 
         return 0, proc
 
-    # def write_bibtex(self, path: Path) -> None:
-    #     """Write out the current library to a bibtex file."""
-
-    def import_bibtex(
-        self,
-        bibtex_path: Path,
-        imports_dir: Path | None = None,
-        pdf_dir: Path | None = None,
-        audit_mode: bool = False,
-    ):
+    def write_bibtex(self, bibtex_path: Path | None = None):
         """
-        Import references and documents from a BibTeX file into this library.
+        Write out bibtex file of the library.
 
-        This delegates to the import_bibtex helper module, which reuses the
-        Mendeley porting logic (Bib2df) and updates the underlying feather
-        files and in-memory dataframes.
+        Uses config path unless overridden.
         """
-        from . import import_bibtex as import_bibtex_mod
 
-        bibtex_path = Path(bibtex_path)
-        if imports_dir is not None:
-            imports_dir = Path(imports_dir)
-        if pdf_dir is not None:
-            pdf_dir = Path(pdf_dir)
+        bibtex_path = bibtex_path or self.config.bibtex_file
+        bibtex_path = Path(bibtex_path).absolute()
+        ans = []
+        drop_cols = ['arc-source']
+        for r, row in self.ref_df.drop(columns=drop_cols).iterrows():
+            ans.append(dict_to_bibtex(row))
+        txt = '\n\n'.join(ans)
 
-        result = import_bibtex_mod.run_import(
-            bibtex_path=bibtex_path,
-            library=self,
-            imports_dir=imports_dir,
-            pdf_dir=pdf_dir,
-            audit_mode=audit_mode,
-        )
-        return result
+        if bibtex_path.exists():
+            backup = bibtex_path.with_suffix(".bak")
+            if backup.exists(): backup.unlink()
+            backup.hardlink_to(bibtex_path)
+
+        bibtex_path.write_text(txt, encoding='utf-8')
+        logger.info('Wrote %s bibtex entries to %s', len(ans), bibtex_path)
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

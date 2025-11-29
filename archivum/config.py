@@ -48,6 +48,9 @@ class Configurator(BaseModel):
         description="Root directory for BibTeX import runs (relative to BASE_DIR or absolute)",
     )
 
+    tag_name_mapper: dict[str, str] = Field(default_factory=dict,
+        description="Optional mapping of longer names to abbreviations.")
+
     def write_template(self, path: Path):
         """Generate a clean default config file at the given path."""
         path = Path(path)

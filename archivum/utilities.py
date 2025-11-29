@@ -83,7 +83,7 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
             "aligners": {'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
         }
     if max_string_length > 0:
-        default_args["default_formatter"] = default_formatter,
+        default_args["default_formatter"] = default_formatter
 
     default_args = default_args | gt_kwargs
 

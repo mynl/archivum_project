@@ -24,7 +24,7 @@ import datetime as dt
 import shutil
 from IPython.display import display
 
-# import latexcodec
+import latexcodec
 # import Levenshtein  # per Gemini prefer to use rapidfuzz
 from rapidfuzz import distance, fuzz
 import numpy as np
@@ -582,8 +582,27 @@ class Bib2df_Incremental(LibraryBase):
         df = self.ported_df[['author', 'editor', 'year', 'tag', 'title']].copy()
         # figure out what the tag "should be"
         pat = r" |\.|\{|\}|\-|'"
-        a = df.author.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().str.replace(pat, '', regex=True)
-        e = df.editor.map(remove_accents).str.split(',', expand=True, n=1)[0].str.strip().replace(pat, '', regex=True)
+        cpat = re.compile(pat)
+        # handle mapping names to abbreviations
+        # pass the mapping through the same transformation
+        tag_mapper = {cpat.sub("", k): v for
+            k, v in self.reference_library.config.tag_name_mapper.items()}
+        # but not sure that's worth it?
+        # TODO: this is not working!
+        a = (df.author
+                .map(remove_accents)
+                .str.split(',', expand=True, n=1)[0]
+                .str.strip()
+                .str.replace(pat, '', regex=True)
+                .map(lambda x: tag_mapper.get(x, x))
+                )
+        e = (df.editor
+                .map(remove_accents)
+                .str.split(',', expand=True, n=1)[0]
+                .str.strip()
+                .str.replace(pat, '', regex=True)
+                .map(lambda x: tag_mapper.get(x, x))
+                )
         y = df['year'].map(safe_int)
         # the standardized tag, standard_tag (stem)
         df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))

@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+from typing import Union
 import yaml
 
 import click
@@ -37,6 +38,8 @@ from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR
 from . utilities import make_qd
 from . config import Configurator
 from . querex import querex_help
+from . crossref import lookup_doi, search_by_title, search
+from . bibtex import dict_to_bibtex
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
@@ -99,10 +102,30 @@ def get_prompt(cmd):
         print('get prompt error', e, sep='\n')
         return HTML(f'ERR: <ansiyellow>{cmd} > </ansiyellow>')
 # ========================================================================================
-# ===================f=====================================================================
+# ========================================================================================
+
+# Helper
+def _open_document(d):
+    """Try to open document at path d."""
+    # assume windows knows what to do
+    p = Path(d)
+    if not p.exists():
+        logger.info('file %s not found', p.name)
+        return
+    try:
+        # windows only
+        os.startfile(p)
+    except FileNotFoundError:
+        logger.error("File not found %s", d)
+    except PermissionError:
+        logger.error("Permission denied %s", d)
+    except OSError as e:
+        logger.error("OS error while opening %s: %s", d, e)
+    except Exception as e:
+        logger.error("Unexpected error: %s", e)
+
+
 # Completers
-
-
 def make_query_completer_static(df):
     """Make nested query completer for df (eg ref_df or database)."""
     lib = LibraryContext.get()
@@ -155,7 +178,7 @@ def entry():
 
 @entry.command()
 @click.argument('lib_name', type=str)
-def open_library(lib_name):
+def open(lib_name):
     """Open a library by name and set it as current."""
     try:
         lib = Library(lib_name)
@@ -168,7 +191,7 @@ def open_library(lib_name):
 
 
 @entry.command()
-def save_library():
+def save():
     """Save the current library to disk."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -180,7 +203,7 @@ def save_library():
 
 # ========================================================================================
 @entry.command()
-def close_library():
+def close():
     """
     Close the currently open library.
 
@@ -201,14 +224,14 @@ def close_library():
 # ========================================================================================
 # @entry.command()
 # @click.argument('other_lib_name', type=str)
-# def merge_library(other_lib_name):
+# def merge(other_lib_name):
 #     """Merge another library into the current library."""
 #     lib = LibraryContext.get()
 #     if lib.is_empty:
 #         return
 
 #     logger.info("Merging %s into %s", other_lib_name, lib)
-#     logger.todo('Implement merge_library!')
+#     logger.todo('Implement merge!')
 #     # TODO: Implement merge logic
 #     # try:
 #     #     other = Library(other_lib_name)
@@ -221,7 +244,7 @@ def close_library():
 # ========================================================================================
 @entry.command()
 @click.argument('lib_name', type=str)
-def create_library(lib_name):
+def create(lib_name):
     """
     Create and open a new library. SEE ALSO THE CONFIG VERSION
 
@@ -359,7 +382,7 @@ def get_distinct_values(field):
     is_flag=True,
     help='Search ref_df rather than database (default)'
 )
-def query_library(start: str, ref):
+def query(start: str, ref):
     """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -421,21 +444,7 @@ def query_library(start: str, ref):
                     print(f'Trying to open {docs=}')
                     logger.info(f'Trying to open {docs=}')
                     for d in docs:
-                        p = Path(d)
-                        if not p.exists():
-                            logger.info('file %s not found', p.name)
-                            continue
-                        try:
-                            # windows only
-                            os.startfile(p)
-                        except FileNotFoundError:
-                            logger.error("File not found %s", d)
-                        except PermissionError:
-                            logger.error("Permission denied %s", d)
-                        except OSError as e:
-                            logger.error("OS error while opening %s: %s", d, e)
-                        except Exception as e:
-                            logger.error("Unexpected error: %s", e)
+                        _open_document(d)
                 except Exception:
                     raise
                 continue
@@ -456,6 +465,46 @@ def query_library(start: str, ref):
                         f'Found pipe clause {pipe=} TODO: deal with this!')
         except Exception as e:
             click.echo(f"[Error] {e}")
+
+
+# ========================================================================================
+
+@entry.command()
+@click.option('--author', '-a', help='Author name')
+@click.option('--title', '-t', help='Title of work')
+@click.option('--doi', '-d', help='DOI string')
+@click.option('--keywords', '-k', help='Search keywords')
+def crossref(
+    author: Union[str, None],
+    title: Union[str, None],
+    doi: Union[str, None],
+    keywords: Union[str, None]
+) -> None:
+    """
+    Fetch metadata from Crossref and output BibTeX.
+
+    Priority:
+    1. DOI (if provided)
+    2. Title (if provided without author/keywords)
+    3. Generic Search (using provided keywords, title, author)
+    """
+    result = None
+
+    if doi:
+        result = lookup_doi(doi)
+    elif title and not author and not keywords:
+        result = search_by_title(title)
+    else:
+        # 'keywords' maps to the 'query' param in generic search
+        items = search(query=keywords, title=title, author=author, rows=1)
+        if items:
+            result = items[0]
+
+    if result:
+        bibtex = dict_to_bibtex(result)
+        click.echo(bibtex)
+    else:
+        click.echo("No results found.", err=True)
 
 
 # ========================================================================================
@@ -709,24 +758,163 @@ def rg(args, n):
 
     return
 
-# helpers =--------------------------
-def get_available_libraries():
-    """Return list of library directory names."""
-    if not LIBRARIES_DIR.exists():
+
+# tags opening docs ------------------------
+def get_library_tags():
+    """Fetch unique tags from the current library context."""
+    lib = LibraryContext.get()
+    if lib == EMPTY_LIBRARY:
         return []
-    return
+    else:
+        return lib.all_tags
 
 
+@entry.command()
+@click.argument('tag', type=str)
+@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+def tag(tag, all_docs):
+    """Open a document by its tag."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know where to look for text files. Returning")
+        return
+    if lib.ref_doc_df.empty:
+        click.echo("No referenced documents. Returning")
+        return
+
+    df = lib.ref_doc_df.query('tag == @tag')
+    if len(df) == 0:
+        click.echo('No matching documents found to %s', tag)
+    if not all_docs:
+        df = df.iloc[:1]
+    if all_docs and len(df) > 5:
+        click.echo('Found %s docs, just opening first 5', len(df))
+        df = df.iloc[:5]
+    for d in df.path:
+        _open_document(d)
+
+
+# doc title opening ======experimental-----------------
+def get_library_titles():
+    """Fetch unique titles from the current library context."""
+    lib = LibraryContext.get()
+    if lib == EMPTY_LIBRARY:
+        return []
+    else:
+        return lib.all_titles
+
+# from prompt_toolkit.completion import Completer, Completion, FuzzyCompleter, WordCompleter, DynamicCompleter
+
+# # 2. Define the Custom Completer
+# class AllTitlesCompleter(Completer):
+#     """
+#     Yields ALL titles unconditionally.
+#     Allows FuzzyCompleter to handle the filtering/sorting logic entirely,
+#     enabling matching across spaces (e.g. 'risk ins' -> 'Risk Insurance').
+#     """
+#     def get_completions(self, document, complete_event):
+#         titles = get_library_titles()
+#         # We pass the full text before cursor to ensure we are matching
+#         # against the entire buffer if needed, but FuzzyCompleter usually
+#         # handles the filtering. We just yield everything.
+#         for title in titles:
+#             yield Completion(title, start_position=0)
+
+
+@entry.command()
+@click.argument('title', nargs=-1, required=True, type=str)
+@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+def title(title, all_docs):
+    """Open a document by its title with fuzzy search (no spaces!)."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know where to look for text files. Returning")
+        return
+    if lib.ref_df.empty:
+        click.echo("No referenced documents. Returning")
+        return
+
+    # title comes in as a tuple: ('My', 'Paper', 'Title')
+    title = " ".join(title)
+    df = lib.ref_df.query('title == @title')
+    if len(df) == 0:
+        click.echo('No matching documents found to %s', title)
+    if not all_docs:
+        df = df.iloc[:1]
+    if all_docs and len(df) > 5:
+        click.echo('Found %s docs, just opening first 5', len(df))
+        df = df.iloc[:5]
+    doc_tags = df.tag.to_list()  # noqa
+    df2 = lib.ref_doc_df.query("tag in @doc_tags")
+    for d in df2.path:
+        _open_document(d)
+
+def get_library_tag_titles():
+    """Fetch unique titles from the current library context."""
+    lib = LibraryContext.get()
+    if lib == EMPTY_LIBRARY:
+        return []
+    else:
+        return lib.all_tag_titles
+
+
+@entry.command()
+@click.argument('title', nargs=-1, required=True, type=str)
+@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+def tt(title, all_docs):
+    """Open a document by its tag and title with fuzzy search (no spaces!)."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know where to look for text files. Returning")
+        return
+    if lib.ref_df.empty:
+        click.echo("No referenced documents. Returning")
+        return
+
+    # title comes in as a tuple: ('My', 'Paper', 'Title')
+    title = " ".join(title)
+    tag, title = title.split('-')
+    df = lib.ref_df.query('title == @title and tag == @tag')
+    if len(df) == 0:
+        click.echo('No matching documents found to %s', title)
+    if not all_docs:
+        df = df.iloc[:1]
+    if all_docs and len(df) > 5:
+        click.echo('Found %s docs, just opening first 5', len(df))
+        df = df.iloc[:5]
+    doc_tags = df.tag.to_list()  # noqa
+    df2 = lib.ref_doc_df.query("tag in @doc_tags")
+    for d in df2.path:
+        _open_document(d)
+
+# =================================================
 # Uber using Gemini new technology Nov 2025
 @entry.command()
-@click.option("--debug", is_flag=True)
-def uber(debug):
-    """QT Standalone Shell."""
+@click.option("-l", "--lib-name",
+                type=str,
+                default="",
+                help="Open library.")
+@click.option("-a", "--auto-open",
+                is_flag=True,
+                show_default=True,
+                help="If true, auto open the default library.")
+@click.option("-d", "--debug", is_flag=True)
+def uber(lib_name, auto_open, debug):
+    """QT Standalone Shell. Optionally open library."""
     shell = UberShell("archivum", debug)
 
     # figure completers
     completers = {}
-    completers['open-library'] = DynamicCompleter(lambda: WordCompleter(Library.list()))
+    completers['open'] = DynamicCompleter(lambda: WordCompleter(Library.list()))
+
+    # NEW: Register the dynamic fuzzy completer for the 'tag' command
+    # WordCompleter accepts a callable (get_library_tags) to fetch tags at runtime
+    completers['tag'] = FuzzyCompleter(WordCompleter(get_library_tags, ignore_case=True))
+    completers['title'] = FuzzyCompleter(WordCompleter(get_library_titles, ignore_case=True,
+                                            sentence=True, WORD=False, match_middle=True))
+    completers['tt'] = FuzzyCompleter(WordCompleter(get_library_tag_titles, ignore_case=True,
+                                            sentence=True, WORD=False, match_middle=True))
+    # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)
@@ -734,6 +922,17 @@ def uber(debug):
     def prompt_function():
         lib = LibraryContext.get()
         return HTML(f"<ansired>archivum <ansigreen>[{lib.name}]</ansigreen> > </ansired>")
+
+    if lib_name == "" and auto_open:
+        lib_name = DEFAULT_LIBRARY
+
+    if lib_name != "":
+        try:
+            lib = Library(lib_name)
+            LibraryContext.set(lib)
+            logger.info(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
+        except Exception as e:
+            logger.error('Open library error: %s', e)
 
     shell.start(prompt_function=prompt_function)
 
