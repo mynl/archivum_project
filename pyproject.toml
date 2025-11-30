@@ -48,8 +48,8 @@ version = { attr = "archivum.__version__" }
 [project.scripts]
 archivum = "archivum.cli:entry"
 
-# Magic discovery by great2 uber uber routine
-[project.entry-points."great2.plugins"]
+# Magic discovery by uber routine
+[project.entry-points."uber.plugins"]
 archivum = "archivum.cli:entry"
 
 [project.urls]
@@ -70,3 +70,6 @@ dev = [
     "sphinx-toggleprompt",
     "sphinx-multitoc-numbering"
 ]
+
+[tool.ruff]
+extend-ignore = ["E501", "E701", "E702"]

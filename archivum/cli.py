@@ -7,8 +7,6 @@ import logging.config
 import os
 from pathlib import Path
 import re
-import shlex
-import subprocess
 import sys
 from typing import Union
 import yaml
@@ -19,9 +17,12 @@ import pandas as pd
 from pendulum import local_timezone
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import (
-    FuzzyCompleter, WordCompleter,
-    NestedCompleter, DynamicCompleter,
-    Completer, Completion
+    FuzzyCompleter,
+    WordCompleter,
+    NestedCompleter,
+    DynamicCompleter,
+    Completer,
+    Completion,
 )
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.document import Document
@@ -32,34 +33,35 @@ from rich.console import Console
 from rich.text import Text
 
 # for uber loop
-from great2.shell import UberShell
+from great2.shell import UberShell  # type: ignore[import-not-found]
 from rustfuzz import FuzzyMatcherMultiHi
 
-from . reference import Reference
-from . library import Library
-from . document import Document
+from .reference import Reference
+from .library import Library
+from .document import Document
 from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR
-from . utilities import make_qd
-from . config import Configurator
-from . querex import querex_help
-from . crossref import lookup_doi, search_by_title, search
-from . bibtex import dict_to_bibtex, dict_to_bibtex_crossref
+from .utilities import make_qd
+from .config import Configurator
+from .querex import querex_help
+from .crossref import lookup_doi, search_by_title, search
+from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
 
 # local constants
-DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
+DEFAULT_NEW_DIR = str(Path.home() / "Downloads")
 EMPTY_DF = pd.DataFrame([])
 
 # for local display function
-qd = make_qd(max_table_inch_width=18,
-            max_string_length=-1, # no string truncation
-            max_rows=50,
-            display_func=click.echo)
+qd = make_qd(
+    max_table_inch_width=18,
+    max_string_length=-1,  # no string truncation
+    max_rows=50,
+    display_func=click.echo,
+)
 
 # logger
 logger = logging.getLogger(__name__)
 
 console = Console()
-
 
 
 # ========================================================================================
@@ -80,18 +82,18 @@ class LibraryContext:
     matcher_tags_titles = None
 
     @classmethod
-    def set(cls, lib):   # noqa
+    def set(cls, lib):  # noqa
         cls.current = lib
         logger.debug("Library set to: %s", lib)
 
     @classmethod
-    def get(cls):   # noqa
+    def get(cls):  # noqa
         if cls.current is None:
             return cls.no_library
         return cls.current
 
     @classmethod
-    def clear(cls):   # noqa
+    def clear(cls):  # noqa
         logger.debug("Library %s closed.", cls.current)
         cls.current = None
         cls.candidates_tags = None
@@ -146,15 +148,18 @@ def get_prompt(cmd):
     try:
         lib_name = lib.name
         return HTML(
-            '<ansired>archivum </ansired>'
-            f'<ansigreen>[{lib_name}] > </ansigreen>'
-            f'<ansiyellow>{cmd} > </ansiyellow>'
+            "<ansired>archivum </ansired>"
+            f"<ansigreen>[{lib_name}] > </ansigreen>"
+            f"<ansiyellow>{cmd} > </ansiyellow>"
         )
     except AttributeError as e:
-        print('get prompt error', e, sep='\n')
-        return HTML(f'ERR: <ansiyellow>{cmd} > </ansiyellow>')
+        print("get prompt error", e, sep="\n")
+        return HTML(f"ERR: <ansiyellow>{cmd} > </ansiyellow>")
+
+
 # ========================================================================================
 # ========================================================================================
+
 
 # Helper
 def _open_document(d):
@@ -162,7 +167,7 @@ def _open_document(d):
     # assume windows knows what to do
     p = Path(d)
     if not p.exists():
-        logger.info('file %s not found', p.name)
+        logger.info("file %s not found", p.name)
         return
     try:
         # windows only
@@ -184,7 +189,7 @@ def make_query_completer_static(df):
     if lib.is_empty:
         libs = None
     else:
-        libs = {l: None for l in lib.list()}
+        libs = {line: None for line in lib.list()}
     cols = {col: None for col in df.columns}
     cols_with_values = {
         col: {
@@ -198,24 +203,22 @@ def make_query_completer_static(df):
     }
 
     # Placeholder - will override 'open' dynamically later
-    return NestedCompleter.from_nested_dict({
-        "top": {},
-        "recent": None,
-        "verbose": None,
-        "select": {
-            "*": None,
-            "-": cols,
-            **cols
-        },
-        "where": cols_with_values,
-        "order": cols,
-        "sort": cols,
-        "~": cols,
-        "!": cols,
-        "and": None,
-        "open": libs,
-        "o": None,
-    })
+    return NestedCompleter.from_nested_dict(
+        {
+            "top": {},
+            "recent": None,
+            "verbose": None,
+            "select": {"*": None, "-": cols, **cols},
+            "where": cols_with_values,
+            "order": cols,
+            "sort": cols,
+            "~": cols,
+            "!": cols,
+            "and": None,
+            "open": libs,
+            "o": None,
+        }
+    )
 
 
 class RustFuzzyCompleter(Completer):
@@ -232,17 +235,17 @@ class RustFuzzyCompleter(Completer):
             full_text = get_app().current_buffer.document.text_before_cursor
         except RuntimeError:
             # Fallback for unit tests or contexts without an active app
-            logger.debug('Runtime error - defaulting to text before cursor')
+            logger.debug("Runtime error - defaulting to text before cursor")
             full_text = document.text_before_cursor
 
-        logger.debug('Full command line context: |%s|', full_text)
+        logger.debug("Full command line context: |%s|", full_text)
 
         # 2. Determine the pattern.
         # document.text_before_cursor is relative to the NestedCompleter context.
         pattern = document.text_before_cursor
         word = document.get_word_before_cursor()
         replace_len = len(word)
-        logger.debug('word and length %s, %s', word, replace_len)
+        logger.debug("word and length %s, %s", word, replace_len)
 
         # FIX: If prompt_toolkit passes an empty string (common in some nested configs or
         # immediately after typing a command without a space), try to grab the last word
@@ -250,36 +253,36 @@ class RustFuzzyCompleter(Completer):
         if not pattern and full_text.strip() and not full_text.endswith(" "):
             # Logic: split full line and take the last segment as the fuzzy pattern
             parts = full_text.split()
-            logger.debug('split to >> %s', parts)
+            logger.debug("split to >> %s", parts)
             if parts:
-                pattern = ' '.join(parts[1:])
-                logger.debug('Pattern inferred from full_text: |%s|', pattern)
+                pattern = " ".join(parts[1:])
+                logger.debug("Pattern inferred from full_text: |%s|", pattern)
 
-        logger.debug('in get_completions with pattern = |%s|', pattern)
+        logger.debug("in get_completions with pattern = |%s|", pattern)
 
         candidates, matcher = self.get_candidates()
 
         # really is nothing there - delegate
         if not pattern:
-            logger.debug('NOT PATTERN BRANCH')
+            logger.debug("NOT PATTERN BRANCH")
             for cand in candidates or []:
-                yield Completion(
-                    cand,
-                    start_position=-replace_len, # 0,
-                    display=cand
-                )
+                yield Completion(cand, start_position=-replace_len, display=cand)  # 0,
             return
 
         # match
         indices, scores, highlights = matcher.query(pattern, top_k=25)
-        logger.debug('rustfuzz returns indices count = %s', len(indices))
+        logger.debug("rustfuzz returns indices count = %s", len(indices))
 
         # Calculate safe start position
         # prompt_toolkit discards completions if start_position goes out of bounds
         # of the current document slice.
         start_pos = -len(pattern)
         if -start_pos > len(document.text_before_cursor):
-            logger.debug('Clamping start_position %d to %d', start_pos, -len(document.text_before_cursor))
+            logger.debug(
+                "Clamping start_position %d to %d",
+                start_pos,
+                -len(document.text_before_cursor),
+            )
             start_pos = -len(document.text_before_cursor)
 
         for i, score, highlight_indices in zip(indices, scores, highlights):
@@ -289,13 +292,15 @@ class RustFuzzyCompleter(Completer):
             highlight_set = set(highlight_indices)
             highlighted_html = "".join(
                 f"<style bg='ansiyellow' fg='ansired'>{html.escape(char)}</style>"
-                            if i in highlight_set
-                            else html.escape(char)
+                if i in highlight_set
+                else html.escape(char)
                 for i, char in enumerate(candidate_string)
             )
 
             # Merge adjacent marks
-            highlighted_html = highlighted_html.replace("</style><style bg='ansiyellow' fg='ansired'>", "")
+            highlighted_html = highlighted_html.replace(
+                "</style><style bg='ansiyellow' fg='ansired'>", ""
+            )
 
             if 0:
                 highlighted_html = "".join(
@@ -305,12 +310,13 @@ class RustFuzzyCompleter(Completer):
 
                 # Merge adjacent marks
                 highlighted_html = highlighted_html.replace("</mark><mark>", "")
-            logger.info('RF YIELDING %s', highlighted_html)
+            logger.info("RF YIELDING %s", highlighted_html)
             yield Completion(
                 candidate_string,
                 start_position=start_pos,
-                display=HTML(highlighted_html)
-                )
+                display=HTML(highlighted_html),
+            )
+
 
 # ========================================================================================
 # ========================================================================================
@@ -318,20 +324,25 @@ class RustFuzzyCompleter(Completer):
 def entry():
     """CLI for managing bibliographic entries."""
     if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding="utf-8")
+
 
 # ========================================================================================
 
+
 @entry.command()
-@click.argument('lib_name', type=str)
+@click.argument("lib_name", type=str)
 def open(lib_name):
     """Open a library by name and set it as current."""
     try:
         lib = Library(lib_name)
         LibraryContext.set(lib)
-        logger.info(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
+        logger.info(
+            f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references."
+        )
     except Exception as e:
-        logger.error('Open library error: %s', e)
+        logger.error("Open library error: %s", e)
+
 
 # ========================================================================================
 
@@ -359,9 +370,9 @@ def close():
     """
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.secho('No library open; ignoring.')
+        click.secho("No library open; ignoring.")
         return
-    logger.info('Closing library %s', lib)
+    logger.info("Closing library %s", lib)
     lib = LibraryContext.get()
     LibraryContext.clear()
 
@@ -388,7 +399,7 @@ def close():
 
 # ========================================================================================
 @entry.command()
-@click.argument('lib_name', type=str)
+@click.argument("lib_name", type=str)
 def create(lib_name):
     """
     Create and open a new library. SEE ALSO THE CONFIG VERSION
@@ -398,40 +409,79 @@ def create(lib_name):
 
     Library must not already exist.
     """
-    lib_dir_name = lib_name.replace(' ', '-')
+    lib_dir_name = lib_name.replace(" ", "-")
 
     # sort the file out
     lib_path = LIBRARIES_DIR / lib_dir_name
     if lib_path.exists():
-        click.secho('Error: Library file already exists: %s', lib_path)
-        click.secho('Pick another name. Returning, no library created.')
+        click.secho("Error: Library file already exists: %s", lib_path)
+        click.secho("Pick another name. Returning, no library created.")
         return
-    click.secho("=== Library Config Creator ===", fg='cyan')
-    click.secho(f'Creating Library {lib_name} at {lib_path}')
+    click.secho("=== Library Config Creator ===", fg="cyan")
+    click.secho(f"Creating Library {lib_name} at {lib_path}")
 
     def pr(x):
         """Make the prompt string."""
-        return f'[{lib_name}] {x} > '
+        return f"[{lib_name}] {x} > "
 
-    tablefmt_completer = FuzzyCompleter(WordCompleter(
-        ['mixed_grid', 'simple_grid', 'outline', 'simple_outline', 'mixed_outline', 'rst'],
-        ignore_case=True))
+    tablefmt_completer = FuzzyCompleter(
+        WordCompleter(
+            [
+                "mixed_grid",
+                "simple_grid",
+                "outline",
+                "simple_outline",
+                "mixed_outline",
+                "rst",
+            ],
+            ignore_case=True,
+        )
+    )
     while True:
         config = {
             "name": lib_name,
-            "description": click.prompt(pr('Description')),
-            "columns": ['type', 'tag', 'author', 'doi', 'file', 'journal', 'pages', 'title',
-                        'volume', 'year', 'publisher', 'url', 'institution', 'number',
-                        'mendeley-tags', 'booktitle', 'edition', 'month', 'address', 'editor',
-                        'arc-citations', 'arc-source'],
+            "description": click.prompt(pr("Description")),
+            "columns": [
+                "type",
+                "tag",
+                "author",
+                "doi",
+                "file",
+                "journal",
+                "pages",
+                "title",
+                "volume",
+                "year",
+                "publisher",
+                "url",
+                "institution",
+                "number",
+                "mendeley-tags",
+                "booktitle",
+                "edition",
+                "month",
+                "address",
+                "editor",
+                "arc-citations",
+                "arc-source",
+            ],
             # TODO
-            "bibtex_file": click.prompt(pr('BibTeX File'), default=f'\\S\\Telos\\biblio\\{lib_dir_name}-test.bib'),
-            "pdf_dir_name": click.prompt(pr('PDF Directory'), default='\\S\\Telos\\Library'),
+            "bibtex_file": click.prompt(
+                pr("BibTeX File"),
+                default=f"\\S\\Telos\\biblio\\{lib_dir_name}-test.bib",
+            ),
+            "pdf_dir_name": click.prompt(
+                pr("PDF Directory"), default="\\S\\Telos\\Library"
+            ),
             "full_text": "true",
-            "text_dir_name": click.prompt(pr('PDF Directory'), default='\\temp\\pdf-full-text'),
+            "text_dir_name": click.prompt(
+                pr("PDF Directory"), default="\\temp\\pdf-full-text"
+            ),
             "file_formats": ["*.pdf"],
             "hash_files": click.confirm(pr("Hash files?"), default=False),
-            "hash_workers": click.prompt(pr("Number of hash workers"), default=6, type=int),
+            "hash_workers": click.prompt(
+                pr("Number of hash workers"), default=6, type=int
+            ),
             "last_indexed": 0,
             "timezone": click.prompt(pr("Timezone"), default=local_timezone()),
             "tablefmt": click.prompt(pr("Table format"), completer=tablefmt_completer),
@@ -440,13 +490,13 @@ def create(lib_name):
             con = Configurator(**config)
             break
         except ValidationError as e:
-            logger.error('configuration error %s', e)
-            click.secho('Error in config, no file written. Adjust!')
+            logger.error("configuration error %s", e)
+            click.secho("Error in config, no file written. Adjust!")
             # todo  - a quit option!
 
     # con must be valid
     con.save(lib_path)
-    #o open the library
+    # o open the library
     lib = Library(lib_dir_name)
     LibraryContext.set(lib)
     click.secho(f"\nConfig written to {lib_path}", fg="green")
@@ -455,9 +505,10 @@ def create(lib_name):
 # ========================================================================================
 @entry.command()
 @click.option(
-    '-d', '--details',
+    "-d",
+    "--details",
     is_flag=True,
-    help='Show detailed information about each library.'
+    help="Show detailed information about each library.",
 )
 def list(details):
     """List all available libraries."""
@@ -469,9 +520,9 @@ def list(details):
         qd(df)
     else:
         logger.debug("Basic information.")
-        l = Library.list()
-        l.insert(0, 'Library')
-        qd(l)
+        lib_list = Library.list()
+        lib_list.insert(0, "Library")
+        qd(lib_list)
 
 
 # ========================================================================================
@@ -489,10 +540,11 @@ def stats():
 # ========================================================================================
 @entry.command()
 @click.option(
-    '-f', '--field',
+    "-f",
+    "--field",
     type=str,
-    default='',
-    help='Show distinct values of field in each library field.'
+    default="",
+    help="Show distinct values of field in each library field.",
 )
 def get_distinct_values(field):
     """Display number of distinct values in each library field."""
@@ -502,30 +554,28 @@ def get_distinct_values(field):
         return
     field = field.strip()
     logger.debug("Distinct values for field %s", field)
-    if field == '':
+    if field == "":
         df = lib.distinct_values_by_field().reset_index(drop=False)
-        df.index.name = 'field'
-        df = df.sort_values(['distinct'], ascending=[False])
+        df.index.name = "field"
+        df = df.sort_values(["distinct"], ascending=[False])
         qd(df)
     elif field in lib.database:
         df = lib.distinct_value_counts(field).reset_index(drop=False)
         qd(df)
     else:
-        click.echo(f'Field {field} not found in library database.')
+        click.echo(f"Field {field} not found in library database.")
 
 
 # ========================================================================================
 @entry.command()
 @click.argument(
-    'start',
+    "start",
     type=str,
-    default='',
+    default="",
     required=False,
 )
 @click.option(
-    '-r', '--ref',
-    is_flag=True,
-    help='Search ref_df rather than database (default)'
+    "-r", "--ref", is_flag=True, help="Search ref_df rather than database (default)"
 )
 def query(start: str, ref):
     """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
@@ -553,41 +603,41 @@ def query(start: str, ref):
 
     while True:
         try:
-            expr = start or session.prompt(get_prompt('query-library'))
-            start = ''
+            expr = start or session.prompt(get_prompt("query-library"))
+            start = ""
             pipe = False
             if expr.lower() in {"exit", "x", ".."}:
                 break
             elif expr == "?":
                 click.echo(querex_help())
                 continue
-            elif expr == 'cls':
+            elif expr == "cls":
                 # clear screen
-                os.system('cls')
+                os.system("cls")
                 continue
             elif expr.find(">") >= 0:
                 # contains a pipe
-                expr, pipe = expr.split('>')
+                expr, pipe = expr.split(">")
                 pipe = pipe.strip()
-            elif expr.startswith('o ') or expr.startswith('open '):
+            elif expr.startswith("o ") or expr.startswith("open "):
                 # open files
                 if result.empty:
-                    click.echo('No existing query! Run query first')
+                    click.echo("No existing query! Run query first")
                     continue
                 # open file mode, start with o n
                 try:
                     # o or open
-                    if expr.startswith('o '):
+                    if expr.startswith("o "):
                         expr = expr[1:].strip()
-                    elif expr.startswith('open '):
+                    elif expr.startswith("open "):
                         expr = expr[5:].strip()
-                    logger.info(f'{expr=}')
-                    tags = result.loc[result.tag.str.contains(expr, regex=True), 'tag']
+                    logger.info(f"{expr=}")
+                    tags = result.loc[result.tag.str.contains(expr, regex=True), "tag"]
                     tags = sorted(set(tags.values))
-                    docs = lib.ref_doc_df.query('tag in @tags').path.values
-                    logger.info(f'{docs=}')
-                    print(f'Trying to open {docs=}')
-                    logger.info(f'Trying to open {docs=}')
+                    docs = lib.ref_doc_df.query("tag in @tags").path.values
+                    logger.info(f"{docs=}")
+                    print(f"Trying to open {docs=}")
+                    logger.info(f"Trying to open {docs=}")
                     for d in docs:
                         _open_document(d)
                 except Exception:
@@ -599,33 +649,34 @@ def query(start: str, ref):
                 # set as ref_df or database above...
                 result = df.querex(expr)
             except ParseError as e:
-                logger.error('Parsing error')
+                logger.error("Parsing error")
                 logger.error(e)
             else:
                 qd(result)
                 click.echo(
-                    f'{len(result)} of {result.qx_unrestricted_len:,d} results shown.')
+                    f"{len(result)} of {result.qx_unrestricted_len:,d} results shown."
+                )
                 if pipe:
-                    click.echo(
-                        f'Found pipe clause {pipe=} TODO: deal with this!')
+                    click.echo(f"Found pipe clause {pipe=} TODO: deal with this!")
         except Exception as e:
             click.echo(f"[Error] {e}")
 
 
 # ========================================================================================
 
+
 @entry.command()
-@click.option('--author', '-a', help='Author name')
-@click.option('--title', '-t', help='Title of work')
-@click.option('--doi', '-d', help='DOI string')
-@click.option('--raw', '-r', is_flag=True, help='Show raw output.')
-@click.option('--keywords', '-k', help='Search keywords')
+@click.option("--author", "-a", help="Author name")
+@click.option("--title", "-t", help="Title of work")
+@click.option("--doi", "-d", help="DOI string")
+@click.option("--raw", "-r", is_flag=True, help="Show raw output.")
+@click.option("--keywords", "-k", help="Search keywords")
 def crossref(
     author: Union[str, None],
     title: Union[str, None],
     doi: Union[str, None],
     keywords: Union[str, None],
-    raw: bool
+    raw: bool,
 ) -> None:
     """
     Fetch metadata from Crossref and output BibTeX.
@@ -660,18 +711,20 @@ def crossref(
 # ========================================================================================
 @entry.command()
 # file_okay=False ensures autocomplete prefers directories
-@click.argument('directory', type=click.Path(exists=True, file_okay=False), default='.')
+@click.argument("directory", type=click.Path(exists=True, file_okay=False), default=".")
 @click.option(
-    '-r', '--recursive',
+    "-r",
+    "--recursive",
     is_flag=True,
     show_default=True,
-    help='Recursive search of DIRECTORY and its sub-directories.'
+    help="Recursive search of DIRECTORY and its sub-directories.",
 )
 @click.option(
-    "-s", "--save-path",
+    "-s",
+    "--save-path",
     type=click.Path(dir_okay=False, writable=True),
     default=None,  # Set to None to handle dynamic default logic below
-    help="Output path for bibtex file. Defaults to {directory}/bibliography.bib"
+    help="Output path for bibtex file. Defaults to {directory}/bibliography.bib",
 )
 def new_docs(directory, recursive, save_path):
     """
@@ -681,7 +734,7 @@ def new_docs(directory, recursive, save_path):
     Optionally: look for duplicates!
     """
     directory = Path(directory).absolute()
-    click.echo(f'Scanning {directory}')
+    click.echo(f"Scanning {directory}")
     if not directory.exists():
         click.echo("Input directory must exist.")
         return
@@ -692,7 +745,7 @@ def new_docs(directory, recursive, save_path):
     for f in file_generator:
         if not f.is_file():
             continue
-        click.echo(f'Scanning {f.name}')
+        click.echo(f"Scanning {f.name}")
         try:
             doc = Document(f)
             doc.process()
@@ -700,10 +753,10 @@ def new_docs(directory, recursive, save_path):
             blob = doc.bibtex()
             bibs.append(blob)
         except Exception as e:
-            click.echo(f'Error: {e}')
+            click.echo(f"Error: {e}")
 
-    click.echo(f'Found {len(docs)} docs and created {len(bibs)} bib entries:\n')
-    s = '\n\n'.join(bibs)
+    click.echo(f"Found {len(docs)} docs and created {len(bibs)} bib entries:\n")
+    s = "\n\n".join(bibs)
     click.echo(s)
     click.echo()
 
@@ -712,47 +765,51 @@ def new_docs(directory, recursive, save_path):
         save_path = directory / "bibliography.bib"
     else:
         save_path = Path(save_path)
-    click.echo(f'Saving bib file to {save_path.absolute()}')
+    click.echo(f"Saving bib file to {save_path.absolute()}")
     # actually save
-    save_path.write_text(s, encoding='utf-8')
+    save_path.write_text(s, encoding="utf-8")
 
 
 # ========================================================================================
-@entry.command(name='import')
+@entry.command(name="import")
 @click.option(
-    '-x', '--execute',
+    "-x",
+    "--execute",
     is_flag=True,
-    help='Actually perform the import; otherwise, do a dry run.'
+    help="Actually perform the import; otherwise, do a dry run.",
 )
 @click.option(
-    '-p', '--partial',
-    default='',
+    "-p",
+    "--partial",
+    default="",
     show_default=True,
-    help='Comma-separated list of PDF file numbers to upload, default all files.'
+    help="Comma-separated list of PDF file numbers to upload, default all files.",
 )
 @click.option(
-    '-r', '--regex',
+    "-r",
+    "--regex",
     is_flag=True,
-    help='Interpret partial option as a regex, default is comma separated list'
+    help="Interpret partial option as a regex, default is comma separated list",
 )
 def import_(execute, partial, regex):
     """Import bibliographic entries, optionally filtered and executed."""
-    logger.info("Importing documents, partial match = '%s', regex mode %", partial, regex)
+    logger.info(
+        "Importing documents, partial match = '%s', regex mode %", partial, regex
+    )
     df = LibraryContext.last_new
     if df.empty:
-        click.echo('No new documents found! Run new.')
+        click.echo("No new documents found! Run new.")
         return
     # figure the docs
     if regex:
         r = re.compile(partial)
-        indices = [i for i in range(1, 1 + len(df))
-                   if r.search(str(i))]
+        indices = [i for i in range(1, 1 + len(df)) if r.search(str(i))]
     else:
-        indices = [int(i.strip()) for i in partial.split(',')]
-    logger.info('Indices = %', indices)
+        indices = [int(i.strip()) for i in partial.split(",")]
+    logger.info("Indices = %", indices)
     # Import logic
     for i in indices:
-        pdf_path = df.loc[i, 'path']
+        pdf_path = df.loc[i, "path"]
         ref = Reference.from_pdf(pdf_path)
         # prompt_for_fields(ref)  # interactively fill in fields
         click.echo(ref.to_dict())  # or save it, display BibTeX, etc.
@@ -764,6 +821,7 @@ def import_(execute, partial, regex):
 
 
 # ========================================================================================
+
 
 @entry.command(name="import-bibtex")
 @click.argument(
@@ -783,7 +841,7 @@ def import_(execute, partial, regex):
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="Directory containing PDFs referenced in the BibTeX file; "
-         "defaults to the library's pdf_dir_name.",
+    "defaults to the library's pdf_dir_name.",
 )
 @click.option(
     "--audit-mode",
@@ -808,7 +866,7 @@ def import_bibtex_cmd(bibtex_path, imports_dir, pdf_dir, audit_mode):
         else:
             imports_dir = lib.BASE_DIR / "imports"
 
-    print(f'{imports_dir = }')
+    print(f"{imports_dir=}")
 
     result = lib.import_bibtex(
         bibtex_path=bibtex_path,
@@ -823,27 +881,26 @@ def import_bibtex_cmd(bibtex_path, imports_dir, pdf_dir, audit_mode):
     click.echo(f"Import run directory: {result.run_dir}")
 
 
-
-
-
 # ========================================================================================
 
 
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
 @click.option(
-    '-n',
+    "-n",
     default=10,
     type=int,
     show_default=True,
-    help='Number of results to return, default=10, n=-1 returns all.'
+    help="Number of results to return, default=10, n=-1 returns all.",
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def rg(args, n):
     """Run ripgrep (rg) with given pattern and args against text extracts from pdfs."""
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo("No library open...don't know where to look for text files. Returning")
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
         return
     # library runs the query, cli prints it out
     if not args:
@@ -851,7 +908,7 @@ def rg(args, n):
     pattern = args[0]
     args = args[1:]
     return_value, proc = lib.run_ripgrep(pattern, args)
-    if return_value == 'FileNotFoundError':
+    if return_value == "FileNotFoundError":
         console.print(proc)
     elif return_value == "None":
         console.print("[red]Failed to read rg output[/red]")
@@ -863,13 +920,13 @@ def rg(args, n):
     prefix = str(lib.text_dir_full_name)
     print(lib)
     try:
-        suffix = f'.{lib.extractor}.md'
+        suffix = f".{lib.extractor}.md"
     except AttributeError:
-        print('ATTRIBUTE ERROR...here is dir lib')
+        print("ATTRIBUTE ERROR...here is dir lib")
         print(dir(lib))
-        print('RETURNING')
+        print("RETURNING")
         return
-    last_file = ''
+    last_file = ""
     fc = 0
     for line in proc.stdout:
         try:
@@ -881,13 +938,13 @@ def rg(args, n):
                 file = result["data"]["path"]["text"]
                 new_file = file != last_file
                 if new_file:
-                    console.print('')  # between files
+                    console.print("")  # between files
                     # new file
                     fc = 0
                     last_file = file
                 styled = Text()
                 if new_file:
-                    file = file.replace(prefix, '').replace(suffix, '')
+                    file = file.replace(prefix, "").replace(suffix, "")
                     styled.append(f"{file}\n", style="bold cyan")
                 fc += 1
                 line_num = result["data"]["line_number"]
@@ -901,36 +958,41 @@ def rg(args, n):
 
                 styled.append(f"[m{fc:02d}@.{line_num:05d}]: ", style="bold cyan")
                 styled.append(text)
-                styled.append('\n')
-                console.print(styled, end='')
+                styled.append("\n")
+                console.print(styled, end="")
         except json.JSONDecodeError:
-            console.print('ERROR ' + line.strip(), style="dim")
+            console.print("ERROR " + line.strip(), style="dim")
 
     return
 
 
 # tags opening docs ------------------------
 
+
 @entry.command()
-@click.argument('tag', type=str)
-@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+@click.argument("tag", type=str)
+@click.option(
+    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+)
 def tag(tag, all_docs):
     """Open a document by its tag."""
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo("No library open...don't know where to look for text files. Returning")
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
         return
     if lib.ref_doc_df.empty:
         click.echo("No referenced documents. Returning")
         return
 
-    df = lib.ref_doc_df.query('tag == @tag')
+    df = lib.ref_doc_df.query("tag == @tag")
     if len(df) == 0:
-        click.echo('No matching documents found to %s', tag)
+        click.echo("No matching documents found to %s", tag)
     if not all_docs:
         df = df.iloc[:1]
     if all_docs and len(df) > 5:
-        click.echo('Found %s docs, just opening first 5', len(df))
+        click.echo("Found %s docs, just opening first 5", len(df))
         df = df.iloc[:5]
     for d in df.path:
         _open_document(d)
@@ -957,13 +1019,17 @@ def tag(tag, all_docs):
 
 
 @entry.command()
-@click.argument('title', nargs=-1, required=True, type=str)
-@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+@click.argument("title", nargs=-1, required=True, type=str)
+@click.option(
+    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+)
 def title(title, all_docs):
     """Open a document by its title with fuzzy search (no spaces!)."""
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo("No library open...don't know where to look for text files. Returning")
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
         return
     if lib.ref_df.empty:
         click.echo("No referenced documents. Returning")
@@ -971,13 +1037,13 @@ def title(title, all_docs):
 
     # title comes in as a tuple: ('My', 'Paper', 'Title')
     title = " ".join(title)
-    df = lib.ref_df.query('title == @title')
+    df = lib.ref_df.query("title == @title")
     if len(df) == 0:
-        click.echo('No matching documents found to %s', title)
+        click.echo("No matching documents found to %s", title)
     if not all_docs:
         df = df.iloc[:1]
     if all_docs and len(df) > 5:
-        click.echo('Found %s docs, just opening first 5', len(df))
+        click.echo("Found %s docs, just opening first 5", len(df))
         df = df.iloc[:5]
     doc_tags = df.tag.to_list()  # noqa
     df2 = lib.ref_doc_df.query("tag in @doc_tags")
@@ -986,13 +1052,17 @@ def title(title, all_docs):
 
 
 @entry.command()
-@click.argument('title', nargs=-1, required=True, type=str)
-@click.option('-a', '--all-docs', is_flag=True, help="Open all docs if more than one match.")
+@click.argument("title", nargs=-1, required=True, type=str)
+@click.option(
+    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+)
 def tt(title, all_docs):
     """Open a document by its tag and title with fuzzy search (no spaces!)."""
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo("No library open...don't know where to look for text files. Returning")
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
         return
     if lib.ref_df.empty:
         click.echo("No referenced documents. Returning")
@@ -1000,44 +1070,45 @@ def tt(title, all_docs):
 
     # title comes in as a tuple: ('My', 'Paper', 'Title')
     title = " ".join(title)
-    tag, title = title.split('-')
-    df = lib.ref_df.query('title == @title and tag == @tag')
+    tag, title = title.split("-")
+    df = lib.ref_df.query("title == @title and tag == @tag")
     if len(df) == 0:
-        click.echo('No matching documents found to %s', title)
+        click.echo("No matching documents found to %s", title)
     if not all_docs:
         df = df.iloc[:1]
     if all_docs and len(df) > 5:
-        click.echo('Found %s docs, just opening first 5', len(df))
+        click.echo("Found %s docs, just opening first 5", len(df))
         df = df.iloc[:5]
     doc_tags = df.tag.to_list()  # noqa
     df2 = lib.ref_doc_df.query("tag in @doc_tags")
     for d in df2.path:
         _open_document(d)
 
+
 # =================================================
 # Uber using Gemini new technology Nov 2025
 @entry.command()
-@click.option("-l", "--lib-name",
-                type=str,
-                default="",
-                help="Open library.")
-@click.option("-a", "--auto-open",
-                is_flag=True,
-                show_default=True,
-                help="If true, auto open the default library.")
+@click.option("-l", "--lib-name", type=str, default="", help="Open library.")
+@click.option(
+    "-a",
+    "--auto-open",
+    is_flag=True,
+    show_default=True,
+    help="If true, auto open the default library.",
+)
 @click.option("-d", "--debug", is_flag=True)
-def uber(lib_name = "", auto_open = True, debug = False):
+def uber(lib_name="", auto_open=True, debug=False):
     """QT Standalone Shell. Optionally open library."""
     shell = UberShell("archivum", debug)
 
     # logging
     if debug:
-        logger_config = 'logging-debug-file.yaml'
+        logger_config = "logging-debug-file.yaml"
 
         with (files("archivum.configurations") / logger_config).open("r") as f:
             cfg = yaml.safe_load(f)
         logging.config.dictConfig(cfg)
-        test_logger = logging.getLogger('archivum.TEST')
+        test_logger = logging.getLogger("archivum.TEST")
         test_logger.debug("Uber logger test @ DEBUG")
         test_logger.info("Uber logger test @ INFO")
         test_logger.warning("Uber logger test @ WARNING")
@@ -1045,23 +1116,27 @@ def uber(lib_name = "", auto_open = True, debug = False):
 
     # figure completers
     completers = {}
-    completers['open'] = DynamicCompleter(lambda: WordCompleter(Library.list()))
+    completers["open"] = DynamicCompleter(lambda: WordCompleter(Library.list()))
     # completers['tag'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_tags, ignore_case=True))
     # completers['title'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_titles, ignore_case=True,
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['tt'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_tag_titles, ignore_case=True,
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
-    completers['tag'] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers['title'] = RustFuzzyCompleter(LibraryContext.get_library_titles)
-    completers['tt'] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
+    completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
+    completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)
 
     def prompt_function():
+        """Prompt uses breadcrumb chain from UBERSHELL_CHAIN plus current library."""
         lib = LibraryContext.get()
-        return HTML(f"<ansired>archivum <ansigreen>[{lib.name}]</ansigreen> > </ansired>")
+        chain = os.environ.get("UBERSHELL_CHAIN", shell.prompt_label)
+        return HTML(
+            f"<ansired>{chain} <ansigreen>[{lib.name}]</ansigreen> > </ansired>"
+        )
 
     if lib_name == "" and auto_open:
         lib_name = DEFAULT_LIBRARY
@@ -1070,16 +1145,16 @@ def uber(lib_name = "", auto_open = True, debug = False):
         try:
             lib = Library(lib_name)
             LibraryContext.set(lib)
-            logger.info(f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references.")
+            logger.info(
+                f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references."
+            )
         except Exception as e:
-            logger.error('Open library error: %s', e)
+            logger.error("Open library error: %s", e)
 
     shell.start(prompt_function=prompt_function)
 
 
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     # to facilitate performance logging
     # run python -m cProfile -o perf.prof -m archivum.cli
     # recent top 10 !/Boonen|Tsanakas|Wang, R/
