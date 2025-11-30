@@ -1,5 +1,5 @@
 """Implement command line interface for archivum."""
-
+import html
 from importlib.resources import files
 import json
 import logging
@@ -20,16 +20,20 @@ from pendulum import local_timezone
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import (
     FuzzyCompleter, WordCompleter,
-    NestedCompleter, DynamicCompleter
+    NestedCompleter, DynamicCompleter,
+    Completer, Completion
 )
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.document import Document
+from prompt_toolkit.application.current import get_app
+
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 
 # for uber loop
 from great2.shell import UberShell
+from rustfuzz import FuzzyMatcherMultiHi
 
 from . reference import Reference
 from . library import Library
@@ -39,7 +43,7 @@ from . utilities import make_qd
 from . config import Configurator
 from . querex import querex_help
 from . crossref import lookup_doi, search_by_title, search
-from . bibtex import dict_to_bibtex
+from . bibtex import dict_to_bibtex, dict_to_bibtex_crossref
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / 'Downloads')
@@ -68,6 +72,12 @@ class LibraryContext:
 
     current = None
     no_library = EMPTY_LIBRARY
+    candidates_tags = None
+    candidates_titles = None
+    candidates_tag_titles = None
+    matcher_tags = None
+    matcher_titles = None
+    matcher_tags_titles = None
 
     @classmethod
     def set(cls, lib):   # noqa
@@ -84,6 +94,48 @@ class LibraryContext:
     def clear(cls):   # noqa
         logger.debug("Library %s closed.", cls.current)
         cls.current = None
+        cls.candidates_tags = None
+        cls.candidates_titles = None
+        cls.candidates_tag_titles = None
+        cls.matcher_tags = None
+        cls.matcher_titles = None
+        cls.matcher_tags_titles = None
+
+    @classmethod
+    def get_library_tags(cls):
+        """Fetch unique tags from the current library context."""
+        if cls.candidates_tags is not None:
+            return cls.candidates_tags, cls.matcher_tags
+        if cls.current is None or cls.current == EMPTY_LIBRARY:
+            return []
+        else:
+            cls.candidates_tags = cls.current.all_tags
+            cls.matcher_tags = FuzzyMatcherMultiHi(cls.candidates_tags)
+            return cls.candidates_tags, cls.matcher_tags
+
+    @classmethod
+    def get_library_titles(cls):
+        """Fetch unique tags from the current library context."""
+        if cls.candidates_titles is not None:
+            return cls.candidates_titles, cls.matcher_titles
+        if cls.current is None or cls.current == EMPTY_LIBRARY:
+            return []
+        else:
+            cls.candidates_titles = cls.current.all_titles
+            cls.matcher_titles = FuzzyMatcherMultiHi(cls.candidates_titles)
+            return cls.candidates_tags, cls.matcher_titles
+
+    @classmethod
+    def get_library_tag_titles(cls):
+        """Fetch unique tags from the current library context."""
+        if cls.candidates_tag_titles is not None:
+            return cls.candidates_tag_titles, cls.matcher_tag_titles
+        if cls.current is None or cls.current == EMPTY_LIBRARY:
+            return []
+        else:
+            cls.candidates_tag_titles = cls.current.all_tag_titles
+            cls.matcher_tag_titles = FuzzyMatcherMultiHi(cls.candidates_tag_titles)
+            return cls.candidates_tag_titles, cls.matcher_tag_titles
 
 
 # ========================================================================================
@@ -166,6 +218,100 @@ def make_query_completer_static(df):
     })
 
 
+class RustFuzzyCompleter(Completer):
+    def __init__(self, get_candidates_func):
+        """Handle prompt_toolkit fuzzy matching using my Rust fzf-like matcher."""
+        self.get_candidates = get_candidates_func
+
+    def get_completions(self, document, complete_event):
+        """Matcheroo."""
+
+        # 1. Get the full input line from the global application state.
+        # This bypasses NestedCompleter's slicing to show the actual buffer content.
+        try:
+            full_text = get_app().current_buffer.document.text_before_cursor
+        except RuntimeError:
+            # Fallback for unit tests or contexts without an active app
+            logger.debug('Runtime error - defaulting to text before cursor')
+            full_text = document.text_before_cursor
+
+        logger.debug('Full command line context: |%s|', full_text)
+
+        # 2. Determine the pattern.
+        # document.text_before_cursor is relative to the NestedCompleter context.
+        pattern = document.text_before_cursor
+        word = document.get_word_before_cursor()
+        replace_len = len(word)
+        logger.debug('word and length %s, %s', word, replace_len)
+
+        # FIX: If prompt_toolkit passes an empty string (common in some nested configs or
+        # immediately after typing a command without a space), try to grab the last word
+        # from the full text as a fallback pattern.
+        if not pattern and full_text.strip() and not full_text.endswith(" "):
+            # Logic: split full line and take the last segment as the fuzzy pattern
+            parts = full_text.split()
+            logger.debug('split to >> %s', parts)
+            if parts:
+                pattern = ' '.join(parts[1:])
+                logger.debug('Pattern inferred from full_text: |%s|', pattern)
+
+        logger.debug('in get_completions with pattern = |%s|', pattern)
+
+        candidates, matcher = self.get_candidates()
+
+        # really is nothing there - delegate
+        if not pattern:
+            logger.debug('NOT PATTERN BRANCH')
+            for cand in candidates or []:
+                yield Completion(
+                    cand,
+                    start_position=-replace_len, # 0,
+                    display=cand
+                )
+            return
+
+        # match
+        indices, scores, highlights = matcher.query(pattern, top_k=25)
+        logger.debug('rustfuzz returns indices count = %s', len(indices))
+
+        # Calculate safe start position
+        # prompt_toolkit discards completions if start_position goes out of bounds
+        # of the current document slice.
+        start_pos = -len(pattern)
+        if -start_pos > len(document.text_before_cursor):
+            logger.debug('Clamping start_position %d to %d', start_pos, -len(document.text_before_cursor))
+            start_pos = -len(document.text_before_cursor)
+
+        for i, score, highlight_indices in zip(indices, scores, highlights):
+            candidate_string = candidates[i]
+
+            # Use the highlight indices to format the output (e.g., for HTML)
+            highlight_set = set(highlight_indices)
+            highlighted_html = "".join(
+                f"<style bg='ansiyellow' fg='ansired'>{html.escape(char)}</style>"
+                            if i in highlight_set
+                            else html.escape(char)
+                for i, char in enumerate(candidate_string)
+            )
+
+            # Merge adjacent marks
+            highlighted_html = highlighted_html.replace("</style><style bg='ansiyellow' fg='ansired'>", "")
+
+            if 0:
+                highlighted_html = "".join(
+                    f"<mark>{char}</mark>" if i in highlight_set else char
+                    for i, char in enumerate(candidate_string)
+                )
+
+                # Merge adjacent marks
+                highlighted_html = highlighted_html.replace("</mark><mark>", "")
+            logger.info('RF YIELDING %s', highlighted_html)
+            yield Completion(
+                candidate_string,
+                start_position=start_pos,
+                display=HTML(highlighted_html)
+                )
+
 # ========================================================================================
 # ========================================================================================
 @click.group()
@@ -217,7 +363,6 @@ def close():
         return
     logger.info('Closing library %s', lib)
     lib = LibraryContext.get()
-    del lib
     LibraryContext.clear()
 
 
@@ -473,12 +618,14 @@ def query(start: str, ref):
 @click.option('--author', '-a', help='Author name')
 @click.option('--title', '-t', help='Title of work')
 @click.option('--doi', '-d', help='DOI string')
+@click.option('--raw', '-r', is_flag=True, help='Show raw output.')
 @click.option('--keywords', '-k', help='Search keywords')
 def crossref(
     author: Union[str, None],
     title: Union[str, None],
     doi: Union[str, None],
-    keywords: Union[str, None]
+    keywords: Union[str, None],
+    raw: bool
 ) -> None:
     """
     Fetch metadata from Crossref and output BibTeX.
@@ -500,8 +647,11 @@ def crossref(
         if items:
             result = items[0]
 
+    if raw:
+        click.echo(result)
+
     if result:
-        bibtex = dict_to_bibtex(result)
+        bibtex = dict_to_bibtex_crossref(result)
         click.echo(bibtex)
     else:
         click.echo("No results found.", err=True)
@@ -760,14 +910,6 @@ def rg(args, n):
 
 
 # tags opening docs ------------------------
-def get_library_tags():
-    """Fetch unique tags from the current library context."""
-    lib = LibraryContext.get()
-    if lib == EMPTY_LIBRARY:
-        return []
-    else:
-        return lib.all_tags
-
 
 @entry.command()
 @click.argument('tag', type=str)
@@ -795,13 +937,6 @@ def tag(tag, all_docs):
 
 
 # doc title opening ======experimental-----------------
-def get_library_titles():
-    """Fetch unique titles from the current library context."""
-    lib = LibraryContext.get()
-    if lib == EMPTY_LIBRARY:
-        return []
-    else:
-        return lib.all_titles
 
 # from prompt_toolkit.completion import Completer, Completion, FuzzyCompleter, WordCompleter, DynamicCompleter
 
@@ -849,14 +984,6 @@ def title(title, all_docs):
     for d in df2.path:
         _open_document(d)
 
-def get_library_tag_titles():
-    """Fetch unique titles from the current library context."""
-    lib = LibraryContext.get()
-    if lib == EMPTY_LIBRARY:
-        return []
-    else:
-        return lib.all_tag_titles
-
 
 @entry.command()
 @click.argument('title', nargs=-1, required=True, type=str)
@@ -899,22 +1026,35 @@ def tt(title, all_docs):
                 show_default=True,
                 help="If true, auto open the default library.")
 @click.option("-d", "--debug", is_flag=True)
-def uber(lib_name, auto_open, debug):
+def uber(lib_name = "", auto_open = True, debug = False):
     """QT Standalone Shell. Optionally open library."""
     shell = UberShell("archivum", debug)
+
+    # logging
+    if debug:
+        logger_config = 'logging-debug-file.yaml'
+
+        with (files("archivum.configurations") / logger_config).open("r") as f:
+            cfg = yaml.safe_load(f)
+        logging.config.dictConfig(cfg)
+        test_logger = logging.getLogger('archivum.TEST')
+        test_logger.debug("Uber logger test @ DEBUG")
+        test_logger.info("Uber logger test @ INFO")
+        test_logger.warning("Uber logger test @ WARNING")
+        test_logger.error("Uber logger test @ ERROR")
 
     # figure completers
     completers = {}
     completers['open'] = DynamicCompleter(lambda: WordCompleter(Library.list()))
-
-    # NEW: Register the dynamic fuzzy completer for the 'tag' command
-    # WordCompleter accepts a callable (get_library_tags) to fetch tags at runtime
-    completers['tag'] = FuzzyCompleter(WordCompleter(get_library_tags, ignore_case=True))
-    completers['title'] = FuzzyCompleter(WordCompleter(get_library_titles, ignore_case=True,
-                                            sentence=True, WORD=False, match_middle=True))
-    completers['tt'] = FuzzyCompleter(WordCompleter(get_library_tag_titles, ignore_case=True,
-                                            sentence=True, WORD=False, match_middle=True))
+    # completers['tag'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_tags, ignore_case=True))
+    # completers['title'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_titles, ignore_case=True,
+    #                                         sentence=True, WORD=False, match_middle=True))
+    # completers['tt'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_tag_titles, ignore_case=True,
+    #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
+    completers['tag'] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers['title'] = RustFuzzyCompleter(LibraryContext.get_library_titles)
+    completers['tt'] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)
@@ -935,6 +1075,8 @@ def uber(lib_name, auto_open, debug):
             logger.error('Open library error: %s', e)
 
     shell.start(prompt_function=prompt_function)
+
+
 
 
 if __name__ == '__main__':

@@ -126,6 +126,11 @@ def dict_to_bibtex_crossref(data: Any) -> str:
     safe_family = "".join(filter(str.isalnum, first_author_family))
     cite_key = f"{safe_family}{year}"
 
+    if (isbn := data.get("ISBN")):
+        isbn = isbn[0]
+    else:
+        isbn = None
+
     fields = {
         'author': author_str,
         'title': get_list_safe('title'),
@@ -136,7 +141,8 @@ def dict_to_bibtex_crossref(data: Any) -> str:
         'pages': data.get('page'),
         'doi': data.get('DOI'),
         'publisher': data.get('publisher'),
-        'url': data.get('URL')
+        'url': data.get('URL'),
+        'isbn': isbn,
     }
 
     active_fields = {k: v for k, v in fields.items() if v}
