@@ -16,6 +16,7 @@ if /i not "%2"=="new" if /i not "%2"=="refresh" (
 
 :: --- Configuration CUSTOMIZE HERE! ---
 set "PYTHON_VERSION=%1"
+set "PYTHONUTF8=1"
 set "MODE=%2"
 set "PROJECT_NAME=archivum_project"
 :: set "PROJECT_REPO=https://github.com/mynl/%PROJECT_NAME%.git"

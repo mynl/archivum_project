@@ -57,70 +57,263 @@ class Document:
             "pages": "",
         }
 
-    def __repr__(self):
-        return f"Document({self.doc_path.name})"
+        # Flags to track which sources contributed to the final record.
+        self._used_filename = False
+        self._used_metadata = False
+        self._used_cover = False
+        self._used_identifier = False
+        self._used_external = False
 
-    @property
-    def has_text(self) -> bool:
-        return bool(self._text)
+        # Overall quality status for the record.
+        self.status: str = "partial"
+        self.status_diagnostics: List[str] = []
 
-    def extract_text(self) -> str:
+        # Diagnostics just for the filename heuristic.
+        self.filename_diagnostics: List[str] = []
+
+    def _guess_from_filename(
+        self,
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], float, List[str]]:
         """
-        Extracts text using pdftotext.
-        Stores result in self._text and returns it.
+        Best-effort guess of (title, author, year) from the filename.
+        Returns a tuple (title, author, year, confidence, diagnostics).
+        All fields may be None if no reasonable guess is possible.
         """
-        if self._text:
-            return self._text
+        diagnostics: List[str] = []
+        stem = self.doc_path.stem
 
-        try:
-            logger.info("extract text: %s", self.doc_path)
-            # -raw: content stream order, -nopgbrk: no page breaks
-            result = subprocess.run(
-                ["pdftotext", "-raw", "-nopgbrk", str(self.doc_path), "-"],
-                capture_output=True,
-                check=True,
+        # Normalize underscores and whitespace.
+        name = stem.replace("_", " ")
+        name = re.sub(r"\s+", " ", name).strip()
+
+        # Strip trailing source tags like (z-lib.org), (Z-Library), (libgen.li).
+        name2 = re.sub(
+            r"\s*\((z-lib\.org|Z-Library|libgen\.li)\)\s*$",
+            "",
+            name,
+            flags=re.IGNORECASE,
+        )
+        if name2 != name:
+            diagnostics.append("removed trailing source tag")
+            name = name2
+
+        # Strip trailing copy indices like (1), (2).
+        name2 = re.sub(r"\s*\(\d+\)\s*$", "", name)
+        if name2 != name:
+            diagnostics.append("removed trailing copy index")
+            name = name2
+
+        # Strip leading series information in parentheses.
+        name2 = re.sub(r"^\([^)]*\)\s*", "", name)
+        if name2 != name:
+            diagnostics.append("removed leading series information")
+            name = name2
+
+        # If nothing useful remains, bail out.
+        if not name or len(name) < 5:
+            diagnostics.append("filename too short or empty after cleaning")
+            return None, None, None, 0.0, diagnostics
+
+        # Find a plausible year (prefer the last one if multiple).
+        year: Optional[str] = None
+        year_matches = re.findall(r"\b(19\d{2}|20\d{2})\b", name)
+        if year_matches:
+            year = year_matches[-1]
+            diagnostics.append(f"found year {year} in filename")
+            name = re.sub(rf"\b{year}\b", "", name)
+            name = re.sub(r"\s+", " ", name).strip(" -_,")
+
+        title: Optional[str] = None
+        author: Optional[str] = None
+        confidence = 0.0
+
+        # Pattern 1: "Title by Author"
+        by_match = re.search(r"\sby\s", name, flags=re.IGNORECASE)
+        if by_match:
+            raw_title = name[: by_match.start()].strip(" -_,")
+            raw_author = name[by_match.end() :].strip(" -_,")
+            # Drop trailing parenthetical noise from author.
+            raw_author = re.sub(r"\s*\([^)]*\)\s*$", "", raw_author).strip(" -_,")
+            if raw_title and raw_author:
+                title = raw_title
+                author = raw_author
+                confidence = 0.9
+                diagnostics.append("matched pattern 'title by author'")
+
+        # Pattern 2: "Title (Author)" at the end.
+        if title is None:
+            paren_match = re.search(r"\(([^()]*)\)\s*$", name)
+            if paren_match:
+                possible_author = paren_match.group(1).strip()
+                # Heuristic: looks like a name if it has at least one space and no digits.
+                if " " in possible_author and not re.search(r"\d", possible_author):
+                    raw_title = name[: paren_match.start()].strip(" -_,")
+                    if raw_title:
+                        title = raw_title
+                        author = possible_author
+                        confidence = max(confidence, 0.75)
+                        diagnostics.append("matched pattern 'title (author)'")
+
+        # Pattern 3: "Author - Title - ..."
+        if title is None:
+            parts = re.split(r"\s-\s", name)
+            if len(parts) >= 2:
+                candidate_author = re.sub(r"\s*\([^)]*\)\s*$", "", parts[0]).strip(
+                    " -_,"
+                )
+                remainder = " - ".join(parts[1:]).strip(" -_,")
+                # Basic name-like check: letters present, very few digits.
+                if re.search(r"[A-Za-z]", candidate_author) and not re.search(
+                    r"\d", candidate_author
+                ):
+                    author = candidate_author
+                    title = remainder
+                    confidence = max(confidence, 0.8)
+                    diagnostics.append("matched pattern 'author - title'")
+
+        # Pattern 4: "YYYY Title" (only if we still do not have a title).
+        if title is None:
+            m = re.match(r"^(19\d{2}|20\d{2})[\s_]+(.+)$", stem)
+            if m:
+                if year is None:
+                    year = m.group(1)
+                    diagnostics.append(f"year {year} from prefix")
+                title = m.group(2).replace("_", " ")
+                title = re.sub(r"\s+", " ", title).strip(" -_,")
+                confidence = max(confidence, 0.5)
+                diagnostics.append("matched pattern 'YYYY title'")
+
+        # Final fallback: treat remaining cleaned name as title only.
+        if title is None:
+            title = name.strip(" -_,")
+            confidence = max(confidence, 0.3)
+            diagnostics.append("fallback: treated filename as title only")
+
+        # Normalize whitespace for title and author.
+        if title:
+            title = re.sub(r"\s+", " ", title).strip(" -_,")
+        if author:
+            author = re.sub(r"\s+", " ", author).strip(" -_,")
+
+        # Basic informativeness check for title.
+        def _informative(s: str) -> bool:
+            letters = len(re.findall(r"[A-Za-z]", s))
+            return bool(letters) and letters >= len(s) / 3
+
+        if not title or len(title) < 5 or not _informative(title):
+            diagnostics.append(f"title '{title}' deemed uninformative")
+            title = None
+
+        # Adjust confidence based on what we actually have.
+        if title is None and author is None and year is None:
+            return None, None, None, 0.0, diagnostics
+
+        if title is not None:
+            confidence += 0.1
+        if author is not None:
+            confidence += 0.1
+        if year is not None:
+            confidence += 0.1
+
+        confidence = max(0.0, min(1.0, confidence))
+
+        return title, author, year, confidence, diagnostics
+
+    def _step_filename(self) -> None:
+        """
+        Use the filename as a low-trust heuristic for title/author/year.
+        Only fills fields that are currently empty.
+        """
+        title, author, year, confidence, diagnostics = self._guess_from_filename()
+        self.filename_diagnostics = diagnostics
+
+        if title or author or year:
+            self._used_filename = True
+
+        if title and not self.bib["title"]:
+            self.bib["title"] = title
+        if author and not self.bib["author"]:
+            self.bib["author"] = author
+        if year and not self.bib["year"]:
+            self.bib["year"] = year
+
+    def _finalize_status(self) -> None:
+        """
+        Derive an overall status ('ok', 'partial', 'failed') from the fields
+        and which sources were used.
+        """
+        # No title => hard failure.
+        if not self.bib["title"]:
+            self.status = "failed"
+            self.status_diagnostics.append("missing title after pipeline")
+            return
+
+        core_ok = bool(self.bib["title"] and self.bib["author"] and self.bib["year"])
+
+        # Highest confidence: we used external identifiers (doi/arxiv/crossref).
+        if self._used_external or self.bib["doi"] or self.bib["arxiv_id"]:
+            if core_ok:
+                self.status = "ok"
+            else:
+                self.status = "partial"
+                self.status_diagnostics.append(
+                    "external data used but some core fields missing"
+                )
+            return
+
+        # Next: we have core fields from internal sources (metadata/cover/filename).
+        if core_ok and (self._used_metadata or self._used_cover or self._used_filename):
+            self.status = "ok"
+            return
+
+        if core_ok:
+            self.status = "partial"
+            self.status_diagnostics.append(
+                "core fields present but only weakly supported"
             )
-            text = result.stdout.decode("utf-8", errors="replace").replace("\r", "")
-
-            # Fix hyphenation (word-\nword -> wordword)
-            text = re.sub(r"(\w+)-\n(\w+)", r"\1\2", text)
-            # Normalize unicode
-            text = unicodedata.normalize("NFC", text)
-
-            self._text = text
-            return text
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            logger.error(f"Error extracting text for {self.doc_path.name}: {e}")
-            return ""
-
-    def report(self):
-        """Quick summary."""
-        print(self.bibtex())
+        else:
+            self.status = "failed"
+            self.status_diagnostics.append(
+                "missing at least one of title, author, year"
+            )
 
     def process(self):
         """
         Run the full discovery pipeline to populate self.bib.
+
         Order of operations increases in 'trust':
-        1. File Metadata / Filename
+        0. Filename heuristic
+        1. File Metadata
         2. Visual Inspection (Cover Page)
         3. Identifier Scrape (DOI/Arxiv found in text)
         4. External API Enhancement (Crossref/Arxiv)
         """
-        # 1. Base Metadata
+        # Reset flags and status for this run.
+        self._used_filename = False
+        self._used_metadata = False
+        self._used_cover = False
+        self._used_identifier = False
+        self._used_external = False
+        self.status = "partial"
+        self.status_diagnostics = []
+        self.filename_diagnostics = []
+
+        # 0. Filename heuristic (low trust).
+        self._step_filename()
+
+        # 1. Base Metadata.
         self._step_metadata()
-        # self.report()
-        # 2. Visual/Text Inspection of Page 1
+        # 2. Visual/Text Inspection of Page 1.
         self._step_cover_page()
-        # self.report()
-
-        # 3. Enhance with External APIs
+        # 3. Enhance with External APIs.
         self._step_external_enhancement()
-        # self.report()
 
-        # Final cleanup
+        # Final cleanup and status.
         if not self.bib["title"]:
             self.bib["title"] = self.doc_path.stem.replace("_", " ")
             self.bib["entry_type"] = "misc"
+
+        self._finalize_status()
 
     def bibtex(self) -> str:
         """Generates a BibTeX entry blob."""
@@ -145,7 +338,18 @@ class Document:
         cite_key = f"{last_name}{year}"
 
         entry_type = self.bib["entry_type"]
-        lines = [f"@{entry_type}{{{cite_key},"]
+
+        header_lines: List[str] = []
+
+        # If the record is not fully trusted, prepend a comment.
+        if getattr(self, "status", "ok") != "ok":
+            diag = "; ".join(getattr(self, "status_diagnostics", []))
+            if diag:
+                header_lines.append(f"% status={self.status}: {diag}")
+            else:
+                header_lines.append(f"% status={self.status}")
+
+        header_lines.append(f"@{entry_type}{{{cite_key},")
 
         # Fields to exclude from output
         exclude = {"entry_type", "arxiv_id"}
@@ -165,37 +369,45 @@ class Document:
         ):
             display_bib["booktitle"] = display_bib.pop("journal")
 
+        body_lines: List[str] = []
+
         for key, val in display_bib.items():
             if val and key not in exclude:
                 safe_val = str(val).replace("{", "\\{").replace("}", "\\}")
                 if key == "title":
                     # double braces for title
-                    lines.append(f"  {key} = {{{{{safe_val}}}}},")
+                    body_lines.append(f"  {key} = {{{{{safe_val}}}}},")
                 else:
-                    lines.append(f"  {key} = {{{safe_val}}},")
+                    body_lines.append(f"  {key} = {{{safe_val}}},")
 
         if self.bib["arxiv_id"]:
-            lines.append(f"  eprint = {{{self.bib['arxiv_id']}}},")
-            lines.append("  archivePrefix = {arXiv},")
+            body_lines.append(f"  eprint = {{{self.bib['arxiv_id']}}},")
+            body_lines.append("  archivePrefix = {arXiv},")
 
         # new name if it exists
         p = self._new_doc_path or self.doc_path
         mendeley_file_str = (
             f":{p.drive[0]}\\:{str(p.absolute().as_posix())[2:]}:{p.suffix[1:]}"
         )
-        lines.append(f"  file = {{{mendeley_file_str}}},")
+        body_lines.append(f"  file = {{{mendeley_file_str}}},")
 
-        lines.append("}")
-        return "\n".join(lines)
+        body_lines.append("}")
+
+        return "\n".join(header_lines + body_lines)
 
     def renamer(self):
         """Figure dir name and file name."""
         # make filename safe!
-        sp = self.bib['author'].split(' and ')
-        dir_name = ', '.join([i.split(',')[0] for i in sp][:3]) + (' et al' if len(sp) > 3 else "")
-        file_name = f'{self.bib['year']}_{self.bib['title']}'
-        dir_name = sanitize_windows_component(dir_name)
-        file_name = sanitize_windows_component(file_name)
+        sp = self.bib["author"].split(" and ") if self.bib["author"] else []
+        dir_name = ", ".join([i.split(",")[0] for i in sp][:3])
+        if len(sp) > 3:
+            dir_name = f"{dir_name} et al" if dir_name else "et al"
+
+        file_name = f"{self.bib['year']}_{self.bib['title']}".strip("_")
+
+        dir_name = sanitize_windows_component(dir_name or "Unknown")
+        file_name = sanitize_windows_component(file_name or self.doc_path.stem)
+
         return dir_name, file_name
 
     def rename(self, pdf_dir):
@@ -210,7 +422,7 @@ class Document:
         parent_dir.mkdir(parents=True, exist_ok=True)
         new_path = parent_dir / new_name
         if new_path.exists():
-            logger.warning('new path exists! Unlinking...')
+            logger.warning("new path exists! Unlinking...")
             # new_path.unlink()
         # make new link
         logger.info("%s --> %s", new_path, self.doc_path)
@@ -219,10 +431,6 @@ class Document:
         self._new_doc_path = new_path
         # new_path.hardlink_to(self.doc_path)
 
-    # ----------------------------------------------------------------------
-    # Pipeline Steps
-    # ----------------------------------------------------------------------
-
     def _step_metadata(self):
         """Extract embedded PDF metadata."""
         try:
@@ -230,6 +438,8 @@ class Document:
                 meta = doc.metadata
         except Exception:
             return
+
+        self._used_metadata = True
 
         title = meta.get("title", "").strip()
         author = meta.get("author", "").strip()
@@ -274,11 +484,13 @@ class Document:
         arxiv_match = re.search(r"arXiv:(\d{4}\.\d{4,5})", raw_text, re.IGNORECASE)
         if arxiv_match:
             self.bib["arxiv_id"] = arxiv_match.group(1)
+            self._used_identifier = True
 
         # DOI
         doi_match = re.search(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", raw_text, re.IGNORECASE)
         if doi_match:
             self.bib["doi"] = doi_match.group(0)
+            self._used_identifier = True
 
         # B. Visual Title Extraction (Medium Trust)
         # Only override metadata title if metadata looked garbage (short) or empty
@@ -289,12 +501,14 @@ class Document:
         if not current_title or len(current_title) < 5 or "Microsoft" in current_title:
             if visual_title and len(visual_title) > 5:
                 self.bib["title"] = visual_title
+                self._used_cover = True
         elif visual_title:
             # If we have both, trust visual if it's significantly longer
             # (Metadata often truncates) or very similar
             sim = ratio(current_title.lower(), visual_title.lower())
             if sim < 90 and len(visual_title) > len(current_title):
                 self.bib["title"] = visual_title
+                self._used_cover = True
 
     def _step_external_enhancement(self):
         """Use found IDs or Title/Author query to fetch clean data."""
@@ -314,6 +528,7 @@ class Document:
                 )  # format list to string if needed
                 self.bib["year"] = str(res.get("year", self.bib["year"]))
                 self.bib["journal"] = "arXiv preprint"
+                self._used_external = True
                 return  # Stop if we found it via Arxiv
 
         # 2. DOI Lookup
@@ -345,14 +560,15 @@ class Document:
                 )
                 # print(top_title, q_title, sep="\n\t")
                 # print(ratio(q_title.lower(), top_title.lower()))
-                # Only accept if titles match reasonably well (>85%)
+                # Only accept if titles match reasonably well (>80%)
                 if ratio(q_title.lower(), top_title.lower()) > 80:
-                    # print("\n\nupdating from cross ref\n\n")
                     # print("\n\nupdating from cross ref\n\n")
                     self._update_from_crossref(top)
 
     def _update_from_crossref(self, data: Dict):
         """Map Crossref API response to internal bib dict."""
+        self._used_external = True
+
         # Titles in crossref are often lists
         t = data.get("title", "")
         self.bib["title"] = t[0] if isinstance(t, list) and t else t
@@ -378,11 +594,16 @@ class Document:
         if pub and "date-parts" in pub:
             self.bib["year"] = str(pub["date-parts"][0][0])
 
-        self.bib["doi"] = data.get("DOI", self.bib["doi"])
+        # Container: journal or booktitle
+        container = data.get("container-title", [""])
+        if isinstance(container, list):
+            container = container[0] if container else ""
+        else:
+            container = str(container)
 
-        # Container (Journal/Proceedings)
-        j = data.get("container-title", [])
-        container = j[0] if j else ""
+        # Map Crossref type to BibTeX type
+        cr_type = data.get("type", "")
+        self.bib["entry_type"] = CROSSREF_TO_BIBTEX.get(cr_type, "article")
 
         if self.bib["entry_type"] in ["inproceedings", "incollection"]:
             self.bib["booktitle"] = container

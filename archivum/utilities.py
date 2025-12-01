@@ -19,10 +19,10 @@ def safe_int(s):
     which is not wanted. Hence this function is needed.
     """
     try:
-        return f'{int(s)}'
+        return f"{int(s)}"
     except ValueError:
-        if s == '':
-            return ''
+        if s == "":
+            return ""
         else:
             return s
 
@@ -37,20 +37,20 @@ def safe_file_size(s):
     try:
         sz = int(s)
         if sz < 1 << 10:
-            return f'{sz:,d}B'
+            return f"{sz:,d}B"
         elif sz < 1 << 18:
-            return f'{sz >> 10:,d}KB'
+            return f"{sz >> 10:,d}KB"
         elif sz < 1 << 28:
-            return f'{sz >> 20:,d}MB'
+            return f"{sz >> 20:,d}MB"
         elif sz < 1 << 38:
-            return f'{sz >> 30:,d}GB'
+            return f"{sz >> 30:,d}GB"
         elif sz < 1 << 48:
-            return f'{sz >> 40:,d}TB'
+            return f"{sz >> 40:,d}TB"
         else:
-            return f'{sz >> 50:,d}PB'
+            return f"{sz >> 50:,d}PB"
     except ValueError:
-        if s == '':
-            return ''
+        if s == "":
+            return ""
         else:
             return s
 
@@ -62,6 +62,7 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
 
     If display_func is None use IPython.display display.
     """
+
     def default_formatter(x):
         """
         For raw columns.
@@ -69,19 +70,27 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
         The issue is that cols with ints and '' strings are not recognized as int by GT.
         """
         if isinstance(x, int):
-            return f'{x:,d}'
+            return f"{x:,d}"
         elif isinstance(x, float):
-            return f'{x:,.2f}'
+            return f"{x:,.2f}"
         else:
             return str(x)[:max_string_length]
 
     default_args = {
-            "large_ok": True,
-            "show_index": False,
-            "formatters": {'size': safe_file_size, },
-            "raw_cols": ['year', 'index', 'node', 'links', 'number'],
-            "aligners": {'year': 'r', 'index': 'l', 'node': 'r', 'links': 'r', 'number': 'r'},
-        }
+        "large_ok": True,
+        "show_index": False,
+        "formatters": {
+            "size": safe_file_size,
+        },
+        "raw_cols": ["year", "index", "node", "links", "number"],
+        "aligners": {
+            "year": "r",
+            "index": "l",
+            "node": "r",
+            "links": "r",
+            "number": "r",
+        },
+    }
     if max_string_length > 0:
         default_args["default_formatter"] = default_formatter
 
@@ -89,13 +98,13 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
 
     fGT = partial(GT, **default_args)
     display_func = display_func or ip_display
-    caption_str = f'{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)'
+    caption_str = f"{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)"
 
     def qd(df, **kwargs):
         """Generic display function."""
-        caption = kwargs.get('caption', None)
+        caption = kwargs.get("caption", None)
         if caption:
-            kwargs['caption'] = caption_str.format(caption=caption)
+            kwargs["caption"] = caption_str.format(caption=caption)
         if isinstance(df, list):
             df = df[:max_rows]
         else:
@@ -107,9 +116,8 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
 
 def remove_accents(s: str) -> str:
     """Remove accents from a string."""
-    return ''.join(
-        c for c in unicodedata.normalize('NFD', s)
-        if unicodedata.category(c) != 'Mn'
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s) if unicodedata.category(c) != "Mn"
     )
 
 
@@ -135,18 +143,18 @@ def suggest_filename(s):
 
 
 class TagAllocator:
-
     def __init__(self, existing: set[str]):
         """Class to determine the next key (@AuthorYYYY) given a list of existing keys."""
         self.existing = set(existing)
-        self.pattern = re.compile(r'^(.+?)(\d{4})?([a-z]?)$')
+        self.pattern = re.compile(r"^(.+?)(\d{4})?([a-z]?)$")
         self.allocators = defaultdict(self._make_iter)
 
     def _make_iter(self):
         def gen():
-            yield ''  # first without suffix
-            for c in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            yield ""  # first without suffix
+            for c in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ":
                 yield c
+
         return gen()
 
     def next_tag(self, tag) -> str:
@@ -157,10 +165,10 @@ class TagAllocator:
             name = m[1]
             year = m[2]
             if year is None:
-                year = 'YYYY'
+                year = "YYYY"
         except TypeError:
             # m - none, no match found
-            print(f'Type Error for {tag = }')
+            print(f"Type Error for {tag = }")
             return tag
         else:
             return self.get_tag(name, year)
@@ -177,3 +185,58 @@ class TagAllocator:
             if candidate not in self.existing:
                 self.existing.add(candidate)
                 return candidate
+
+
+def sanitize_windows_component(name: str, max_length: int = 255) -> str:
+    """
+    Sanitize a string so it can be safely used as a single Windows
+    path component (file or directory name).
+
+    Rules:
+      - Remove control characters and invalid punctuation.
+      - Strip leading/trailing spaces and dots.
+      - Avoid reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9).
+      - Enforce a per-component length cap.
+    """
+    # Remove NUL and other control chars, plus Windows-invalid characters.
+    # Invalid: < > : " / \ | ? *
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1F]', "_", name)
+
+    # Strip leading/trailing spaces and dots.
+    name = name.strip(" .")
+
+    # Collapse multiple underscores.
+    name = re.sub(r"_+", "_", name)
+
+    # Avoid empty component.
+    if not name:
+        name = "unnamed"
+
+    # Avoid reserved device names (extension is ignored).
+    reserved = {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+    root = name.split(".", 1)[0]
+    if root.upper() in reserved:
+        name = name + "_"
+
+    # Enforce max_length per component.
+    if len(name) > max_length:
+        # Try to preserve the extension if present.
+        if "." in name:
+            stem, ext = name.rsplit(".", 1)
+            keep_stem = max_length - 1 - len(ext)
+            if keep_stem <= 0:
+                # Extension too long; fall back to truncating everything.
+                name = name[:max_length]
+            else:
+                name = stem[:keep_stem] + "." + ext
+        else:
+            name = name[:max_length]
+
+    return name

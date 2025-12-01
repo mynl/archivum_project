@@ -17,16 +17,14 @@ from . import __version__ as version
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {
-    "User-Agent": f"archivum/{version} (mailto:stephenjmildenhall@gmail.com)"
-}
-BASE_URL = 'https://api.crossref.org/works'
+HEADERS = {"User-Agent": f"archivum/{version} (mailto:stephenjmildenhall@gmail.com)"}
+BASE_URL = "https://api.crossref.org/works"
 
 
-@lru_cache
+@lru_cache(maxsize=None)
 def lookup_doi(doi: str) -> Union[Dict[str, Any], None]:
     """Lookup an individual doi string."""
-    logger.info('crossref doi %s', doi)
+    logger.info("crossref doi %s", doi)
     url = f"{BASE_URL}/{doi}"
     try:
         resp = requests.get(url, headers=HEADERS)
@@ -37,10 +35,10 @@ def lookup_doi(doi: str) -> Union[Dict[str, Any], None]:
         return None
 
 
-@lru_cache
+@lru_cache(maxsize=None)
 def search_by_title(title: str, rows: int = 1) -> Union[Dict[str, Any], None]:
     """Reverse lookup via title search."""
-    logger.info('crossref title %s', title)
+    logger.info("crossref title %s", title)
     params = {"query.title": title, "rows": rows}
     try:
         resp = requests.get(BASE_URL, params=params, headers=HEADERS)
@@ -53,15 +51,15 @@ def search_by_title(title: str, rows: int = 1) -> Union[Dict[str, Any], None]:
         return None
 
 
-@lru_cache
+@lru_cache(maxsize=None)
 def search(
     query: Optional[str] = None,
     title: Optional[str] = None,
     author: Optional[str] = None,
-    rows: int = 5
+    rows: int = 5,
 ) -> List[Dict[str, Any]]:
     """Generic search: keywords, title, and/or author."""
-    logger.info('crossref search title=%s author=%s query=%s', title, author, query)
+    logger.info("crossref search title=%s author=%s query=%s", title, author, query)
     params = {"rows": rows}
     if query:
         params["query"] = query
@@ -77,6 +75,7 @@ def search(
     except RequestException as e:
         logger.error("Error in generic search: %s", e)
         return []
+
 
 # # v1
 # from functools import lru_cache
@@ -132,4 +131,3 @@ def search(
 #     if resp.status_code == 200:
 #         return resp.json()["message"]["items"]
 #     return []
-
