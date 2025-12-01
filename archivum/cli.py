@@ -33,7 +33,7 @@ from rich.console import Console
 from rich.text import Text
 
 # for uber loop
-from great2.shell import UberShell  # type: ignore[import-not-found]
+from uber_shell import UberShell  # type: ignore[import-not-found]
 from rustfuzz import FuzzyMatcherMultiHi
 
 from .reference import Reference
