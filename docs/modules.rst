@@ -17,18 +17,17 @@ Command Line Interface
 .. automodule:: archivum.cli
    :members:
 
+For **click**.
+
+.. click:: archivum.cli:entry
+   :prog: archivum
+   :nested: full
+
 Document Class
 --------------
 
 .. automodule:: archivum.document
    :members:
-
-GUI
-----
-
-.. automodule:: archivum.gui
-   :members:
-
 
 Hasher
 ----------
@@ -43,10 +42,10 @@ Library
 .. automodule:: archivum.library
    :members:
 
-Mendeley-Port
+Import BibTex
 ---------------
 
-.. automodule:: archivum.mendeley_port
+.. automodule:: archivum.import_bibtex
    :members:
 
 Parser

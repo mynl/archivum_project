@@ -41,13 +41,14 @@ extensions = [
     "sphinx.ext.autosectionlabel",
     "sphinx_copybutton",
     "sphinx_toggleprompt",
+    "sphinx_click",
     "IPython.sphinxext.ipython_directive",
     "IPython.sphinxext.ipython_console_highlighting",
     "nbsphinx",
     # 'sphinx_panels',
     # 'sphinxcontrib.bibtex',
     "sphinx_multitoc_numbering",
-    "sphinx_rtd_dark_mode",
+    # "sphinx_rtd_dark_mode",
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -77,8 +78,8 @@ default_dark_mode = False
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
-#
-html_theme = "sphinx_rtd_theme"
+# ???
+# html_theme = "sphinx_rtd_theme"
 
 html_theme_options = {
     "logo_only": False,
