@@ -26,6 +26,7 @@ dependencies = [
     "python_Levenshtein",
     "pyyaml",
     "rapidfuzz",
+    "rustfuzz",
     "requests",
     "tqdm",
     "arxiv",
