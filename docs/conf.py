@@ -81,17 +81,17 @@ default_dark_mode = False
 # ??? sphinx < 8.0.0
 html_theme = "sphinx_rtd_theme"
 
-html_theme_options = {
-    "logo_only": False,
-    "display_version": True,
-    "prev_next_buttons_location": "both",
-    "style_external_links": False,
-    "collapse_navigation": True,
-    "sticky_navigation": True,
-    "navigation_depth": 3,
-    "includehidden": True,
-    "titles_only": False,
-}
+# html_theme_options = {
+#     "logo_only": False,
+#     "display_version": True,
+#     "prev_next_buttons_location": "both",
+#     "style_external_links": False,
+#     "collapse_navigation": True,
+#     "sticky_navigation": True,
+#     "navigation_depth": 3,
+#     "includehidden": True,
+#     "titles_only": False,
+# }
 
 html_logo = "_static/archivum-logo.png"
 html_favicon = "_static/favicon.ico"
