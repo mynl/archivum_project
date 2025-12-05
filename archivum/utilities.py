@@ -2,6 +2,7 @@
 
 from collections import defaultdict
 from functools import partial
+from pathlib import Path
 import re
 import unicodedata
 from IPython.display import display as ip_display
@@ -240,3 +241,52 @@ def sanitize_windows_component(name: str, max_length: int = 255) -> str:
             name = name[:max_length]
 
     return name
+
+
+def suggest_name(author: str, title: str, year: str | int):
+    """
+    Figure standard dir name and file name from author, title, and year.
+
+    Names are make filename safe
+
+    author, str, in standard last, first [and...] format
+    title, st
+    year, str
+
+    """
+    year = str(year).strip()
+    title = title.strip()
+    author = author.strip()
+
+    # directory from author name(s)
+    split_author = author.split(" and ") if author else []
+    dir_name = ", ".join([i.split(",")[0] for i in split_author][:3])
+    if len(split_author) > 3:
+        dir_name = f"{dir_name} et al" if dir_name else "et al"
+
+    file_name = f"{year}_{title}"
+
+    dir_name = sanitize_windows_component(dir_name)
+    file_name = sanitize_windows_component(file_name)
+
+    return dir_name, file_name
+
+
+def rename(original_file_path: Path, pdf_dir_path: Path, dir_name: str, file_name: str):
+    """Hard link original file into pdf_dir/dir_name/file_name."""
+
+    new_name = Path(file_name).with_suffix(original_file_path.suffix)
+    parent_dir = pdf_dir_path / dir_name
+    parent_dir.mkdir(parents=True, exist_ok=True)
+    new_path = parent_dir / new_name
+    if new_path.exists():
+        logger.warning("new path exists! Unlinking...")
+        # new_path.unlink()
+
+    # make new link
+    logger.info("%s --> %s", new_path, self.doc_path)
+    print(f"{new_path} ==> {self.doc_path}")
+
+    # save it
+    self._new_doc_path = new_path
+    # new_path.hardlink_to(self.doc_path)

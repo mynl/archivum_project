@@ -11,9 +11,9 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
+    "arxiv",
     "click",
     "greater_tables",
-    "uber_shell",
     "lark",
     "latexcodec",
     "numpy",
@@ -26,10 +26,10 @@ dependencies = [
     "python_Levenshtein",
     "pyyaml",
     "rapidfuzz",
-    "rustfuzz",
     "requests",
+    "rustfuzz",
     "tqdm",
-    "arxiv",
+    "uber_shell",
 ]
 
 classifiers = [
@@ -65,13 +65,13 @@ dev = [
     "pickleshare",
     "recommonmark",
     "setuptools>=62.3.2",
-    "sphinx<8.0.0",
     "sphinx-click",
-    "sphinx-rtd-dark-mode",
-    "sphinxcontrib-bibtex",
     "sphinx-copybutton",
+    "sphinx-multitoc-numbering",
+    "sphinx-rtd-dark-mode",
     "sphinx-toggleprompt",
-    "sphinx-multitoc-numbering"
+    "sphinx<8.0.0",
+    "sphinxcontrib-bibtex",
 ]
 
 [tool.ruff]

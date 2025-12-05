@@ -34,28 +34,42 @@ class Document:
     Handles text extraction, metadata discovery, and BibTeX generation.
     """
 
-    def __init__(self, doc_path: Path):
+    def __init__(self, doc_path: Path, book_mode: bool = False):
         self.doc_path = Path(doc_path)
         self._new_doc_path = None
         self._text: str = ""
+        self.book_mode = book_mode
 
         # The central source of truth for the best-guess info
-        self.bib: Dict[str, str] = {
-            "entry_type": "article",  # default
-            "title": "",
-            "author": "",  # Normalized string "Last, First and Last, First"
-            "year": "",
-            "month": "",
-            "day": "",
-            "doi": "",
-            "arxiv_id": "",
-            "journal": "",  # For articles
-            "booktitle": "",  # For chapters/proceedings
-            "publisher": "",
-            "volume": "",
-            "number": "",
-            "pages": "",
-        }
+        if self.book_mode:
+            self.bib: Dict[str, str] = {
+                "entry_type": "book",  # default
+                "title": "",
+                "author": "",  # Normalized string "Last, First and Last, First"
+                "year": "",
+                "doi": "",
+                # "arxiv_id": "",
+                "booktitle": "",  # For chapters/proceedings
+                "publisher": "",
+                "pages": "",
+            }
+        else:
+            self.bib: Dict[str, str] = {
+                "entry_type": "article",  # default
+                "title": "",
+                "author": "",  # Normalized string "Last, First and Last, First"
+                "year": "",
+                "month": "",
+                "day": "",
+                "doi": "",
+                "arxiv_id": "",
+                "journal": "",  # For articles
+                "booktitle": "",  # For chapters/proceedings
+                "publisher": "",
+                "volume": "",
+                "number": "",
+                "pages": "",
+            }
 
         # Flags to track which sources contributed to the final record.
         self._used_filename = False
@@ -251,7 +265,7 @@ class Document:
         core_ok = bool(self.bib["title"] and self.bib["author"] and self.bib["year"])
 
         # Highest confidence: we used external identifiers (doi/arxiv/crossref).
-        if self._used_external or self.bib["doi"] or self.bib["arxiv_id"]:
+        if self._used_external or self.bib.get("doi") or self.bib.get("arxiv_id"):
             if core_ok:
                 self.status = "ok"
             else:
@@ -514,7 +528,7 @@ class Document:
         """Use found IDs or Title/Author query to fetch clean data."""
 
         # 1. Arxiv Lookup
-        if self.bib["arxiv_id"]:
+        if self.bib.get("arxiv_id"):
             logger.info("arxiv lookup %s", self.bib["arxiv_id"])
             data = lookup_arxiv(self.bib["arxiv_id"])
             # Assuming data returns a dict or list of dicts.
@@ -532,7 +546,7 @@ class Document:
                 return  # Stop if we found it via Arxiv
 
         # 2. DOI Lookup
-        if self.bib["doi"]:
+        if self.bib.get("doi"):
             logger.info("doi lookup %s", self.bib["doi"])
             data = lookup_doi(self.bib["doi"])
             if data:
@@ -546,7 +560,8 @@ class Document:
         if q_title and len(q_title) > 10:
             logger.info("xref lookup %s, %s", self.bib["author"], self.bib["title"])
             results = xref_search(
-                query=f"{q_title} {q_author}"
+                query=f"{q_title} {q_author}",
+                book_mode=self.book_mode,
             )  # title=q_title, author=q_author)
             # print("\n\nX cross ref queryX\n\n")
             if results:

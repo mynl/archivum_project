@@ -21,10 +21,11 @@ class Document:
     Uses a Gather -> Rank -> Verify strategy to reconcile Metadata, Filenames, and OCR.
     """
 
-    def __init__(self, doc_path: Path):
+    def __init__(self, doc_path: Path, book_mode: bool = False):
         self.doc_path = Path(doc_path)
         self._new_doc_path: Optional[Path] = None
         self._text: str = ""
+        self.book_mode = book_mode
 
         # Operational Status
         self.status = "NEW"  # NEW, SUCCESS, REVIEW_NEEDED, FAILED
@@ -71,6 +72,8 @@ class Document:
         # 2. Rank / Anchor Selection
         anchor_source, anchor_data = self._determine_anchor()
         self.log_messages.append(f"Selected anchor source: {anchor_source}")
+
+        # return  # !!!
 
         # 3. Enhance (API Search)
         # If we found an ID (DOI/Arxiv) visually, that's an automatic win.
@@ -182,6 +185,7 @@ class Document:
             with pymupdf.open(self.doc_path) as doc:
                 meta = doc.metadata
         except Exception:
+            c["error"] = "extracting md"
             self.candidates["metadata"] = c
             return
 
@@ -279,6 +283,7 @@ class Document:
 
     def _step_id_lookup(self, source_data):
         """Lookup by DOI or Arxiv ID."""
+        print("arxiv/doi lookup")
         if source_data.get("arxiv_id"):
             res = lookup_arxiv(source_data["arxiv_id"])
             if res:
@@ -295,13 +300,14 @@ class Document:
         """Search Crossref using Title/Author from anchor."""
         if not anchor.get("title"):
             return
+        print("x ref api call")
 
         query = anchor["title"]
         if anchor.get("author"):
             query += f" {anchor['author']}"
 
         # logger.info(f"Searching Crossref: {query}")
-        results = xref_search(query)
+        results = xref_search(query, book_mode=self.book_mode)
         if results:
             # We take the top result tentatively
             self.candidates["api"] = self._normalize_crossref(results[0])

@@ -57,6 +57,7 @@ def search(
     title: Optional[str] = None,
     author: Optional[str] = None,
     rows: int = 5,
+    book_mode: bool = False,
 ) -> List[Dict[str, Any]]:
     """Generic search: keywords, title, and/or author."""
     logger.info("crossref search title=%s author=%s query=%s", title, author, query)
@@ -67,6 +68,9 @@ def search(
         params["query.author"] = author
     if title:
         params["query.title"] = title
+
+    if book_mode:
+        params["filter"] = ("type:book",)  # Filters specifically for books
 
     try:
         resp = requests.get(BASE_URL, params=params, headers=HEADERS)
