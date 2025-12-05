@@ -25,17 +25,22 @@ import shutil
 from IPython.display import display
 
 import latexcodec
+
 # import Levenshtein  # per Gemini prefer to use rapidfuzz
 from rapidfuzz import distance, fuzz
 import numpy as np
 import pandas as pd
 
 from . import EMPTY_LIBRARY, DEBUG_DIR
-from . utilities import (remove_accents, make_qd,
-                        accent_mapper_dict, safe_int,
-                        TagAllocator)
-from . trie import Trie
-from . library_base import LibraryBase
+from .utilities import (
+    remove_accents,
+    make_qd,
+    accent_mapper_dict,
+    safe_int,
+    TagAllocator,
+)
+from .trie import Trie
+from .library_base import LibraryBase
 
 # set to True to override where audit files are stored to tmp
 # False is default
@@ -53,48 +58,55 @@ class Bib2df_Incremental(LibraryBase):
     """
 
     # for de-texing single characters in braces
-    _r_brace1 = re.compile(r'{(.)}')
-    _r_brace2 = re.compile(r'{{(.)}}')
+    _r_brace1 = re.compile(r"{(.)}")
+    _r_brace2 = re.compile(r"{{(.)}}")
 
     # base columns used by the app for quick output displays
-    _base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
+    _base_cols = ["tag", "type", "author", "title", "year", "journal", "file"]
 
     # base columns expected by import_bibtex_file
-    _base_fields = ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
-              'editor', 'mendeley-tags', 'edition']
-
+    _base_fields = [
+        "title",
+        "journal",
+        "publisher",
+        "institution",
+        "booktitle",
+        "address",
+        "editor",
+        "mendeley-tags",
+        "edition",
+    ]
 
     # =====================================================================================================
     # user defined mappers: these can be customized
     # _char_map is less likely to be changed: it is applied to the raw text read from the bibtex file
     _char_unicode_dict = {
-        '“': '"',    # left double quote
-        '”': '"',    # right double quote
-        '„': '"',    # low double quote
-        '«': '"',    # double angle quote
-        '»': '"',
-        '′': "'",
-        '‘': "'",    # left single quote
-        '’': "'",    # right single quote
-        '‚': "'",    # low single quote
-        '′': "'",    # prime
-        '‵': "'",    # reversed prime
-        '‹': "'",    # single angle quote
-        '›': "'",
-
-        '\u00a0': ' ',    # non-breaking space
-        '\u200b': '',     # zero-width space
-        '\ufeff': '',     # BOM
+        "“": '"',  # left double quote
+        "”": '"',  # right double quote
+        "„": '"',  # low double quote
+        "«": '"',  # double angle quote
+        "»": '"',
+        "′": "'",
+        "‘": "'",  # left single quote
+        "’": "'",  # right single quote
+        "‚": "'",  # low single quote
+        "′": "'",  # prime
+        "‵": "'",  # reversed prime
+        "‹": "'",  # single angle quote
+        "›": "'",
+        "\u00a0": " ",  # non-breaking space
+        "\u200b": "",  # zero-width space
+        "\ufeff": "",  # BOM
     }
 
     _char_map = str.maketrans(_char_unicode_dict)
 
     # _re_subs is also applied to raw text to adjust en and em dashes.
     _re_subs = {
-        '–': '--',    # en dash → hyphen
-        '—': '---',    # em dash → hyphen
+        "–": "--",  # en dash → hyphen
+        "—": "---",  # em dash → hyphen
     }
-    _re_subs_compiled = re.compile('|'.join(map(re.escape, _re_subs)))
+    _re_subs_compiled = re.compile("|".join(map(re.escape, _re_subs)))
 
     # for mapping the edition bibtex field, used in import_bibtex_file
     _edition_mapper = {
@@ -122,19 +134,38 @@ class Bib2df_Incremental(LibraryBase):
     }
 
     # used by import_bibtex_file to drop fields from input bibtex file
-    _omitted_bibtex_fields = ['abstract', 'annote', 'issn', 'isbn', 'archivePrefix',
-                               # 'arxivId',
-                               'eprint', 'pmid',
-                               'primaryClass', 'series', 'chapter', 'school',
-                               'organization', 'howpublished', 'keywords'
-                               ]
+    _omitted_bibtex_fields = [
+        "abstract",
+        "annote",
+        "issn",
+        "isbn",
+        "archivePrefix",
+        # 'arxivId',
+        "eprint",
+        "pmid",
+        "primaryClass",
+        "series",
+        "chapter",
+        "school",
+        "organization",
+        "howpublished",
+        "keywords",
+    ]
 
     # end customizable mappers
     # =====================================================================================================
 
-    def __init__(self, *, bibtex_file_path, pdf_dir, reference_library,
-                fillna=True, errors_mapper=None, remap_dashes=False, qd=None,
-                ):
+    def __init__(
+        self,
+        *,
+        bibtex_file_path,
+        pdf_dir,
+        reference_library,
+        fillna=True,
+        errors_mapper=None,
+        remap_dashes=False,
+        qd=None,
+    ):
         """
         Read Path p into bibtex df, pdf_dir is a Path to pdf files (must exist)
 
@@ -187,9 +218,9 @@ class Bib2df_Incremental(LibraryBase):
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
-        assert self.bibtex_file_path.exists(), 'Bibtex file must exist'
+        assert self.bibtex_file_path.exists(), "Bibtex file must exist"
         self.pdf_dir = Path(pdf_dir)
-        assert self.pdf_dir.exists(), 'PDF directory does not exist'
+        assert self.pdf_dir.exists(), "PDF directory does not exist"
         self.reference_library = reference_library or EMPTY_LIBRARY
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
@@ -206,7 +237,9 @@ class Bib2df_Incremental(LibraryBase):
         self._ref_df = pd.DataFrame()
         self._best_match_df = pd.DataFrame()
         self._ref_no_doc = pd.DataFrame()
-        self._ported_df = pd.DataFrame()    # the "raw" ported df, includes file column, but otherwise like ref_df
+        self._ported_df = (
+            pd.DataFrame()
+        )  # the "raw" ported df, includes file column, but otherwise like ref_df
         self._database = pd.DataFrame()
 
         # for audit and debugging
@@ -227,16 +260,20 @@ class Bib2df_Incremental(LibraryBase):
     def raw_df(self):
         """DataFrame of raw(ish) information read directly from bibtex file."""
         if self._raw_df.empty:
-            logger.info('===>> creating raw_df property <<====')
+            logger.info("===>> creating raw_df property <<====")
             # read text
-            self.txt = self.bibtex_file_path.read_text(encoding='utf-8').translate(self._char_map)
+            self.txt = self.bibtex_file_path.read_text(encoding="utf-8").translate(
+                self._char_map
+            )
             if self.remap_dashes:
                 # basic remapping for dashes
-                self.txt, n = self._re_subs_compiled.subn(lambda m: self._re_subs[m.group()], self.txt)
-                logger.info(f'uber regex sub found {n = } replacements')
+                self.txt, n = self._re_subs_compiled.subn(
+                    lambda m: self._re_subs[m.group()], self.txt
+                )
+                logger.info(f"uber regex sub found {n = } replacements")
 
             # split into references
-            self.stxt = re.split(r'^@', self.txt, flags=re.MULTILINE)
+            self.stxt = re.split(r"^@", self.txt, flags=re.MULTILINE)
 
             # parse each line
             parsed_lines = map(self.parse_line, self.stxt[1:])
@@ -246,13 +283,13 @@ class Bib2df_Incremental(LibraryBase):
             # doing this keeps stxt and the df on the same index
             self._raw_df.index = range(1, 1 + len(self._raw_df))
             if self.fillna:
-                self._raw_df = self._raw_df.fillna('')
+                self._raw_df = self._raw_df.fillna("")
         return self._raw_df
 
     @property
     def ported_df(self):
         if self._ported_df.empty:
-            logger.info('===>> creating ported_df property <<====')
+            logger.info("===>> creating ported_df property <<====")
             self.import_bibtex_file()
         return self._ported_df
 
@@ -260,9 +297,11 @@ class Bib2df_Incremental(LibraryBase):
     def ref_df(self):
         """The reference df contains no file information and has tag NOT as the index."""
         if self._ref_df.empty:
-            logger.info('===>> creating ref_df property <<====')
-            self._ref_df = self.ported_df.drop(columns='file')#.reset_index(drop=False)
-            self._ref_df['arc-source'] = f"bibtex {self.name} at {self.timestamp}"
+            logger.info("===>> creating ref_df property <<====")
+            self._ref_df = self.ported_df.drop(
+                columns="file"
+            )  # .reset_index(drop=False)
+            self._ref_df["arc-source"] = f"bibtex {self.name} at {self.timestamp}"
         return self._ref_df
 
     @property
@@ -275,34 +314,48 @@ class Bib2df_Incremental(LibraryBase):
         Currently only PDFs.
         """
         if self._doc_df.empty:
-            logger.info('===>> creating doc_df property <<====')
-            pdfs = list(self.pdf_dir.rglob('*.pdf'))
-            logger.warning('Found %s afiles (actual pdf files).', len(pdfs))
+            logger.info("===>> creating doc_df property <<====")
+            pdfs = list(self.pdf_dir.rglob("*.pdf"))
+            logger.warning("Found %s afiles (actual pdf files).", len(pdfs))
             ans = []
             for p in pdfs:
                 p = p.absolute()
                 stat = p.stat(follow_symlinks=True)
-                ans.append({
-                    "name": p.name,
-                    "path": str(p.as_posix()),
-                    "mod": stat.st_mtime_ns,
-                    "create": stat.st_ctime_ns,
-                    "access": stat.st_atime_ns,
-                    "node": stat.st_ino,
-                    "links": stat.st_nlink,
-                    "size": stat.st_size,
-                    "suffix": p.suffix[1:],
-                    "hash": 'TBD'
-                })
+                ans.append(
+                    {
+                        "name": p.name,
+                        "path": str(p.as_posix()),
+                        "mod": stat.st_mtime_ns,
+                        "create": stat.st_ctime_ns,
+                        "access": stat.st_atime_ns,
+                        "node": stat.st_ino,
+                        "links": stat.st_nlink,
+                        "size": stat.st_size,
+                        "suffix": p.suffix[1:],
+                        "hash": "TBD",
+                    }
+                )
             df = pd.DataFrame(ans)
-            tz = 'Europe/London'
-            df["create"] = pd.to_datetime(df["create"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
-            df["mod"] = pd.to_datetime(df["mod"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
-            df["access"] = pd.to_datetime(df["access"], unit="ns").dt.tz_localize("UTC").dt.tz_convert(tz)
+            tz = "Europe/London"
+            df["create"] = (
+                pd.to_datetime(df["create"], unit="ns")
+                .dt.tz_localize("UTC")
+                .dt.tz_convert(tz)
+            )
+            df["mod"] = (
+                pd.to_datetime(df["mod"], unit="ns")
+                .dt.tz_localize("UTC")
+                .dt.tz_convert(tz)
+            )
+            df["access"] = (
+                pd.to_datetime(df["access"], unit="ns")
+                .dt.tz_localize("UTC")
+                .dt.tz_convert(tz)
+            )
             self._doc_df = df
             # mend version added hashes from precomputed data frame - fragile!
             # self._add_hashes()
-            logger.info(f'Scanned pdf folder and created doc_df with {len(ans)} files')
+            logger.info(f"Scanned pdf folder and created doc_df with {len(ans)} files")
         return self._doc_df
 
     @property
@@ -319,11 +372,11 @@ class Bib2df_Incremental(LibraryBase):
         Oddly, empty vfiles are ::
         """
         if self._vfile_df.empty:
-            logger.info('===>> creating vfile_df property <<====')
+            logger.info("===>> creating vfile_df property <<====")
             ans = []
             self._file_errs = []
-            df = self.ported_df.set_index('tag')
-            for tag, value in df.file.str.split(';').fillna('').items():
+            df = self.ported_df.set_index("tag")
+            for tag, value in df.file.str.split(";").fillna("").items():
                 # the items are: tag=0,1,... and value a list of strings
                 # of the form :drive\\:file:file_type
                 # on splitting at ":" these have four parts:
@@ -334,17 +387,21 @@ class Bib2df_Incremental(LibraryBase):
                         # these should be ignored - they are not afiles
                         if ref == "::":
                             continue
-                        x = ref.split(':')
+                        x = ref.split(":")
                         if len(x) == 4:
                             ans.append([tag, *x[1:]])
                         else:
                             self._file_errs.append([tag, *x[1:]])
                 except AttributeError:
-                    self._file_errs.append([tag, 'Attribute', *ref])
-            self._vfile_df = pd.DataFrame(ans, columns=['tag', 'drive', 'vfile', 'type'])
+                    self._file_errs.append([tag, "Attribute", *ref])
+            self._vfile_df = pd.DataFrame(
+                ans, columns=["tag", "drive", "vfile", "type"]
+            )
             # resolve the file names
-            self._vfile_df.vfile = [str(Path(vf).absolute().as_posix()) for vf in self._vfile_df.vfile]
-            logger.info(f'Created vfile_df with {len(self._vfile_df)} rows.')
+            self._vfile_df.vfile = [
+                str(Path(vf).absolute().as_posix()) for vf in self._vfile_df.vfile
+            ]
+            logger.info(f"Created vfile_df with {len(self._vfile_df)} rows.")
         return self._vfile_df
 
     @property
@@ -358,29 +415,49 @@ class Bib2df_Incremental(LibraryBase):
         """
         # columns are ref_id=tag and afile name
         if self._ref_doc_df.empty:
-            logger.info('===>> creating ref_doc_df property <<====')
+            logger.info("===>> creating ref_doc_df property <<====")
             actual_files = set(self.doc_df.path)
-            logger.info(f'\tFound {len(actual_files)} actual files')
+            logger.info(f"\tFound {len(actual_files)} actual files")
             missing_vfiles = []
             for i, r in self.vfile_df.iterrows():
                 if r.vfile not in actual_files:
                     missing_vfiles.append([i, r.vfile])
-            logger.info(f'\tFound {len(missing_vfiles) = } missing vfiles (Mend main extract expects 558)')
-            logger.info('\tLevenshtein matching in ref_doc...')
+            logger.info(
+                f"\tFound {len(missing_vfiles) = } missing vfiles (Mend main extract expects 558)"
+            )
+            logger.info("\tLevenshtein matching in ref_doc...")
             ans = []
             for tag, m_vfile in missing_vfiles:
-                best_match = min(actual_files,
-                                 key=lambda alt: distance.Levenshtein.distance(m_vfile, alt))
-                ans.append([tag, m_vfile, best_match, distance.Levenshtein.distance(m_vfile, best_match)])
+                best_match = min(
+                    actual_files,
+                    key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
+                )
+                ans.append(
+                    [
+                        tag,
+                        m_vfile,
+                        best_match,
+                        distance.Levenshtein.distance(m_vfile, best_match),
+                    ]
+                )
             # for reference
-            self._best_match_df = pd.DataFrame(ans, columns=['tag', 'missing_vfile', 'match_afile', 'distance'])
-            logger.info('\t...Levenshtein matching completed')
-            matcher = {vfile: afile for vfile, afile in self._best_match_df[['missing_vfile', 'match_afile']].values}
-            self._ref_doc_df = pd.DataFrame({
-                'tag': self.vfile_df.tag,
-                # replace defaults to no change if not in the matcher dictionary
-                'path': self.vfile_df['vfile'].replace(matcher).values
-            })
+            self._best_match_df = pd.DataFrame(
+                ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
+            )
+            logger.info("\t...Levenshtein matching completed")
+            matcher = {
+                vfile: afile
+                for vfile, afile in self._best_match_df[
+                    ["missing_vfile", "match_afile"]
+                ].values
+            }
+            self._ref_doc_df = pd.DataFrame(
+                {
+                    "tag": self.vfile_df.tag,
+                    # replace defaults to no change if not in the matcher dictionary
+                    "path": self.vfile_df["vfile"].replace(matcher).values,
+                }
+            )
             # for ref.
             self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
@@ -397,40 +474,45 @@ class Bib2df_Incremental(LibraryBase):
         on the authors in raw_df to prime the pump
         """
         if self._author_map_df.empty:
-            df = pd.DataFrame({'original': self.distinct('author', self.raw_df)})
+            df = pd.DataFrame({"original": self.distinct("author", self.raw_df)})
             self._last_decode = []
-            df['unicoded'] = df.original.map(self.tex_to_unicode).str.replace('.', '')
+            df["unicoded"] = df.original.map(self.tex_to_unicode).str.replace(".", "")
             # space out initials Mild, SJM -> Mild, S J M; works for two of three consecutive initials
-            df['spaced'] = df.unicoded.str.replace(r'(?<=, )([A-Z]{2,3})\b',
-                                                   lambda m: ' '.join(m.group(1)),
-                                                   regex=True)
+            df["spaced"] = df.unicoded.str.replace(
+                r"(?<=, )([A-Z]{2,3})\b", lambda m: " ".join(m.group(1)), regex=True
+            )
 
             # diverge from Bib2df: use the reference library
             t = Trie()
             # distinct returns a set
-            if self.reference_library != EMPTY_LIBRARY and \
-                            not self.reference_library.ref_df.empty:
-
+            if (
+                self.reference_library != EMPTY_LIBRARY
+                and not self.reference_library.ref_df.empty
+            ):
                 ref_authors = self.distinct("author", self.reference_library.ref_df)
-                logger.warning('Building author Trie from reference library, '
-                                f'{len(ref_authors)} distinct authors')
+                logger.warning(
+                    "Building author Trie from reference library, "
+                    f"{len(ref_authors)} distinct authors"
+                )
             else:
                 # no reference authors in the reference library
                 # e.g., it could be a start from scratch library
                 # prime the pump with the author names we have
                 ref_authors = self.distinct("author", self.raw_df)
-                logger.warning('Building author Trie from self.raw_df - no reference library authors; '
-                                f'{len(ref_authors) = } distinct authors')
+                logger.warning(
+                    "Building author Trie from self.raw_df - no reference library authors; "
+                    f"{len(ref_authors) = } distinct authors"
+                )
             for name in ref_authors:
-                t.insert(name.strip('. '))
+                t.insert(name.strip(". "))
             # mapping will go from name to longest completion
             mapping = {}
             # authors in self.raw_df
             a = self.distinct("author", self.raw_df)
-            logger.info(f'Import contains {len(a)} distinct authors -> remapping')
+            logger.info(f"Import contains {len(a)} distinct authors -> remapping")
             for name in a:
                 try:
-                    m = t.longest_unique_completion(name.strip('.'), strict=False)
+                    m = t.longest_unique_completion(name.strip("."), strict=False)
                 except ValueError:
                     # in strict mode means prefix not found -> no change
                     pass
@@ -438,12 +520,14 @@ class Bib2df_Incremental(LibraryBase):
                     if m != name:
                         # have found a better version
                         mapping[name] = m
-            df['longest'] = df.spaced.replace(mapping)
+            df["longest"] = df.spaced.replace(mapping)
             accent_mapper = accent_mapper_dict(df.longest)
-            df['accents'] = df.longest.replace(accent_mapper)
+            df["accents"] = df.longest.replace(accent_mapper)
             # initial  periods
-            df['proposed'] = df.accents.str.replace(r'(\b)([A-Z])( |$)', r'\1\2.\3', case=True, regex=True)
-            logger.info(f'Field: authors\nDecode errors: {len(self._last_decode) = }')
+            df["proposed"] = df.accents.str.replace(
+                r"(\b)([A-Z])( |$)", r"\1\2.\3", case=True, regex=True
+            )
+            logger.info(f"Field: authors\nDecode errors: {len(self._last_decode) = }")
             self._author_map_df = df
             # debug
             self.trie = t
@@ -455,23 +539,20 @@ class Bib2df_Incremental(LibraryBase):
     def database(self):
         """Merged database, with exploded authors."""
         if self._database.empty:
-            exploded_authors = (
-                self.ref_df.assign(author=self.ref_df.author.str.split(" and "))
-                .explode("author", ignore_index=True)
-            )
-            self._database = (((
-                self.ref_doc_df
-                .merge(exploded_authors, on="tag", how='right'))
-                .merge(self.doc_df, on='path', how='left'))
-            )
-            for c in ['node', 'links', 'size']:
+            exploded_authors = self.ref_df.assign(
+                author=self.ref_df.author.str.split(" and ")
+            ).explode("author", ignore_index=True)
+            self._database = (
+                self.ref_doc_df.merge(exploded_authors, on="tag", how="right")
+            ).merge(self.doc_df, on="path", how="left")
+            for c in ["node", "links", "size"]:
                 self._database[c] = self._database[c].fillna(0)
-            self._database.fillna('')
+            self._database.fillna("")
         return self._database
 
     def raw_no_file(self):
         """Raw entries with no files listed."""
-        return self.raw_df.loc[self.raw_df.file == '', self._base_cols]
+        return self.raw_df.loc[self.raw_df.file == "", self._base_cols]
 
     @staticmethod
     def parse_line(entry):
@@ -479,24 +560,24 @@ class Bib2df_Incremental(LibraryBase):
 
         # Step 1: Extract type and tag
         # windows GS bibtex pastes come in with \r\n
-        entry = entry.replace('\r\n  ', '\n')
-        header_match = re.match(r'@?(\w+)\{([^,]+),', entry)
+        entry = entry.replace("\r\n  ", "\n")
+        header_match = re.match(r"@?(\w+)\{([^,]+),", entry)
         if not header_match:
             logger.error("Error: Unable to parse entry header.")
             return None
-        result['type'], result['tag'] = header_match.groups()
+        result["type"], result["tag"] = header_match.groups()
 
         # Step 2: Remove header and final trailing '}'
-        body = entry[header_match.end():].strip()
-        if body.endswith('}'):
+        body = entry[header_match.end() :].strip()
+        if body.endswith("}"):
             body = body[:-1].strip() + ",\n"
 
-        for m in re.finditer(r'([a-zA-Z\-]+) = {(.*?)},\n', body, flags=re.DOTALL):
+        for m in re.finditer(r" *([a-zA-Z\-]+) *= *{(.*?)},\n", body, flags=re.DOTALL):
             try:
                 k, v = m.groups()
                 result[k] = v
             except ValueError:
-                logger.info('going slow')
+                logger.info("going slow")
                 return Bib2df_Incremental.parse_line_slow(entry)
         return result
 
@@ -505,19 +586,19 @@ class Bib2df_Incremental(LibraryBase):
         result = {}
 
         # Step 1: Extract type and tag
-        header_match = re.match(r'(\w+)\{([^,]+),', entry)
+        header_match = re.match(r"(\w+)\{([^,]+),", entry)
         if not header_match:
             logger.error("Error: Unable to parse entry header.")
             return None
-        result['type'], result['tag'] = header_match.groups()
+        result["type"], result["tag"] = header_match.groups()
 
         # Step 2: Remove header and final trailing '}'
-        body = entry[header_match.end():].strip()
-        if body.endswith('}'):
+        body = entry[header_match.end() :].strip()
+        if body.endswith("}"):
             body = body[:-1].strip()
 
         # Step 3: Find all key = { positions
-        matches = list(re.finditer(r'([a-zA-Z\-]+) = \{', body))
+        matches = list(re.finditer(r"([a-zA-Z\-]+) = \{", body))
         n = len(matches)
 
         for i, match in enumerate(matches):
@@ -526,8 +607,8 @@ class Bib2df_Incremental(LibraryBase):
             val_end = matches[i + 1].start() if i + 1 < n else len(body)
 
             # Strip off the trailing "}," (assumes always ",\n" after value)
-            value = body[val_start:val_end].rstrip().rstrip(',')
-            if value.endswith('}'):
+            value = body[val_start:val_end].rstrip().rstrip(",")
+            if value.endswith("}"):
                 value = value[:-1].rstrip()
 
             result[key] = value
@@ -540,12 +621,16 @@ class Bib2df_Incremental(LibraryBase):
         # signature changed from mendeley version
         if df is None or df.empty:
             return []
-        if column_name == 'author':
+        if column_name == "author":
             return sorted(
-                set(author.strip() for s in df.author.dropna() for author in s.split(" and "))
+                set(
+                    author.strip()
+                    for s in df.author.dropna()
+                    for author in s.split(" and ")
+                )
             )
         else:
-            return sorted(set([i for i in df[column_name] if i != '']))
+            return sorted(set([i for i in df[column_name] if i != ""]))
 
     def tex_to_unicode(self, s_in: str) -> str:
         """
@@ -558,9 +643,9 @@ class Bib2df_Incremental(LibraryBase):
         if pd.isna(s_in):
             return s_in
         try:
-            s = self._r_brace2.sub(r'\1', s_in.encode('latin1').decode('latex'))
-            s = self._r_brace1.sub(r'\1', s)
-            if s.find(',') > 0 and s == s.upper():
+            s = self._r_brace2.sub(r"\1", s_in.encode("latin1").decode("latex"))
+            s = self._r_brace1.sub(r"\1", s)
+            if s.find(",") > 0 and s == s.upper():
                 # title case what appear to be names (comma) that are all caps
                 s = s.title()
             return s
@@ -579,38 +664,40 @@ class Bib2df_Incremental(LibraryBase):
         Updated to use reference library.
         """
         # pattern to remove non-bibtex like characters
-        df = self.ported_df[['author', 'editor', 'year', 'tag', 'title']].copy()
+        df = self.ported_df[["author", "editor", "year", "tag", "title"]].copy()
         # figure out what the tag "should be"
         pat = r" |\.|\{|\}|\-|'"
         cpat = re.compile(pat)
         # handle mapping names to abbreviations
         # pass the mapping through the same transformation
-        tag_mapper = {cpat.sub("", k): v for
-            k, v in self.reference_library.config.tag_name_mapper.items()}
+        tag_mapper = {
+            cpat.sub("", k): v
+            for k, v in self.reference_library.config.tag_name_mapper.items()
+        }
         # but not sure that's worth it?
         # TODO: this is not working!
-        a = (df.author
-                .map(remove_accents)
-                .str.split(',', expand=True, n=1)[0]
-                .str.strip()
-                .str.replace(pat, '', regex=True)
-                .map(lambda x: tag_mapper.get(x, x))
-                )
-        e = (df.editor
-                .map(remove_accents)
-                .str.split(',', expand=True, n=1)[0]
-                .str.strip()
-                .str.replace(pat, '', regex=True)
-                .map(lambda x: tag_mapper.get(x, x))
-                )
-        y = df['year'].map(safe_int)
+        a = (
+            df.author.map(remove_accents)
+            .str.split(",", expand=True, n=1)[0]
+            .str.strip()
+            .str.replace(pat, "", regex=True)
+            .map(lambda x: tag_mapper.get(x, x))
+        )
+        e = (
+            df.editor.map(remove_accents)
+            .str.split(",", expand=True, n=1)[0]
+            .str.strip()
+            .str.replace(pat, "", regex=True)
+            .map(lambda x: tag_mapper.get(x, x))
+        )
+        y = df["year"].map(safe_int)
         # the standardized tag, standard_tag (stem)
-        df['standard_tag'] = np.where(a != '', a + y, np.where(e != '', e + y, 'NOTAG'))
+        df["standard_tag"] = np.where(a != "", a + y, np.where(e != "", e + y, "NOTAG"))
 
-        noans = df.standard_tag[df.standard_tag == 'NOTAG']
+        noans = df.standard_tag[df.standard_tag == "NOTAG"]
         if len(noans):
-            logger.warning(f'WARNING: Suggested tags failed for {len(noans)} items')
-            logger.warning('YOU NEED TO FIX THIS!')
+            logger.warning(f"WARNING: Suggested tags failed for {len(noans)} items")
+            logger.warning("YOU NEED TO FIX THIS!")
             logger.info(noans)
 
         # make the proposed tags, build lists as you go with no duplicates
@@ -618,34 +705,36 @@ class Bib2df_Incremental(LibraryBase):
             # library is aware and returns tag allocator on [] if
             # if has no database
             self.reference_library.reset_tag_allocator()
-            df['proposed_tag'] = [self.reference_library.next_tag(a, y)
-                                for a, y in zip(np.where(a != '', a, e), y)]
+            df["proposed_tag"] = [
+                self.reference_library.next_tag(a, y)
+                for a, y in zip(np.where(a != "", a, e), y)
+            ]
         else:
             # make the proposed tags, build lists as you go with no duplicates
             ta = TagAllocator([])
-            df['proposed_tag'] = df.standard_tag.map(ta)
-            df = df.sort_values('proposed_tag')
+            df["proposed_tag"] = df.standard_tag.map(ta)
+            df = df.sort_values("proposed_tag")
 
         # check all unique
         non_uq_tags = df.loc[df.proposed_tag.duplicated(keep=False)]
         if len(non_uq_tags):
-            logger.warning(f'Non-unique tags {len(non_uq_tags) = }')
+            logger.warning(f"Non-unique tags {len(non_uq_tags) = }")
             print(non_uq_tags)
             logger.info(set(non_uq_tags.proposed_tag))
-            raise ValueError('Non-unique proposed tags')
+            raise ValueError("Non-unique proposed tags")
         # enforce unique
-        assert df.proposed_tag.is_unique, 'ERROR: proposed tags are not unique'
+        assert df.proposed_tag.is_unique, "ERROR: proposed tags are not unique"
 
         # save for audit purposes
-        self.save_audit_file(df, '.tag-mapping')
+        self.save_audit_file(df, ".tag-mapping")
 
         # actually make the change to ported_df
-        self.ported_df['tag'] = df['proposed_tag']
+        self.ported_df["tag"] = df["proposed_tag"]
 
     def author_mapper(self):
         """dict mapper for author name."""
         # dropped manual fixes
-        return  {k: v for k, v in self.author_map_df[['original', 'proposed']].values}
+        return {k: v for k, v in self.author_map_df[["original", "proposed"]].values}
 
     def map_authors(self, df_name):
         """Actually apply the author mapper to the author column."""
@@ -653,14 +742,14 @@ class Bib2df_Incremental(LibraryBase):
         am = self.author_mapper()
 
         def f(x):
-            sx = x.split(' and ')
+            sx = x.split(" and ")
             msx = map(lambda x: am.get(x, x), sx)
-            return ' and '.join(msx)
+            return " and ".join(msx)
 
         df.author = df.author.map(f)
         # audit
-        amdf = pd.DataFrame(am.items(), columns=['key', 'value'])
-        self.save_audit_file(amdf, '.author-mapping')
+        amdf = pd.DataFrame(am.items(), columns=["key", "value"])
+        self.save_audit_file(amdf, ".author-mapping")
 
     def import_bibtex_file(self):
         """
@@ -677,42 +766,52 @@ class Bib2df_Incremental(LibraryBase):
 
         Called automatically by ported_df property if needed.
         """
-        logger.info('Running import_bibtex_file to create ported_df')
-        kept_fields = [i for i in self.raw_df.columns if i not in self._omitted_bibtex_fields]
+        logger.info("Running import_bibtex_file to create ported_df")
+        kept_fields = [
+            i for i in self.raw_df.columns if i not in self._omitted_bibtex_fields
+        ]
         self._ported_df = self.raw_df[kept_fields].copy()
 
         # ============================================================================================
         # author: initials, extend, accents - either from reference library or self.raw_df
         # if a new import
-        self.map_authors('_ported_df')
+        self.map_authors("_ported_df")
 
         # ensure other edited fields are present
         # this may not be the case for small imports
         for f in self._base_fields:
             if f not in self._ported_df:
-                logger.debug('Imported df missing %s - adding', f)
+                logger.debug("Imported df missing %s - adding", f)
                 # probably a string?
                 self._ported_df[f] = ""
 
         # ============================================================================================
         # de-tex other text fields
         self._all_unicode_errors = {}
-        for f in ['title', 'journal', 'publisher', 'institution', 'booktitle', 'address',
-                  'editor', 'mendeley-tags']:
+        for f in [
+            "title",
+            "journal",
+            "publisher",
+            "institution",
+            "booktitle",
+            "address",
+            "editor",
+            "mendeley-tags",
+        ]:
             self._last_decode = []
             self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
             if len(self._last_decode):
-                logger.info(f'\tField: {f}\t{len(self._last_decode) = }')
+                logger.info(f"\tField: {f}\t{len(self._last_decode) = }")
                 self._all_unicode_errors[f] = self._last_decode.copy()
-            logger.debug(f'Fixed {f}')
+            logger.debug(f"Fixed {f}")
 
         # audit unicode errors
         ans = []
         for k, v in self._all_unicode_errors.items():
             for mc in v:
                 ans.append([k, mc])
-        temp = pd.DataFrame(ans, columns=['field', 'miscode'])
-        self.save_audit_file(temp, '.tex-unicode-errors')
+        temp = pd.DataFrame(ans, columns=["field", "miscode"])
+        self.save_audit_file(temp, ".tex-unicode-errors")
 
         # ============================================================================================
         # keywords
@@ -744,15 +843,18 @@ class Bib2df_Incremental(LibraryBase):
 
         # ============================================================================================
         # final checks and balances, and write out info
-        self.save_audit_file(self.raw_df, '.raw-df')
-        self.save_audit_file(self._ported_df, '.ported-df')
-        import_info = pd.DataFrame({
-            'created': str(self.timestamp),
-            'bibtex_file': self.bibtex_file_path.absolute(),
-            'raw_entries': len(self.raw_df),
-            'ported_entries': len(self._ported_df)
-        }.items(), columns=['key', 'value'])
-        self.save_audit_file(import_info, '.audit-info')
+        self.save_audit_file(self.raw_df, ".raw-df")
+        self.save_audit_file(self._ported_df, ".ported-df")
+        import_info = pd.DataFrame(
+            {
+                "created": str(self.timestamp),
+                "bibtex_file": self.bibtex_file_path.absolute(),
+                "raw_entries": len(self.raw_df),
+                "ported_entries": len(self._ported_df),
+            }.items(),
+            columns=["key", "value"],
+        )
+        self.save_audit_file(import_info, ".audit-info")
         return import_info
 
     def import_analysis(self, lib_test=False, strict=False):
@@ -768,14 +870,26 @@ class Bib2df_Incremental(LibraryBase):
         """
         results = []
         for (left, raw_input), (right, revised) in zip(
-                self.raw_df.iterrows(), self.ported_df.iterrows()):
+            self.raw_df.iterrows(), self.ported_df.iterrows()
+        ):
             tag_in = raw_input.tag
             # trim for ligo problem
             # tag = revised.tag[:20]
             tag = revised.tag
             title = revised.title
-            kind, score_title, score_tag, match_title, match_tag = \
-                self._possible_duplicate(revised, right, lib_test=lib_test) or ("", "", "", 0, 0)
+            (
+                kind,
+                score_title,
+                score_tag,
+                match_title,
+                match_tag,
+            ) = self._possible_duplicate(revised, right, lib_test=lib_test) or (
+                "",
+                "",
+                "",
+                0,
+                0,
+            )
 
             change = "-" if self._compare(raw_input, revised) else "CHANGED"
             if change == "CHANGED":
@@ -784,32 +898,51 @@ class Bib2df_Incremental(LibraryBase):
                     if c in raw_input.index and revised[c] != raw_input[c]:
                         temp.append(c)
                 if temp:
-                    change_cols = ','.join(temp)
+                    change_cols = ",".join(temp)
                 else:
                     # ? must be an index change
-                    change = '-'
+                    change = "-"
                     if strict:
                         index_change = set(revised.index) - set(raw_input.index)
-                        change_cols = 'idx: ' + ','.join(index_change)
+                        change_cols = "idx: " + ",".join(index_change)
                     else:
-                        change_cols = ''
+                        change_cols = ""
             else:
                 change_cols = " no chg "
             #
-            results.append([tag_in, tag,
-                        title,
-                        kind, score_title, score_tag, match_title, match_tag,
-                        raw_input.author, revised.author,
-                        change, change_cols])
-        result_df = pd.DataFrame(results,
+            results.append(
+                [
+                    tag_in,
+                    tag,
+                    title,
+                    kind,
+                    score_title,
+                    score_tag,
+                    match_title,
+                    match_tag,
+                    raw_input.author,
+                    revised.author,
+                    change,
+                    change_cols,
+                ]
+            )
+        result_df = pd.DataFrame(
+            results,
             columns=[
-                'tag_in', 'tag_ported',
-                'title',
-                "kind", "score_title", "score_tag", "match_title", "match_tag",
-                'author_in', 'author_ported',
-                'change',
-                'change_cols',
-            ]).sort_values(['kind','change', 'change_cols'], ascending=[True, False, True])
+                "tag_in",
+                "tag_ported",
+                "title",
+                "kind",
+                "score_title",
+                "score_tag",
+                "match_title",
+                "match_tag",
+                "author_in",
+                "author_ported",
+                "change",
+                "change_cols",
+            ],
+        ).sort_values(["kind", "change", "change_cols"], ascending=[True, False, True])
 
         return result_df
 
@@ -822,27 +955,29 @@ class Bib2df_Incremental(LibraryBase):
         """
         self.reference_library.update(self)
         # create audit trail
-        import_path = self.reference_library.config_path / "import-audit" / self.timestamp
+        import_path = (
+            self.reference_library.config_path / "import-audit" / self.timestamp
+        )
         import_path.mkdir(parents=True, exist_ok=True)
         count = 0
-        for f in self._audit_dir_path.glob('*.*'):
+        for f in self._audit_dir_path.glob("*.*"):
             newf = import_path / f.name
             if newf.exists():
                 newf.unlink()
             newf.hardlink_to(f)
             count += 1
-        logger.info('UPDATE AUDIT: %s files copied to %s', count, import_path)
+        logger.info("UPDATE AUDIT: %s files copied to %s", count, import_path)
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
-        fn = self.bibtex_file_path.stem + suffix + '.csv'
+        fn = self.bibtex_file_path.stem + suffix + ".csv"
         p = self._audit_dir_path / fn
-        df.to_csv(p, encoding='utf-8')
-        logger.info(f'Audit: dataFrame, {len(df) = }, saved to {p.name}.')
+        df.to_csv(p, encoding="utf-8")
+        logger.info(f"Audit: dataFrame, {len(df) = }, saved to {p.name}.")
         # check about errors mapper
         if self.errors_mapper and not self._errors_mapper_saved:
             fn = self._audit_dir_path / "errors_mapper.json"
-            with open(fn, 'w', encoding='utf-8') as f:
+            with open(fn, "w", encoding="utf-8") as f:
                 json.dump(self.errors_mapper, f, indent=4)
             self._errors_mapper_saved = True
 
@@ -852,9 +987,9 @@ class Bib2df_Incremental(LibraryBase):
             for f in self._audit_dir_path.glob("*.bib"):
                 print(f.name)
                 print("=" * len(f.name))
-                print(f'Lines trimmed to {trim} characters.')
+                print(f"Lines trimmed to {trim} characters.")
                 txt = f.read_text()
-                txt = '\n'.join([i[:trim] for i in txt.split('\n')])
+                txt = "\n".join([i[:trim] for i in txt.split("\n")])
                 print(txt)
                 print()
 
@@ -865,18 +1000,18 @@ class Bib2df_Incremental(LibraryBase):
             print()
 
         if self.qd is None:
-            logger.error('Must provide qd to use show_ functions')
+            logger.error("Must provide qd to use show_ functions")
             return
         for f in self._audit_dir_path.glob("*.csv"):
-            df = pd.read_csv(f, encoding='utf-8-sig')
+            df = pd.read_csv(f, encoding="utf-8-sig")
             self.qd(df.head(top), caption=f.stem, tikz=False)
 
     def show_generated_dfs(self):
         """Use self.qd to display the main generated dfs."""
         if self.qd is None:
-            logger.error('Must provide qd to use show_ functions')
+            logger.error("Must provide qd to use show_ functions")
             return
-        for nm in ('df', 'ported_df', 'ref_df', 'doc_df', 'ref_doc_df'):
+        for nm in ("df", "ported_df", "ref_df", "doc_df", "ref_doc_df"):
             d = getattr(self, nm, None)
             if d is not None:
                 self.qd(d, caption=nm)
@@ -887,7 +1022,9 @@ class Bib2df_Incremental(LibraryBase):
             return None
         ans = set()
         for k, v in self._all_unicode_errors.items():
-            ans = ans.union(set([c for line in v for c in line if len(c.encode('utf-8')) > 1]))
+            ans = ans.union(
+                set([c for line in v for c in line if len(c.encode("utf-8")) > 1])
+            )
         return ans
 
     @property
@@ -901,11 +1038,11 @@ class Bib2df_Incremental(LibraryBase):
             self.__audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
             # ensure it exists
             self.__audit_dir_path.mkdir(parents=True, exist_ok=True)
-            logger.info('Created audit path at %s', str(self.__audit_dir_path))
+            logger.info("Created audit path at %s", str(self.__audit_dir_path))
             # audit the bibtex input file
             p_ = self.__audit_dir_path / self.bibtex_file_path.name
             if p_.exists():
-                logger.warning('REALLY WEIRD - audit of input bibtex already exists.')
+                logger.warning("REALLY WEIRD - audit of input bibtex already exists.")
                 p_.unlink()
             p_.hardlink_to(self.bibtex_file_path)
         return self.__audit_dir_path
@@ -920,7 +1057,9 @@ class Bib2df_Incremental(LibraryBase):
         s = re.sub(r"[^a-z0-9]+", " ", s)
         return " ".join(s.split())
 
-    def _possible_duplicate(self, ref_row, ref_row_idx, lib_test: bool = True) -> str | None:
+    def _possible_duplicate(
+        self, ref_row, ref_row_idx, lib_test: bool = True
+    ) -> str | None:
         """
         Heuristic duplicate check: by DOI (if present) and by normalized title.
         Returns a short message if something looks like a duplicate.
@@ -935,21 +1074,36 @@ class Bib2df_Incremental(LibraryBase):
 
         # what are we checking against?
         if self._existing_title_norm is None or self._dois is None:
-            if lib_test and self.reference_library != EMPTY_LIBRARY and \
-                        not self.reference_library.ref_df.empty:
-                self._existing_title_norm = self.reference_library.ref_df.title.map(self._normalize_title)
-                self._dois = self.reference_library.ref_df.doi.astype(str).str.lower().str.strip() if \
-                        'doi' in self.reference_library.ref_df else []
+            if (
+                lib_test
+                and self.reference_library != EMPTY_LIBRARY
+                and not self.reference_library.ref_df.empty
+            ):
+                self._existing_title_norm = self.reference_library.ref_df.title.map(
+                    self._normalize_title
+                )
+                self._dois = (
+                    self.reference_library.ref_df.doi.astype(str)
+                    .str.lower()
+                    .str.strip()
+                    if "doi" in self.reference_library.ref_df
+                    else []
+                )
                 self._self_test = False
                 # temporary storage - note titles are non-normalized
                 self._possible_duplicate_tags = self.reference_library.ref_df.tag
                 self._possible_duplicate_titles = self.reference_library.ref_df.title
             else:
                 # check against self - new import with no library or lib_test == False
-                logger.info('No reference library...checking duplicates relative to import.')
+                logger.info(
+                    "No reference library...checking duplicates relative to import."
+                )
                 self._existing_title_norm = self.ref_df.title.map(self._normalize_title)
-                self._dois = self.ref_df.doi.astype(str).str.lower().str.strip() if \
-                        'doi' in self.ref_df else []
+                self._dois = (
+                    self.ref_df.doi.astype(str).str.lower().str.strip()
+                    if "doi" in self.ref_df
+                    else []
+                )
                 self._self_test = True
                 # temporary storage
                 self._possible_duplicate_tags = self.ref_df.tag
@@ -985,19 +1139,21 @@ class Bib2df_Incremental(LibraryBase):
         if doi:
             mask = self._dois == doi
             # when run against itself (import into empty library), not match yourself!
-            if self._self_test: mask[ref_row_idx] = False
+            if self._self_test:
+                mask[ref_row_idx] = False
             if mask.any():
-                if (t:=sum(mask)) > 1:
-                    logger.debug('MULTI TITLE: %s, %s', ref_row.tag, t)
-                return create_message(mask, 'DOI')
+                if (t := sum(mask)) > 1:
+                    logger.debug("MULTI TITLE: %s, %s", ref_row.tag, t)
+                return create_message(mask, "DOI")
         # Title check
         if title_norm:
             mask = self._existing_title_norm == title_norm
-            if self._self_test: mask[ref_row_idx] = False
+            if self._self_test:
+                mask[ref_row_idx] = False
             if mask.any():
-                if (t:=sum(mask)) > 1:
-                    logger.debug('MULTI TITLE: %s, %s', ref_row.tag, t)
-                return create_message(mask, 'title')
+                if (t := sum(mask)) > 1:
+                    logger.debug("MULTI TITLE: %s, %s", ref_row.tag, t)
+                return create_message(mask, "title")
 
         return None
 
@@ -1010,4 +1166,3 @@ class Bib2df_Incremental(LibraryBase):
         if not revised.index.isin(orig.index).all():
             return False
         return revised.equals(orig.loc[revised.index])
-
