@@ -7,6 +7,7 @@ import logging.config
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Union
 import yaml
@@ -21,11 +22,13 @@ from prompt_toolkit.completion import (
     WordCompleter,
     NestedCompleter,
     DynamicCompleter,
+    PathCompleter,
     Completer,
     Completion,
 )
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.document import Document
+
+# from prompt_toolkit.document import Document
 from prompt_toolkit.application.current import get_app
 
 from pydantic import ValidationError
@@ -33,18 +36,19 @@ from rich.console import Console
 from rich.text import Text
 
 # for uber loop
-from uber_shell import UberShell  # type: ignore[import-not-found]
-from rustfuzz import FuzzyMatcherMultiHi
+from uber_shell import UberShell  # type: ignore[import-untyped]
+from rustfuzz import FuzzyMatcherMultiHi  # type: ignore[import-untyped]
+from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
-from .reference import Reference
 from .library import Library
-from .document import Document
-from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR
+from .document import Document  # type: ignore[import-untyped]
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
 from .utilities import make_qd
 from .config import Configurator
-from .querex import querex_help
 from .crossref import lookup_doi, search_by_title, search
-from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
+from .bibtex import dict_to_bibtex_crossref
+from .import_bibtex import Bib2df_Incremental
+
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / "Downloads")
@@ -328,8 +332,6 @@ def entry():
 
 
 # ========================================================================================
-
-
 @entry.command()
 @click.argument("lib_name", type=str)
 def open(lib_name):
@@ -345,8 +347,17 @@ def open(lib_name):
 
 
 # ========================================================================================
+@entry.command()
+def explorer():
+    """Open explorer to see files at the location of the open library, if any."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...nothing to save. Returning")
+        return
+    subprocess.run(f"start explorer {lib.config_path.absolute()}", shell=True)
 
 
+# ========================================================================================
 @entry.command()
 def save():
     """Save the current library to disk."""
@@ -399,7 +410,7 @@ def close():
 
 # ========================================================================================
 @entry.command()
-@click.argument("lib_name", type=str)
+@click.argument("lib_name", nargs=-1)
 def create(lib_name):
     """
     Create and open a new library. SEE ALSO THE CONFIG VERSION
@@ -409,82 +420,87 @@ def create(lib_name):
 
     Library must not already exist.
     """
+    lib_name = ' '.join(lib_name)
     lib_dir_name = lib_name.replace(" ", "-")
 
     # sort the file out
     lib_path = LIBRARIES_DIR / lib_dir_name
     if lib_path.exists():
-        click.secho("Error: Library file already exists: %s", lib_path)
-        click.secho("Pick another name. Returning, no library created.")
+        click.echo(f"Error: Library file {lib_path} already exists.")
+        click.echo("Pick another name. Returning, no library created.")
         return
+    else:
+        lib_path.mkdir(parents=True)
     click.secho("=== Library Config Creator ===", fg="cyan")
     click.secho(f"Creating Library {lib_name} at {lib_path}")
 
-    def pr(x):
+    def local_prompt(x):
         """Make the prompt string."""
         return f"[{lib_name}] {x} > "
 
-    tablefmt_completer = FuzzyCompleter(
-        WordCompleter(
-            [
-                "mixed_grid",
-                "simple_grid",
-                "outline",
-                "simple_outline",
-                "mixed_outline",
-                "rst",
-            ],
-            ignore_case=True,
-        )
-    )
+    # fyi = but can't pass into prompt
+    # tablefmt_completer = FuzzyCompleter(
+    #     WordCompleter(
+    #         [
+    #             "mixed_grid",
+    #             "simple_grid",
+    #             "outline",
+    #             "simple_outline",
+    #             "mixed_outline",
+    #             "rst",
+    #         ],
+    #         ignore_case=True,
+    #     )
+    # )
+
+    click.echo('Entering loop')
+
     while True:
         config = {
             "name": lib_name,
-            "description": click.prompt(pr("Description")),
-            "columns": [
-                "type",
+            "description": click.prompt(local_prompt("Description")),
+            "ref_columns": [
                 "tag",
-                "author",
-                "doi",
-                "file",
-                "journal",
-                "pages",
+                "type",
                 "title",
-                "volume",
                 "year",
-                "publisher",
-                "url",
-                "institution",
+                "author",
+                "journal",
+                "volume",
                 "number",
-                "mendeley-tags",
-                "booktitle",
-                "edition",
                 "month",
-                "address",
+                "pages",
+                "booktitle",
                 "editor",
+                "edition",
+                "chapter",
+                "doi",
+                "isbn",
+                "publisher",
+                "institution",
+                "address",
+                "url",
+                "mendeley-tags",
                 "arc-citations",
                 "arc-source",
             ],
-            # TODO
+            # TODO - MAGIC STRING
             "bibtex_file": click.prompt(
-                pr("BibTeX File"),
+                local_prompt("BibTeX File"),
                 default=f"\\S\\Telos\\biblio\\{lib_dir_name}-test.bib",
             ),
-            "pdf_dir_name": click.prompt(
-                pr("PDF Directory"), default="\\S\\Telos\\Library"
+            "pdf_dir_name": click.prompt(local_prompt("pdf dir name"),
+                default="\\S\\Library"
             ),
             "full_text": "true",
             "text_dir_name": click.prompt(
-                pr("PDF Directory"), default="\\temp\\pdf-full-text"
+                local_prompt("Full text Directory"), default=str(BASE_DIR / "pdf-full-text")
             ),
             "file_formats": ["*.pdf"],
-            "hash_files": click.confirm(pr("Hash files?"), default=False),
             "hash_workers": click.prompt(
-                pr("Number of hash workers"), default=6, type=int
+                local_prompt("Number of hash workers"), default=8, type=int
             ),
-            "last_indexed": 0,
-            "timezone": click.prompt(pr("Timezone"), default=local_timezone()),
-            "tablefmt": click.prompt(pr("Table format"), completer=tablefmt_completer),
+            "tablefmt": click.prompt(local_prompt("Table format"), default="mixed_grid"),
         }
         try:
             con = Configurator(**config)
@@ -496,10 +512,8 @@ def create(lib_name):
 
     # con must be valid
     con.save(lib_path)
-    # o open the library
-    lib = Library(lib_dir_name)
-    LibraryContext.set(lib)
     click.secho(f"\nConfig written to {lib_path}", fg="green")
+    click.echo(f"Use 'open {lib_name}' to open")
 
 
 # ========================================================================================
@@ -570,8 +584,8 @@ def get_distinct_values(field):
 @entry.command()
 @click.argument(
     "start",
-    type=str,
-    default="",
+    nargs=-1,
+    default=(),  # with nargs=-1 the default needs to be an empty tuple, it gets converted to a string below
     required=False,
 )
 @click.option(
@@ -597,7 +611,11 @@ def query(start: str, database: str):
     else:
         df = lib.database
 
-    click.echo(df.columns)
+    if getattr(df, 'querex', None) is None:
+        click.echo(f'querex not attached to {database}, exiting.')
+        return
+
+    click.echo('Available columns: ' + ', '.join(df.columns))
     result = EMPTY_DF
     base_completer = make_query_completer_static(df)
 
@@ -610,6 +628,9 @@ def query(start: str, database: str):
     base_completer.options["o"] = DynamicCompleter(tag_branch)
     session = PromptSession(completer=base_completer)
 
+    # sort out start = initial query
+    start = ' '.join(start)
+
     while True:
         try:
             expr = start or session.prompt(get_prompt(f"query::{database}"))
@@ -618,7 +639,7 @@ def query(start: str, database: str):
             if expr.lower() in {"exit", "x", ".."}:
                 break
             elif expr == "?":
-                click.echo(querex_help())
+                click.echo(querexfuzz_help())
                 continue
             elif expr == "cls":
                 # clear screen
@@ -718,134 +739,13 @@ def crossref(
 
 
 # ========================================================================================
-@entry.command()
-# file_okay=False ensures autocomplete prefers directories
-@click.argument("directory", type=click.Path(exists=True, file_okay=False), default=".")
-@click.option(
-    "-r",
-    "--recursive",
-    is_flag=True,
-    show_default=True,
-    help="Recursive search of DIRECTORY and its sub-directories.",
-)
-@click.option(
-    "-s",
-    "--save-path",
-    type=click.Path(dir_okay=False, writable=True),
-    default=None,  # Set to None to handle dynamic default logic below
-    help="Output path for bibtex file. Defaults to {directory}/bibliography.bib",
-)
-def new_docs(directory, recursive, save_path):
-    """
-    Scan a directory for new [PDF] document files and optionally display metadata.
-
-    Note ``new`` requires an open library for timezone and name completion.
-    Optionally: look for duplicates!
-    """
-    directory = Path(directory).absolute()
-    click.echo(f"Scanning {directory}")
-    if not directory.exists():
-        click.echo("Input directory must exist.")
-        return
-
-    docs = []
-    bibs = []
-    file_generator = directory.rglob("*.pdf") if recursive else directory.glob("*.pdf")
-    for f in file_generator:
-        if not f.is_file():
-            continue
-        click.echo(f"Scanning {f.name}")
-        try:
-            doc = Document(f)
-            doc.process()
-            docs.append(doc)
-            blob = doc.bibtex()
-            bibs.append(blob)
-        except Exception as e:
-            click.echo(f"Error: {e}")
-
-    click.echo(f"Found {len(docs)} docs and created {len(bibs)} bib entries:\n")
-    s = "\n\n".join(bibs)
-    click.echo(s)
-    click.echo()
-
-    # Dynamic default: if not provided, save to bibliography.bib in the target dir
-    if save_path is None:
-        save_path = directory / "bibliography.bib"
-    else:
-        save_path = Path(save_path)
-    click.echo(f"Saving bib file to {save_path.absolute()}")
-    # actually save
-    save_path.write_text(s, encoding="utf-8")
-
-
-# ========================================================================================
-@entry.command(name="import")
-@click.option(
-    "-x",
-    "--execute",
-    is_flag=True,
-    help="Actually perform the import; otherwise, do a dry run.",
-)
-@click.option(
-    "-p",
-    "--partial",
-    default="",
-    show_default=True,
-    help="Comma-separated list of PDF file numbers to upload, default all files.",
-)
-@click.option(
-    "-r",
-    "--regex",
-    is_flag=True,
-    help="Interpret partial option as a regex, default is comma separated list",
-)
-def import_(execute, partial, regex):
-    """Import bibliographic entries, optionally filtered and executed."""
-    logger.info(
-        "Importing documents, partial match = '%s', regex mode %", partial, regex
-    )
-    df = LibraryContext.last_new
-    if df.empty:
-        click.echo("No new documents found! Run new.")
-        return
-    # figure the docs
-    if regex:
-        r = re.compile(partial)
-        indices = [i for i in range(1, 1 + len(df)) if r.search(str(i))]
-    else:
-        indices = [int(i.strip()) for i in partial.split(",")]
-    logger.info("Indices = %", indices)
-    # Import logic
-    for i in indices:
-        pdf_path = df.loc[i, "path"]
-        ref = Reference.from_pdf(pdf_path)
-        # prompt_for_fields(ref)  # interactively fill in fields
-        click.echo(ref.to_dict())  # or save it, display BibTeX, etc.
-
-    if execute:
-        logger.info("Execution enabled: changes will be applied.")
-    else:
-        logger.info("Dry run mode: no changes applied.")
-
-
-# ========================================================================================
-
-
 @entry.command(name="import-bibtex")
 @click.argument(
     "bibtex_path",
     type=click.Path(exists=True, dir_okay=False, path_type=Path),
 )
 @click.option(
-    "-I",
-    "--imports-dir",
-    type=click.Path(file_okay=False, path_type=Path),
-    default=None,
-    help="Root directory for import runs; defaults to config.imports_dir_name or BASE_DIR / 'imports'.",
-)
-@click.option(
-    "-P",
+    "-p",
     "--pdf-dir",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
@@ -853,41 +753,156 @@ def import_(execute, partial, regex):
     "defaults to the library's pdf_dir_name.",
 )
 @click.option(
-    "--audit-mode",
-    is_flag=True,
-    help="Enable BibTeX import audit logging (delegated to Bib2df).",
+    "-v",
+    "--verbose",
+    count=True,
+    help="Increase verbosity. Specify -vv or -vvv for more detail.",
 )
-def import_bibtex_cmd(bibtex_path, imports_dir, pdf_dir, audit_mode):
+@click.option(
+    "-h",
+    "--add-hashes",
+    is_flag=True,
+    help="Hash input pdf files.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    help="Actually perform the import; otherwise, do a dry run and report stats.",
+)
+def import_bibtex(bibtex_path: Path, pdf_dir: Path, add_hashes: bool, verbose: int, execute: bool):
     """
     Import new references from a BibTeX file into the current library.
     """
+    if execute:
+        logger.info("Execution enabled: changes will be applied.")
+    else:
+        logger.info("Dry run mode: no changes applied.")
+
+    if verbose == 0:
+        click.echo("Running silently.")
+    elif verbose == 1:
+        click.echo("Running with standard verbosity (v).")
+    elif verbose == 2:
+        click.echo("Running with high verbosity (vv).")
+    elif verbose >= 3:
+        click.echo("Running with maximum verbosity (vvv or more).")
+
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open -- cannot import.")
         return
 
-    cfg = lib.config
-    if imports_dir is None:
-        # Prefer an explicit config field if present, otherwise fall back.
-        root = getattr(cfg, "imports_dir_name", None)
-        if root:
-            imports_dir = Path(root)
+    # create importer
+    b = Bib2df_Incremental(
+        bibtex_file_path=bibtex_path, pdf_dir=pdf_dir, reference_library=lib,
+        add_hashes=add_hashes
+    )
+    # do the import
+    import_df = b.import_bibtex_file()
+
+    if verbose > 0:
+        qd(import_df)
+    if verbose > 1:
+        qd(b.import_analysis())
+
+    if execute:
+        click.echo(f"Updating with {len(b.ported_df)} entries.")
+        b.update_library(save=True)
+
+
+# ========================================================================================
+@entry.command(name="import-doc")
+@click.argument(
+    "doc_path",
+    type=click.Path(exists=True, dir_okay=True, path_type=Path),
+)
+@click.option(
+    "-r",
+    "--recursive",
+    is_flag=True,
+    show_default=True,
+    help="Search for pdfs recursively when DOC_PATH is a directory.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    help="Increase verbosity. Specify -vv or -vvv for more detail.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    help="Actually perform the import; otherwise, do a dry run and report stats.",
+)
+def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
+    """
+    Explore importing new documents into the current library. Process
+    is to write a temporary bibtex file and open it for editing.
+    You can then import that when you are happy. It includes filenames.
+
+    If doc_path is a directory, [r]glob all pdf files in it.
+    """
+    if execute:
+        logger.info("Execution enabled: changes will be applied.")
+    else:
+        logger.info("Dry run mode: no changes applied.")
+
+    if verbose == 0:
+        click.echo("Running silently.")
+    elif verbose == 1:
+        click.echo("Running with standard verbosity (v).")
+    elif verbose == 2:
+        click.echo("Running with high verbosity (vv).")
+    elif verbose >= 3:
+        click.echo("Running with maximum verbosity (vvv or more).")
+
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open -- cannot import.")
+        return
+
+    # find the files
+    if doc_path.is_dir():
+        if recursive:
+            doc_paths = list(doc_path.rglob("*.pdf"))
         else:
-            imports_dir = lib.BASE_DIR / "imports"
+            doc_paths = list(doc_path.glob("*.pdf"))
+        logger.info("Found %s files", len(doc_paths))
+    else:
+        doc_paths = [doc_path]
 
-    print(f"{imports_dir=}")
+    docs = []
+    bibs = []
+    for p in doc_paths:
+        try:
+            doc = Document(p)
+            doc.process()
+            docs.append(doc)
+            blob = doc.bibtex()
+            bibs.append(blob)
+        except Exception as e:
+            click.echo(f"Error: {e}")
 
-    result = lib.import_bibtex(
-        bibtex_path=bibtex_path,
-        imports_dir=imports_dir,
-        pdf_dir=pdf_dir,
-        audit_mode=audit_mode,
-    )
+    # for the time being...
+    click.echo("\n".join(bibs))
 
-    click.echo(
-        f"Imported {result.added_refs} references and {result.added_docs} documents."
-    )
-    click.echo(f"Import run directory: {result.run_dir}")
+    # # create importer
+    # b = Bib2df_Incremental(
+    #     bibtex_file_path=xx, pdf_dir=pdf_dir, reference_library=lib
+    # )
+    # # do the import
+    # import_df = b.import_bibtex_file()
+
+    # if verbose > 0:
+    #     qd(import_df)
+    # if verbose > 1:
+    #     qd(b.import_analysis())
+
+    # if execute:
+    #     click.echo("Updating with {len(b.ported_df)} entries.")
+    #     b.update_library(save=True)
 
 
 # ========================================================================================
@@ -1156,6 +1171,8 @@ def uber(lib_name="", auto_open=True, debug=False):
         }
     )
     completers["query"] = query_completer
+    completers["import_bibtex"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["import_doc"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)

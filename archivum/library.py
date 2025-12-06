@@ -18,7 +18,7 @@ import yaml
 import pandas as pd
 from pydantic import ValidationError
 
-from querexfuzz import Querexfuzz
+from querexfuzz.core import Querexfuzz
 
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
 from .trie import Trie
@@ -310,6 +310,8 @@ class Library(LibraryBase):
         self._ref_df.to_feather(self.config_path / "ref.feather")
         self._doc_read_df.to_feather(self.config_path / "doc.feather")
         self._ref_doc_df.to_feather(self.config_path / "ref-doc.feather")
+        # reproduce the bibtex file
+        self.write_bibtex()
 
     # def querex(self, expr):
     #     """Run ``expr`` through the querex on database."""
@@ -462,29 +464,41 @@ class Library(LibraryBase):
 
         return 0, proc
 
-    def write_bibtex(self, bibtex_path: Path | None = None):
+    def write_bibtex(self):
         """
         Write out bibtex file of the library.
 
-        Uses config path unless overridden.
+        Lives in library/LIB_NAME/lib-name.bib with a symlink to config location.
         """
-
-        bibtex_path = bibtex_path or self.config.bibtex_file
+        bibtex_path =  self.config_path / "bibtex.bib"
         bibtex_path = Path(bibtex_path).absolute()
+
+        # make the text for the bibtex file
         ans = []
-        drop_cols = ["arc-source"]
+        drop_cols = [i for i in ["arc-source"] if i in self.ref_df]
         for r, row in self.ref_df.drop(columns=drop_cols).iterrows():
             ans.append(dict_to_bibtex(row))
         txt = "\n\n".join(ans)
 
+        # backup existing
         if bibtex_path.exists():
             backup = bibtex_path.with_suffix(".bak")
             if backup.exists():
                 backup.unlink()
             backup.hardlink_to(bibtex_path)
 
+        # write out
         bibtex_path.write_text(txt, encoding="utf-8")
         logger.info("Wrote %s bibtex entries to %s", len(ans), bibtex_path)
+
+        # create a link to the config location...but remember the version in the
+        # library folder is king.
+        if self.config.bibtex_file:
+            # link there
+            p = Path(self.config.bibtex_file).absolute()
+            if p.exists():
+                p.unlink()
+            p.symlink_to(bibtex_path)
 
     def update_hashes(self):
         """Update _doc_read_df hashes, save and reset."""

@@ -11,30 +11,24 @@ the original .bib and a copy of the PDFs are preserved and the
 ETL is, in principle, replayable.
 """
 
-from dataclasses import dataclass
 import json
 import logging
 from pathlib import Path
 import re
-from types import MethodType
-from typing import Optional
 from difflib import SequenceMatcher
 
 import datetime as dt
-import shutil
-from IPython.display import display
 
-import latexcodec
+import latexcodec  # noqa
 
 # import Levenshtein  # per Gemini prefer to use rapidfuzz
-from rapidfuzz import distance, fuzz
+from rapidfuzz import distance
 import numpy as np
 import pandas as pd
 
 from . import EMPTY_LIBRARY, DEBUG_DIR
 from .utilities import (
     remove_accents,
-    make_qd,
     accent_mapper_dict,
     safe_int,
     TagAllocator,
@@ -87,7 +81,6 @@ class Bib2df_Incremental(LibraryBase):
         "„": '"',  # low double quote
         "«": '"',  # double angle quote
         "»": '"',
-        "′": "'",
         "‘": "'",  # left single quote
         "’": "'",  # right single quote
         "‚": "'",  # low single quote
@@ -184,7 +177,7 @@ class Bib2df_Incremental(LibraryBase):
         afile = an actual file
         vfile = a named reference in the bibtex file that may not correspond to an afile
 
-        pdf_dir is where the afile documents live.
+        pdf_dir is where the afile documents live; all afiles are found.
 
         Use fillna=False to use the contents functions (see missing fields).
 
@@ -220,14 +213,15 @@ class Bib2df_Incremental(LibraryBase):
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
-        assert self.bibtex_file_path.exists(), "Bibtex file must exist"
-        self.pdf_dir = Path(pdf_dir)
-        assert self.pdf_dir.exists(), "PDF directory does not exist"
+        self.pdf_dir = Path(pdf_dir) if pdf_dir else None
         self.reference_library = reference_library or EMPTY_LIBRARY
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
         self.remap_dashes = remap_dashes
         self._add_hashes = add_hashes
+        assert self.bibtex_file_path.exists(), "Bibtex file must exist"
+        if self.pdf_dir and not self.pdf_dir.exists():
+            logger.info("PDF directory is None or does not exist")
 
         # if you write audits, also save  - this is a flag
         self._errors_mapper_saved = False
@@ -301,9 +295,11 @@ class Bib2df_Incremental(LibraryBase):
         """The reference df contains no file information and has tag NOT as the index."""
         if self._ref_df.empty:
             logger.info("===>> creating ref_df property <<====")
-            self._ref_df = self.ported_df.drop(
-                columns="file"
-            )  # .reset_index(drop=False)
+            self._ref_df = (
+                self.ported_df.drop(columns="file")
+                if "file" in self.ported_df
+                else self.ported_df
+            )
             self._ref_df["arc-source"] = f"bibtex {self.name} at {self.timestamp}"
         return self._ref_df
 
@@ -316,54 +312,78 @@ class Bib2df_Incremental(LibraryBase):
         be referenced in library.database.
         Currently only PDFs.
         """
-        if self._doc_df.empty:
+        if self._doc_df.empty and len(self._doc_df.columns) == 0:
             logger.info("===>> creating doc_df property <<====")
-            pdfs = list(self.pdf_dir.rglob("*.pdf"))
-            logger.warning("Found %s afiles (actual pdf files).", len(pdfs))
-            ans = []
-            for p in pdfs:
-                p = p.absolute()
-                stat = p.stat(follow_symlinks=True)
-                ans.append(
-                    {
-                        "name": p.name,
-                        "path": str(p.as_posix()),
-                        "mod": stat.st_mtime_ns,
-                        "create": stat.st_ctime_ns,
-                        "access": stat.st_atime_ns,
-                        "node": stat.st_ino,
-                        "links": stat.st_nlink,
-                        "size": stat.st_size,
-                        "suffix": p.suffix[1:],
-                        "hash": "",
-                    }
+            if self.pdf_dir is None or not self.pdf_dir.exists():
+                column_dtypes = {
+                    "name": "object",
+                    "path": "object",
+                    "mod": "datetime64[ns, Europe/London]",
+                    "create": "datetime64[ns, Europe/London]",
+                    "access": "datetime64[ns, Europe/London]",
+                    "node": "int64",
+                    "links": "int64",
+                    "size": "int64",
+                    "suffix": "object",
+                    "hash": "object",
+                }
+                # Create an empty DataFrame using the defined dtypes
+                self._doc_df = pd.DataFrame(columns=column_dtypes.keys()).astype(
+                    column_dtypes
                 )
-            df = pd.DataFrame(ans)
-            tz = "Europe/London"
-            df["create"] = (
-                pd.to_datetime(df["create"], unit="ns")
-                .dt.tz_localize("UTC")
-                .dt.tz_convert(tz)
-            )
-            df["mod"] = (
-                pd.to_datetime(df["mod"], unit="ns")
-                .dt.tz_localize("UTC")
-                .dt.tz_convert(tz)
-            )
-            df["access"] = (
-                pd.to_datetime(df["access"], unit="ns")
-                .dt.tz_localize("UTC")
-                .dt.tz_convert(tz)
-            )
-            if self.add_hashes:
-                logger.info("Adding hashes")
-                missing_docs = df.path.values
-                hashes = hash_many(missing_docs, workers=self.config.hash_workers)
-                # hashes returns dict path->hash, so lookup on path
-                df.hash = df.path.map(lambda x: hashes.get(x, ""))
-            # set variable
-            self._doc_df = df
-            logger.info(f"Scanned pdf folder and created doc_df with {len(ans)} files")
+                logger.info(
+                    f"pdf folder is None or does not exist; and created empty doc_df with {len(self._doc_df.columns)} columns"
+                )
+            else:
+                # actually have documents
+                pdfs = list(self.pdf_dir.rglob("*.pdf"))
+                logger.warning("Found %s afiles (actual pdf files).", len(pdfs))
+                ans = []
+                for p in pdfs:
+                    p = p.absolute()
+                    stat = p.stat(follow_symlinks=True)
+                    ans.append(
+                        {
+                            "name": p.name,
+                            "path": str(p.as_posix()),
+                            "mod": stat.st_mtime_ns,
+                            "create": stat.st_ctime_ns,
+                            "access": stat.st_atime_ns,
+                            "node": stat.st_ino,
+                            "links": stat.st_nlink,
+                            "size": stat.st_size,
+                            "suffix": p.suffix[1:],
+                            "hash": "",
+                        }
+                    )
+                df = pd.DataFrame(ans)
+                tz = "Europe/London"
+                df["create"] = (
+                    pd.to_datetime(df["create"], unit="ns")
+                    .dt.tz_localize("UTC")
+                    .dt.tz_convert(tz)
+                )
+                df["mod"] = (
+                    pd.to_datetime(df["mod"], unit="ns")
+                    .dt.tz_localize("UTC")
+                    .dt.tz_convert(tz)
+                )
+                df["access"] = (
+                    pd.to_datetime(df["access"], unit="ns")
+                    .dt.tz_localize("UTC")
+                    .dt.tz_convert(tz)
+                )
+                if self._add_hashes:
+                    logger.info("Adding hashes")
+                    missing_docs = df.path.values
+                    hashes = hash_many(missing_docs, workers=self.reference_library.config.hash_workers)
+                    # hashes returns dict path->hash, so lookup on path
+                    df.hash = df.path.map(lambda x: hashes.get(x, ""))
+                # set variable
+                self._doc_df = df
+                logger.info(
+                    f"Scanned pdf folder and created doc_df with {len(ans)} files"
+                )
         return self._doc_df
 
     @property
@@ -422,52 +442,68 @@ class Bib2df_Incremental(LibraryBase):
         afiles are actual files that exist in the pdf_path directory.
         """
         # columns are ref_id=tag and afile name
-        if self._ref_doc_df.empty:
+        if self._ref_doc_df.empty and len(self._ref_doc_df.columns) == 0:
             logger.info("===>> creating ref_doc_df property <<====")
             actual_files = set(self.doc_df.path)
-            logger.info(f"\tFound {len(actual_files)} actual files")
-            missing_vfiles = []
-            for i, r in self.vfile_df.iterrows():
-                if r.vfile not in actual_files:
-                    missing_vfiles.append([i, r.vfile])
-            logger.info(
-                f"\tFound {len(missing_vfiles) = } missing vfiles (Mend main extract expects 558)"
-            )
-            logger.info("\tLevenshtein matching in ref_doc...")
-            ans = []
-            for tag, m_vfile in missing_vfiles:
-                best_match = min(
-                    actual_files,
-                    key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
-                )
-                ans.append(
-                    [
-                        tag,
-                        m_vfile,
-                        best_match,
-                        distance.Levenshtein.distance(m_vfile, best_match),
-                    ]
-                )
-            # for reference
-            self._best_match_df = pd.DataFrame(
-                ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
-            )
-            logger.info("\t...Levenshtein matching completed")
-            matcher = {
-                vfile: afile
-                for vfile, afile in self._best_match_df[
-                    ["missing_vfile", "match_afile"]
-                ].values
-            }
-            self._ref_doc_df = pd.DataFrame(
-                {
-                    "tag": self.vfile_df.tag,
-                    # replace defaults to no change if not in the matcher dictionary
-                    "path": self.vfile_df["vfile"].replace(matcher).values,
+            # two mode - there are or aren't actual files
+            if len(actual_files) == 0:
+                # branch 1: no actual files
+                column_dtypes = {
+                    "tag": "object",
+                    "path": "object",
                 }
-            )
-            # for ref.
-            self._last_missing_vfiles = missing_vfiles
+                # Create an empty DataFrame using the defined dtypes
+                self._ref_doc_df = pd.DataFrame(columns=column_dtypes.keys()).astype(
+                    column_dtypes
+                )
+                logger.info(
+                    "pdf folder is None or does not exist; and created empty doc_df with %s columns",
+                    len(self._doc_df.columns),
+                )
+
+            else:
+                # branch 2: actual files - try to match up
+                logger.info(f"\tFound {len(actual_files)} actual files; matching")
+                missing_vfiles = []
+                for i, r in self.vfile_df.iterrows():
+                    if r.vfile not in actual_files:
+                        missing_vfiles.append([i, r.vfile])
+                logger.info("\tFound %s missing vfiles", len(missing_vfiles))
+                logger.info("\tLevenshtein (rapidfuzz) matching in ref_doc...")
+                ans = []
+                for tag, m_vfile in missing_vfiles:
+                    best_match = min(
+                        actual_files,
+                        key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
+                    )
+                    ans.append(
+                        [
+                            tag,
+                            m_vfile,
+                            best_match,
+                            distance.Levenshtein.distance(m_vfile, best_match),
+                        ]
+                    )
+                # for reference
+                self._best_match_df = pd.DataFrame(
+                    ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
+                )
+                logger.info("\t...Levenshtein matching completed")
+                matcher = {
+                    vfile: afile
+                    for vfile, afile in self._best_match_df[
+                        ["missing_vfile", "match_afile"]
+                    ].values
+                }
+                self._ref_doc_df = pd.DataFrame(
+                    {
+                        "tag": self.vfile_df.tag,
+                        # replace defaults to no change if not in the matcher dictionary
+                        "path": self.vfile_df["vfile"].replace(matcher).values,
+                    }
+                )
+                # for ref.
+                self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
 
     @property
@@ -1087,6 +1123,7 @@ class Bib2df_Incremental(LibraryBase):
                 and self.reference_library != EMPTY_LIBRARY
                 and not self.reference_library.ref_df.empty
             ):
+                logger.info("Checking duplicates relative to reference library.")
                 self._existing_title_norm = self.reference_library.ref_df.title.map(
                     self._normalize_title
                 )
@@ -1117,7 +1154,7 @@ class Bib2df_Incremental(LibraryBase):
                 self._possible_duplicate_tags = self.ref_df.tag
                 self._possible_duplicate_titles = self.ref_df.title
 
-        assert len(self._existing_title_norm) == len(self._dois), "WRONG SIZES"
+            # assert len(self._existing_title_norm) == len(self._dois), "WRONG SIZES"
 
         def create_message(mask, kind):
             tags = self._possible_duplicate_tags.loc[mask].tolist()
