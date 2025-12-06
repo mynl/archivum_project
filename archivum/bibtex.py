@@ -60,6 +60,8 @@ def dict_to_bibtex_crossref(data: Any) -> str:
     """
     Converts a dict-like object to a BibTeX string.
 
+    Suitable for the return value form cross ref.
+
     Gemini code.
     """
     if data is None:
