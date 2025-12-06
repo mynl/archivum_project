@@ -153,7 +153,7 @@ def get_prompt(cmd):
             f"<ansiyellow>{cmd} > </ansiyellow>"
         )
     except AttributeError as e:
-        print("get prompt error", e, sep="\n")
+        logger.error("get prompt error", e, sep="\n")
         return HTML(f"ERR: <ansiyellow>{cmd} > </ansiyellow>")
 
 
@@ -575,16 +575,25 @@ def get_distinct_values(field):
     required=False,
 )
 @click.option(
-    "-r", "--ref", is_flag=True, help="Search ref_df rather than database (default)"
+    "-d",
+    "--database",
+    # Define the allowed choices as a list of strings
+    type=click.Choice(["database", "doc", "ref", "ref-doc"]),
+    default="database",
+    help='Database (dataframe) to process. Must be "database" (default), "doc", "ref", or "ref-doc".',
 )
-def query(start: str, ref):
+def query(start: str, database: str):
     """Interactive REPL to run multiple queries on the file index with fuzzy completion."""
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open...don't what to query. Returning")
         return
-    if ref:
+    if database == "ref":
         df = lib.ref_df
+    elif database == "doc":
+        df = lib.doc_df
+    elif database == "ref-doc":
+        df = lib.ref_doc_df
     else:
         df = lib.database
 
@@ -603,7 +612,7 @@ def query(start: str, ref):
 
     while True:
         try:
-            expr = start or session.prompt(get_prompt("query-library"))
+            expr = start or session.prompt(get_prompt(f"query::{database}"))
             start = ""
             pipe = False
             if expr.lower() in {"exit", "x", ".."}:
@@ -652,10 +661,10 @@ def query(start: str, ref):
                 logger.error("Parsing error")
                 logger.error(e)
             else:
-                qd(result)
-                click.echo(
-                    f"{len(result)} of {result.qx_unrestricted_len:,d} results shown."
-                )
+                try:
+                    qd(result)
+                except Exception as e:
+                    print(f"greater_tables related exception from qd\n{e}")
                 if pipe:
                     click.echo(f"Found pipe clause {pipe=} TODO: deal with this!")
         except Exception as e:
@@ -1126,6 +1135,27 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
     completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
+
+    query_completer = WordCompleter(
+        ["-d", "--database", "doc", "ref", "ref-doc", "database"],
+        ignore_case=True,
+        sentence=False,  # Typically set to False for shell-style commands/options
+    )
+
+    database_choices = WordCompleter(["doc", "ref", "ref-doc", "database"])
+    query_completer = NestedCompleter.from_nested_dict(
+        {
+            "-d": database_choices,
+            "--database": database_choices,
+            # Fallback (None): If the user doesn't type -d or --database,
+            # fall back to the generic completer for the 'start' argument.
+            # You should replace 'None' with a completer for the 'start' argument,
+            # for example, a FuzzyCompleter of common query terms or column names.
+            # For simplicity, we use None to allow free typing for now.
+            # None: None,
+        }
+    )
+    completers["query"] = query_completer
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)

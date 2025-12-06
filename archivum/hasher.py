@@ -8,6 +8,8 @@ from pathlib import Path
 def blake2b_hash(path: Path, block_size: int = 65536) -> str:
     """Compute blake2b hash of a file."""
     h = hashlib.blake2b()
+    # ensure it is a Path
+    path = Path(path)
     with path.open("rb") as f:
         while chunk := f.read(block_size):
             h.update(chunk)
@@ -24,5 +26,5 @@ def hash_many(paths: list[Path], workers: int) -> dict:
 def qhash(s: str) -> str:
     """Quick hash of a string."""
     h = hashlib.md5()
-    h.update(s.encode('utf-8'))
+    h.update(s.encode("utf-8"))
     return h.hexdigest()

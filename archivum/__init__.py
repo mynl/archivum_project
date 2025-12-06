@@ -2,6 +2,11 @@
 archivum project.
 ===================
 
+v 1.0.0
+    Alpha release
+    Uses querexfuzz with config files for each table; deleted unneeded files
+    Added hashing capability
+
 v 0.9.0
     New file layout
 
@@ -24,10 +29,11 @@ import os
 import yaml
 from pathlib import Path
 
-__appname__ = 'archivum'
-__author__ = 'Stephen J. Mildenhall'
+__appname__ = "archivum"
+__author__ = "Stephen J. Mildenhall"
 __version__ = "0.9.0"
-__date__ = '2025-03-06'
+__date__ = "2025-03-06"
+
 
 def _get_local_folder() -> Path:
     if sys.platform == "win32":
@@ -55,14 +61,15 @@ DEFAULT_GLOBAL_CONFIG = {
     "theme": "system",
     "debug_mode": False,
     "debug_dir": "",
-    "version": __version__
+    "version": __version__,
 }
+
 
 def _load_global_config() -> dict:
     """Loads global config or creates it with defaults if missing."""
     if not GLOBAL_CONFIG_PATH.exists():
         try:
-            with open(GLOBAL_CONFIG_PATH, 'w') as f:
+            with open(GLOBAL_CONFIG_PATH, "w") as f:
                 yaml.dump(DEFAULT_GLOBAL_CONFIG, f, default_flow_style=False)
             return DEFAULT_GLOBAL_CONFIG.copy()
         except OSError as e:
@@ -70,7 +77,7 @@ def _load_global_config() -> dict:
             return DEFAULT_GLOBAL_CONFIG.copy()
 
     try:
-        with open(GLOBAL_CONFIG_PATH, 'r') as f:
+        with open(GLOBAL_CONFIG_PATH, "r") as f:
             # Merge with defaults to ensure new keys exist after updates
             config = yaml.safe_load(f) or {}
             return {**DEFAULT_GLOBAL_CONFIG, **config}
@@ -78,15 +85,16 @@ def _load_global_config() -> dict:
         print(f"Error loading global config: {e}", file=sys.stderr)
         return DEFAULT_GLOBAL_CONFIG.copy()
 
+
 # Initialize Global Config
 GLOBAL_CONFIG = _load_global_config()
 
-DEBUG_DIR = Path(GLOBAL_CONFIG['debug_dir'])
+DEBUG_DIR = Path(GLOBAL_CONFIG["debug_dir"])
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
-DEFAULT_LIBRARY = GLOBAL_CONFIG['default_library']
+DEFAULT_LIBRARY = GLOBAL_CONFIG["default_library"]
 
-EMPTY_LIBRARY = type('EmptyLibrary', (), {'name': 'No library open', 'is_empty': True})
+EMPTY_LIBRARY = type("EmptyLibrary", (), {"name": "No library open", "is_empty": True})
 
 # avoid circular import errors, import here
 # from . library import Library  # noqa

@@ -41,6 +41,7 @@ from .utilities import (
 )
 from .trie import Trie
 from .library_base import LibraryBase
+from .hasher import hash_many
 
 # set to True to override where audit files are stored to tmp
 # False is default
@@ -164,6 +165,7 @@ class Bib2df_Incremental(LibraryBase):
         fillna=True,
         errors_mapper=None,
         remap_dashes=False,
+        add_hashes=False,
         qd=None,
     ):
         """
@@ -225,6 +227,7 @@ class Bib2df_Incremental(LibraryBase):
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
         self.remap_dashes = remap_dashes
+        self._add_hashes = add_hashes
 
         # if you write audits, also save  - this is a flag
         self._errors_mapper_saved = False
@@ -332,7 +335,7 @@ class Bib2df_Incremental(LibraryBase):
                         "links": stat.st_nlink,
                         "size": stat.st_size,
                         "suffix": p.suffix[1:],
-                        "hash": "TBD",
+                        "hash": "",
                     }
                 )
             df = pd.DataFrame(ans)
@@ -352,9 +355,14 @@ class Bib2df_Incremental(LibraryBase):
                 .dt.tz_localize("UTC")
                 .dt.tz_convert(tz)
             )
+            if self.add_hashes:
+                logger.info("Adding hashes")
+                missing_docs = df.path.values
+                hashes = hash_many(missing_docs, workers=self.config.hash_workers)
+                # hashes returns dict path->hash, so lookup on path
+                df.hash = df.path.map(lambda x: hashes.get(x, ""))
+            # set variable
             self._doc_df = df
-            # mend version added hashes from precomputed data frame - fragile!
-            # self._add_hashes()
             logger.info(f"Scanned pdf folder and created doc_df with {len(ans)} files")
         return self._doc_df
 

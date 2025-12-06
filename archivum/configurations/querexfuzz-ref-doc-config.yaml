@@ -1,0 +1,12 @@
+base_cols:
+  - tag
+  - path
+
+bang_field: path
+recent_field: tag
+
+fuzzy:
+  fields:
+    - path
+  limit: 50
+  score_col_name: score

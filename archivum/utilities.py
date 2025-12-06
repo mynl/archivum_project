@@ -2,14 +2,20 @@
 
 from collections import defaultdict
 from functools import partial
+import logging
+import os
 from pathlib import Path
 import re
+import stat
 import unicodedata
 from IPython.display import display as ip_display
 import numpy as np
 import pandas as pd
 
 from greater_tables import GT
+
+
+logger = logging.getLogger(__name__)
 
 
 def safe_int(s):
@@ -256,7 +262,10 @@ def suggest_name(author: str, title: str, year: str | int):
     """
     year = str(year).strip()
     title = title.strip()
-    author = author.strip()
+    # titles often enclosed in braces
+    title = re.sub(r"^\{(.*)\}$", r"\1", title).strip()
+    # get rid of {} within names too (this happens!)
+    author = re.sub(r"{|}", "", author).strip()
 
     # directory from author name(s)
     split_author = author.split(" and ") if author else []
@@ -272,21 +281,51 @@ def suggest_name(author: str, title: str, year: str | int):
     return dir_name, file_name
 
 
-def rename(original_file_path: Path, pdf_dir_path: Path, dir_name: str, file_name: str):
-    """Hard link original file into pdf_dir/dir_name/file_name."""
+def rename(
+    original_doc_name: str,
+    doc_hash: str,
+    pdf_dir_path: Path,
+    dir_name: str,
+    file_name: str,
+    hash_len: int = 6,
+) -> bool:
+    """
+    Hard link original file into pdf_dir/dir_name/file_name.
 
-    new_name = Path(file_name).with_suffix(original_file_path.suffix)
+    Returns True if copied, else false
+    """
+    original_doc_path = Path(original_doc_name)
+    new_name = Path(f"{file_name}-{doc_hash[:hash_len]}").with_suffix(
+        original_doc_path.suffix
+    )
     parent_dir = pdf_dir_path / dir_name
     parent_dir.mkdir(parents=True, exist_ok=True)
     new_path = parent_dir / new_name
     if new_path.exists():
-        logger.warning("new path exists! Unlinking...")
-        # new_path.unlink()
+        # almost certainly the same underlying file...
+        logger.info("guessing the same file and skipping %s", new_path)
+        return False
+
+        # the unlink route
+        logger.info("new path exists, unlinking %s", new_path)
+        # --- Fix: Ensure write permission before unlinking on Windows ---
+        try:
+            # Check current permissions
+            file_mode = os.stat(new_path).st_mode
+            # If the read-only bit (S_IREAD) is set
+            if not file_mode & stat.S_IWRITE:
+                # Set write permission (S_IWRITE) for the owner
+                os.chmod(new_path, stat.S_IWRITE)
+                logger.info("Removed read-only attribute from %s", new_path)
+        except Exception as e:
+            logger.warning("Could not change file attributes for %s: %s", new_path, e)
+        # -------------------------------------------------------------
+        new_path.unlink()
 
     # make new link
-    logger.info("%s --> %s", new_path, self.doc_path)
-    print(f"{new_path} ==> {self.doc_path}")
+    logger.info("new: %s --> old: %s", new_path, original_doc_path)
+    # print(f"{new_path} ==> {original_doc_path}")
 
-    # save it
-    self._new_doc_path = new_path
-    # new_path.hardlink_to(self.doc_path)
+    # create link
+    new_path.hardlink_to(original_doc_path)
+    return True

@@ -1,0 +1,21 @@
+base_cols:
+  - name
+  - create
+  - size
+  - tpath
+
+date_fields:
+  - mod
+  - create
+  - access
+
+default_date_field: mod
+
+bang_field: name
+recent_field: mod
+
+fuzzy:
+  fields:
+    - name
+  limit: 50
+  score_col_name: score

@@ -7,7 +7,8 @@ Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
 
 from functools import partial
-import logging 
+from importlib.resources import files
+import logging
 from pathlib import Path
 import re
 import subprocess
@@ -17,14 +18,19 @@ import yaml
 import pandas as pd
 from pydantic import ValidationError
 
+from querexfuzz import Querexfuzz
+
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
-from . trie import Trie
-from . querex import querex_work
-from . utilities import TagAllocator
-from . document import Document
-from . config import Configurator
-from . library_base import LibraryBase
-from . bibtex import dict_to_bibtex
+from .trie import Trie
+
+# from . querex import querex_work
+from .utilities import TagAllocator
+from .document import Document
+from .config import Configurator
+from .library_base import LibraryBase
+from .bibtex import dict_to_bibtex
+from .hasher import hash_many
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,7 +38,7 @@ class Library(LibraryBase):
     """Library specified by config yaml (archivum-config) file."""
 
     # base columns used by the app for quick output displays
-    base_cols = ['tag', 'type', 'author', 'title', 'year', 'journal', 'file']
+    base_cols = ["tag", "type", "author", "title", "year", "journal", "file"]
 
     def __init__(self, library_dir_name: str = "", **overrides):
         """
@@ -42,23 +48,26 @@ class Library(LibraryBase):
         If not found in current directory, looks in local (eg. for default config).
         """
         library_dir_name = library_dir_name or DEFAULT_LIBRARY
-        logger.debug('library_dir_name = %s', library_dir_name)
+        logger.debug("library_dir_name = %s", library_dir_name)
 
         # figure config path and load
         self.config_path = LIBRARIES_DIR / library_dir_name
         if not self.config_path.exists():
             # one other idea
-            self.config_path = LIBRARIES_DIR / library_dir_name.replace(' ', '-')
+            self.config_path = LIBRARIES_DIR / library_dir_name.replace(" ", "-")
             if not self.config_path.exists():
-                raise FileNotFoundError('Library directory does not exist. Create first.')
+                raise FileNotFoundError(
+                    "Library directory does not exist. Create first."
+                )
         try:
-            raw = yaml.safe_load((self.config_path / "config.yaml").read_text(encoding="utf-8"))
+            raw = yaml.safe_load(
+                (self.config_path / "config.yaml").read_text(encoding="utf-8")
+            )
             base_config = Configurator.model_validate(raw)
         except FileNotFoundError:
             raise
         except (ValidationError, OSError) as e:
-            raise ValueError(
-                f"Failed to load config {self.config_path}") from e
+            raise ValueError(f"Failed to load config {self.config_path}") from e
 
         # access through config
         # update and validate; need to merge to avoid repeated args
@@ -71,14 +80,14 @@ class Library(LibraryBase):
 
     def __repr__(self):
         """Create simple string representation."""
-        return f'Library({self.config.name})'
+        return f"Library({self.config.name})"
 
     def reset(self):
         """Reset all cache variables."""
         self._last_query = None
         self._last_unrestricted = 0
-        self._last_query_title = ''
-        self._last_query_expr = ''
+        self._last_query_title = ""
+        self._last_query_expr = ""
         self._config_df = pd.DataFrame()
         self._doc_df = pd.DataFrame()
         # paths in doc df get mangled - this is the original
@@ -102,17 +111,16 @@ class Library(LibraryBase):
     @property
     def config_df(self):
         if self._config_df.empty:
-            self._config_df = pd.Series(self.config.model_dump()).to_frame('value')
-            self._config_df.index.name = 'key'
+            self._config_df = pd.Series(self.config.model_dump()).to_frame("value")
+            self._config_df.index.name = "key"
         return self._config_df
-
 
     @property
     def doc_df(self):
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
             try:
-                self._doc_read_df = pd.read_feather(self.config_path / 'doc.feather')
+                self._doc_read_df = pd.read_feather(self.config_path / "doc.feather")
             except FileNotFoundError:
                 return self._doc_df
             pdf_dir = Path(self.config.pdf_dir_name)
@@ -120,19 +128,30 @@ class Library(LibraryBase):
             def get_rel_parent(p: Path) -> str:
                 if p.is_relative_to(pdf_dir):
                     return str(p.relative_to(pdf_dir).parent)
-                return str(p.parent) # Fallback: keep absolute parent
+                return str(p.parent)  # Fallback: keep absolute parent
 
             # truncate path names to make more readable
             self._doc_df = self._doc_read_df.copy()
-            self._doc_df['tpath'] = [get_rel_parent(p) for p in map(Path, self._doc_df.path)]
+            self._doc_df["tpath"] = [
+                get_rel_parent(p) for p in map(Path, self._doc_df.path)
+            ]
 
+            # set up querexfuzz
+            config_file = (
+                files("archivum.configurations") / "querexfuzz-doc-config.yaml"
+            )
+            qeng = Querexfuzz(config_path=config_file)
+            self._doc_df = qeng.attach_to(
+                self._doc_df,
+                "querex",
+            )
+            # older version
             # set base cols
-            base_cols = ['name', 'create', 'size', 'tpath']
-            querex = partial(querex_work,
-                             base_cols=base_cols,
-                             bang_field='name',
-                             recent_field='mod')
-            self._doc_df.querex = MethodType(querex, self._doc_df)
+            # base_cols = ["name", "create", "size", "tpath"]
+            # querex = partial(
+            #     querex_work, base_cols=base_cols, bang_field="name", recent_field="mod"
+            # )
+            # self._doc_df.querex = MethodType(querex, self._doc_df)
         return self._doc_df
 
     @property
@@ -140,34 +159,54 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._ref_df.empty:
             try:
-                self._ref_df = pd.read_feather(self.config_path / 'ref.feather')
+                self._ref_df = pd.read_feather(self.config_path / "ref.feather")
             except FileNotFoundError:
                 return self._ref_df
-            # set base cols
-            base_cols = ['tag', 'author', 'title', 'journal']
-            querex = partial(querex_work,
-                             base_cols=base_cols,
-                             bang_field='author',
-                             recent_field='year')
-            self._ref_df.querex = MethodType(querex, self._ref_df)
-        return self._ref_df
 
+            config_file = (
+                files("archivum.configurations") / "querexfuzz-ref-config.yaml"
+            )
+            qeng = Querexfuzz(config_path=config_file)
+            self._ref_df = qeng.attach_to(
+                self._ref_df,
+                "querex",
+            )
+
+            # set base cols
+            # base_cols = ["tag", "author", "title", "journal"]
+            # querex = partial(
+            #     querex_work,
+            #     base_cols=base_cols,
+            #     bang_field="author",
+            #     recent_field="year",
+            # )
+            # self._ref_df.querex = MethodType(querex, self._ref_df)
+        return self._ref_df
 
     @property
     def ref_doc_df(self):
         """Return the document df, loading if needed."""
         if self._ref_doc_df.empty:
             try:
-                self._ref_doc_df = pd.read_feather(self.config_path / 'ref-doc.feather')
+                self._ref_doc_df = pd.read_feather(self.config_path / "ref-doc.feather")
             except FileNotFoundError:
                 return self._ref_doc_df
+
+            config_file = (
+                files("archivum.configurations") / "querexfuzz-ref-doc-config.yaml"
+            )
+            qeng = Querexfuzz(config_path=config_file)
+            self._ref_doc_df = qeng.attach_to(
+                self._ref_doc_df,
+                "querex",
+            )
+
             # set base cols
-            base_cols = ['tag', 'path']
-            querex = partial(querex_work,
-                             base_cols=base_cols,
-                             bang_field='path',
-                             recent_field='tag')
-            self._ref_doc_df.querex = MethodType(querex, self._ref_doc_df)
+            # base_cols = ["tag", "path"]
+            # querex = partial(
+            #     querex_work, base_cols=base_cols, bang_field="path", recent_field="tag"
+            # )
+            # self._ref_doc_df.querex = MethodType(querex, self._ref_doc_df)
         return self._ref_doc_df
 
     @property
@@ -176,25 +215,34 @@ class Library(LibraryBase):
         if self._database.empty:
             if self.ref_df.empty:
                 return self._database
-            exploded_authors = (
-                self.ref_df.assign(author=self.ref_df.author.str.split(" and "))
-                .explode("author", ignore_index=True)
-            )
-            self._database = (((
-                self.ref_doc_df
-                .merge(exploded_authors, on="tag", how='right'))
-                .merge(self.doc_df, on='path', how='left'))
-            )
-            for c in ['node', 'links', 'size']:
+            exploded_authors = self.ref_df.assign(
+                author=self.ref_df.author.str.split(" and ")
+            ).explode("author", ignore_index=True)
+            self._database = (
+                self.ref_doc_df.merge(exploded_authors, on="tag", how="right")
+            ).merge(self.doc_df, on="path", how="left")
+            for c in ["node", "links", "size"]:
                 self._database[c] = self._database[c].fillna(0)
-            self._database.fillna('')
-            # set base cols
-            base_cols = ['tag', 'author', 'title', 'journal', 'create']
-            querex = partial(querex_work,
-                             base_cols=base_cols,
-                             bang_field='author',
-                             recent_field='mod')
-            self._database.querex = MethodType(querex, self._database)
+            self._database.fillna("")
+
+            config_file = (
+                files("archivum.configurations") / "querexfuzz-database-config.yaml"
+            )
+            qeng = Querexfuzz(config_path=config_file)
+            self._database = qeng.attach_to(
+                self._database,
+                "querex",
+            )
+
+            # # set base cols
+            # base_cols = ["tag", "author", "title", "journal", "create"]
+            # querex = partial(
+            #     querex_work,
+            #     base_cols=base_cols,
+            #     bang_field="author",
+            #     recent_field="mod",
+            # )
+            # self._database.querex = MethodType(querex, self._database)
         return self._database
 
     def update(self, importer):
@@ -216,9 +264,9 @@ class Library(LibraryBase):
         len_doc_add = len(doc_add)
         len_ref_doc_add = len(ref_doc_add)
 
-        logger.info(f'Appending {len(ref_add) = } references')
-        logger.info(f'Appending {len(doc_add) = } documents')
-        logger.info(f'Appending {len(ref_doc_add) = } ref-doc mappings')
+        logger.info(f"Appending {len(ref_add) = } references")
+        logger.info(f"Appending {len(doc_add) = } documents")
+        logger.info(f"Appending {len(ref_doc_add) = } ref-doc mappings")
 
         pre_ref = len(self.ref_df)
         pre_doc = len(self.doc_df)
@@ -233,9 +281,15 @@ class Library(LibraryBase):
         post_doc = len(doc_out)
         post_ref_doc = len(ref_doc_out)
 
-        print(f'{pre_ref = } + {len_ref_add = } = {pre_ref+ len_ref_add} vs {post_ref = }')
-        print(f'{pre_doc = } + {len_doc_add = } = {pre_doc+ len_doc_add} vs {post_doc = }')
-        print(f'{pre_ref_doc = } + {len_ref_doc_add = } = {pre_ref_doc+ len_ref_doc_add} vs {post_ref_doc = }')
+        print(
+            f"{pre_ref = } + {len_ref_add = } = {pre_ref+ len_ref_add} vs {post_ref = }"
+        )
+        print(
+            f"{pre_doc = } + {len_doc_add = } = {pre_doc+ len_doc_add} vs {post_doc = }"
+        )
+        print(
+            f"{pre_ref_doc = } + {len_ref_doc_add = } = {pre_ref_doc+ len_ref_doc_add} vs {post_ref_doc = }"
+        )
 
         # make these the reference object
         self._ref_df = ref_out
@@ -247,36 +301,37 @@ class Library(LibraryBase):
 
         # invalidate to force cache refresh
         self.reset()
-        logger.info('saved library and invalidated cache')
+        logger.info("saved library and invalidated cache")
 
     def save(self):
         """Save config and all dataframes."""
         # config.save handles the
         self.config.save(self.config_path, backup=True)
-        self._ref_df.to_feather(self.config_path / 'ref.feather')
-        self._doc_read_df.to_feather(self.config_path / 'doc.feather')
-        self._ref_doc_df.to_feather(self.config_path / 'ref-doc.feather')
+        self._ref_df.to_feather(self.config_path / "ref.feather")
+        self._doc_read_df.to_feather(self.config_path / "doc.feather")
+        self._ref_doc_df.to_feather(self.config_path / "ref-doc.feather")
 
-    def querex(self, expr):
-        """Run ``expr`` through the querex on database."""
-        self._last_query_expr = expr
-        try:
-            self._last_query = self.database.querex(expr)
-            self._last_unrestricted = getattr(self.database, "qx_unrestricted_len", -1)
-        except ValueError:
-            return None
-        return self._last_query
+    # def querex(self, expr):
+    #     """Run ``expr`` through the querex on database."""
+    #     self._last_query_expr = expr
+    #     try:
+    #         self._last_query = self.database.querex(expr)
+    #         self._last_unrestricted = getattr(self.database, "qx_unrestricted_len", -1)
+    #     except ValueError:
+    #         return None
+    #     return self._last_query
 
     def distinct(self, c):
         """Return distinct occurrences of col c."""
         # database is fully exploded so this is OK:
-        if self.database.empty: return []
-        return sorted(set([i for i in self.database[c] if i != '']))
+        if self.database.empty:
+            return []
+        return sorted(set([i for i in self.database[c] if i != ""]))
 
     @staticmethod
     def get_library_path_list():
         """Get a list of available libraries (no suffix) as list of Paths (see also ``list``)."""
-        return [f for f in LIBRARIES_DIR.glob('*') if f.is_dir()]
+        return [f for f in LIBRARIES_DIR.glob("*") if f.is_dir()]
 
     @staticmethod
     def list():
@@ -289,8 +344,8 @@ class Library(LibraryBase):
         """Dataframe of all projects in default location."""
         # not sure what the best "way around" is for this...
         df = pd.concat(
-            [Library(p).config_df for p in Library.get_library_path_list()],
-            axis=1).T.fillna('')
+            [Library(p).config_df for p in Library.get_library_path_list()], axis=1
+        ).T.fillna("")
         # df = df[['name', 'description', 'bibtex_file', 'pdf_dir_name', 'text_dir_name', 'extractor', ]]
         df = df.reset_index(drop=True)
         return df
@@ -298,7 +353,7 @@ class Library(LibraryBase):
     def to_name_ex(self, name, strict=False):
         """Extend name to longest match using a Trie; in strict mode adds as key if missing."""
         if self._trie is None:
-            authors = self.distinct('author')
+            authors = self.distinct("author")
             self._trie = Trie()
             for a in authors:
                 self._trie.insert(a)
@@ -314,7 +369,9 @@ class Library(LibraryBase):
             if self.ref_doc_df.empty:
                 self._tag_cache = []
             else:
-                self._tag_cache = sorted(self.ref_doc_df['tag'].dropna().unique().astype(str).tolist())
+                self._tag_cache = sorted(
+                    self.ref_doc_df["tag"].dropna().unique().astype(str).tolist()
+                )
         return self._tag_cache
 
     @property
@@ -323,7 +380,9 @@ class Library(LibraryBase):
             if self.ref_df.empty:
                 self._title_cache = []
             else:
-                self._title_cache = sorted(self.ref_df['title'].dropna().unique().astype(str).tolist())
+                self._title_cache = sorted(
+                    self.ref_df["title"].dropna().unique().astype(str).tolist()
+                )
         return self._title_cache
 
     @property
@@ -332,9 +391,10 @@ class Library(LibraryBase):
             if self.ref_df.empty:
                 self._tag_title_cache = []
             else:
-                tt = [f'{tg}-{ttl}' for tg, ttl in zip(
-                    self.ref_df['tag'],
-                    self.ref_df['title'])]
+                tt = [
+                    f"{tg}-{ttl}"
+                    for tg, ttl in zip(self.ref_df["tag"], self.ref_df["title"])
+                ]
                 self._tag_title_cache = sorted(tt)
         return self._tag_title_cache
 
@@ -370,24 +430,30 @@ class Library(LibraryBase):
         """Execute and format ripgrep search against library full text extracts."""
         # figure library location and prefix and suffix search terms
 
-        cmd = ["rg",
-                    "--json",
-                    "--stats",
-                    "-C", "1",
-                    "-g", '*.md',
-                    "--encoding", "utf-8",
-                    pattern,
-                    *args,
-                    self.text_dir_full_name
-                ]
+        cmd = [
+            "rg",
+            "--json",
+            "--stats",
+            "-C",
+            "1",
+            "-g",
+            "*.md",
+            "--encoding",
+            "utf-8",
+            pattern,
+            *args,
+            self.text_dir_full_name,
+        ]
         logger.info("will run %s", cmd)
         # execute command
         try:
-            proc = subprocess.Popen(cmd,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    text=True,
-                                    encoding='utf-8')
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+            )
         except FileNotFoundError:
             return "FileNotFoundError", "[red]ripgrep (rg) not found on PATH[/red]"
 
@@ -406,18 +472,43 @@ class Library(LibraryBase):
         bibtex_path = bibtex_path or self.config.bibtex_file
         bibtex_path = Path(bibtex_path).absolute()
         ans = []
-        drop_cols = ['arc-source']
+        drop_cols = ["arc-source"]
         for r, row in self.ref_df.drop(columns=drop_cols).iterrows():
             ans.append(dict_to_bibtex(row))
-        txt = '\n\n'.join(ans)
+        txt = "\n\n".join(ans)
 
         if bibtex_path.exists():
             backup = bibtex_path.with_suffix(".bak")
-            if backup.exists(): backup.unlink()
+            if backup.exists():
+                backup.unlink()
             backup.hardlink_to(bibtex_path)
 
-        bibtex_path.write_text(txt, encoding='utf-8')
-        logger.info('Wrote %s bibtex entries to %s', len(ans), bibtex_path)
+        bibtex_path.write_text(txt, encoding="utf-8")
+        logger.info("Wrote %s bibtex entries to %s", len(ans), bibtex_path)
+
+    def update_hashes(self):
+        """Update _doc_read_df hashes, save and reset."""
+        if self._doc_read_df.empty:
+            logger.info("Empty library! Cannot hash.")
+            return
+
+        if "hash" not in self._doc_read_df:
+            self._doc_read_df["hash"] = ""
+
+        missing = self._doc_read_df.query("hash == '' or hash == 'TBD'")
+        if len(missing) == 0:
+            logger.info("No missing caches, exiting.")
+            return
+
+        logger.info(f"Updating {len(missing)} hashes")
+        missing_docs = missing.path.values
+        hashes = hash_many(missing_docs, workers=self.config.hash_workers)
+        # hashes returns dict path->hash, so lookup on path
+        self._doc_read_df.hash = self._doc_read_df.path.map(lambda x: hashes.get(x, ""))
+        # resave everything
+        self.save()
+        # invalidate caches
+        self.reset()
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

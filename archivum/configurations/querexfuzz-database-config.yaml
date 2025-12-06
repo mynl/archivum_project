@@ -1,0 +1,23 @@
+base_cols:
+  - tag
+  - author
+  - title
+  - journal
+  - create
+
+date_fields:
+  - create
+  - mod
+  - access 
+
+default_date_field: mod
+
+bang_field: author
+recent_field: mod
+
+fuzzy:
+  fields:
+    - author
+    - title
+  limit: 50
+  score_col_name: score
