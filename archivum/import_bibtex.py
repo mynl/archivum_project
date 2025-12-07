@@ -738,11 +738,11 @@ class Bib2df_Incremental(LibraryBase):
         # the standardized tag, standard_tag (stem)
         df["standard_tag"] = np.where(a != "", a + y, np.where(e != "", e + y, "NOTAG"))
 
-        noans = df.standard_tag[df.standard_tag == "NOTAG"]
+        noans = df.loc[df.standard_tag == "NOTAG", :]
         if len(noans):
             logger.warning(f"WARNING: Suggested tags failed for {len(noans)} items")
-            logger.warning("YOU NEED TO FIX THIS!")
-            logger.info(noans)
+            logger.warning("********  YOU NEED TO FIX THIS!")
+            logger.warning(noans)
 
         # make the proposed tags, build lists as you go with no duplicates
         if self.reference_library != EMPTY_LIBRARY:

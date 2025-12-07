@@ -517,14 +517,14 @@ def create(lib_name):
 
 
 # ========================================================================================
-@entry.command()
+@entry.command(name="list")  # can't use list as Python fun, it is a built in
 @click.option(
     "-d",
     "--details",
     is_flag=True,
     help="Show detailed information about each library.",
 )
-def list(details):
+def list_libraries(details):
     """List all available libraries."""
     logger.debug("Listing libraries...")
     # TODO: Implement listing logic
@@ -779,14 +779,14 @@ def import_bibtex(bibtex_path: Path, pdf_dir: Path, add_hashes: bool, verbose: i
     else:
         logger.info("Dry run mode: no changes applied.")
 
-    if verbose == 0:
-        click.echo("Running silently.")
-    elif verbose == 1:
-        click.echo("Running with standard verbosity (v).")
-    elif verbose == 2:
-        click.echo("Running with high verbosity (vv).")
-    elif verbose >= 3:
-        click.echo("Running with maximum verbosity (vvv or more).")
+    # if verbose == 0:
+    #     click.echo("Running silently.")
+    # elif verbose == 1:
+    #     click.echo("Running with standard verbosity (v).")
+    # elif verbose == 2:
+    #     click.echo("Running with high verbosity (vv).")
+    # elif verbose >= 3:
+    #     click.echo("Running with maximum verbosity (vvv or more).")
 
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -849,14 +849,14 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
     else:
         logger.info("Dry run mode: no changes applied.")
 
-    if verbose == 0:
-        click.echo("Running silently.")
-    elif verbose == 1:
-        click.echo("Running with standard verbosity (v).")
-    elif verbose == 2:
-        click.echo("Running with high verbosity (vv).")
-    elif verbose >= 3:
-        click.echo("Running with maximum verbosity (vvv or more).")
+    # if verbose == 0:
+    #     click.echo("Running silently.")
+    # elif verbose == 1:
+    #     click.echo("Running with standard verbosity (v).")
+    # elif verbose == 2:
+    #     click.echo("Running with high verbosity (vv).")
+    # elif verbose >= 3:
+    #     click.echo("Running with maximum loquacity (vvv or more).")
 
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -873,41 +873,58 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
     else:
         doc_paths = [doc_path]
 
+    # process the docs
     docs = []
-    bibs = []
+    bibs = [f"% import from {doc_path.absolute()}"]
     for p in doc_paths:
         try:
+            logger.info('gathering import info for %s', p)
             doc = Document(p)
             doc.process()
             docs.append(doc)
-            blob = doc.bibtex()
-            bibs.append(blob)
+            bibs.append(doc.bibtex())
         except Exception as e:
-            click.echo(f"Error: {e}")
+            click.echo(f"Error for {p.name}: {e}")
 
     # for the time being...
-    click.echo("\n".join(bibs))
+    bib_str = "\n".join(bibs)
+    click.echo(bib_str)
 
-    # # create importer
-    # b = Bib2df_Incremental(
-    #     bibtex_file_path=xx, pdf_dir=pdf_dir, reference_library=lib
-    # )
-    # # do the import
-    # import_df = b.import_bibtex_file()
+    p = doc_path if doc_path.is_dir() else doc_path.parent
+    p = p / "bibtex-import.bib"
+    print(f'working with {p}')
+    p = p.absolute()
+    print(f'working with {p}')
+    if p.exists():
+        p.unlink()
 
-    # if verbose > 0:
-    #     qd(import_df)
-    # if verbose > 1:
-    #     qd(b.import_analysis())
+    p.write_text(bib_str, encoding='utf-8')
+    try:
+        subprocess.run(f'"c:\\program files\\sublime text\\subl.exe" {p}', shell=False)
+    except Exception as e:
+        print(f'subprocess error {e}')
 
-    # if execute:
-    #     click.echo("Updating with {len(b.ported_df)} entries.")
-    #     b.update_library(save=True)
+    action = click.confirm("Review file in Sublime...continue to import", default=False)
+
+    if action:
+        # create importer
+        b = Bib2df_Incremental(
+            bibtex_file_path=p, pdf_dir=None, reference_library=lib
+        )
+        # do the import
+        import_df = b.import_bibtex_file()
+
+        if verbose > 0:
+            qd(import_df)
+        if verbose > 1:
+            qd(b.import_analysis())
+
+        if execute:
+            click.echo("Updating with {len(b.ported_df)} entries.")
+            b.update_library(save=True)
 
 
 # ========================================================================================
-
-
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
 @click.option(

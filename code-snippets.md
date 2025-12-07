@@ -16,3 +16,16 @@ import-bibtex -vv  tweedie.bib
 # actually import it
 import-bibtex -v -x  tweedie.bib
 ```
+
+
+## Import docs
+
+```bash
+# discover / import
+cd /tmp
+archivum uber -l silly-library2
+import-doc -v .
+import-bibtex -v  bibtex-import.bib
+# actually import it
+import-bibtex -v -x  tweedie.bib
+```
