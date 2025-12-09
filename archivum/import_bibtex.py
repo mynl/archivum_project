@@ -132,16 +132,16 @@ class Bib2df_Incremental(LibraryBase):
         "abstract",
         "annote",
         "issn",
-        "isbn",
-        "archivePrefix",
+        # "isbn",
+        # "archivePrefix",
         # 'arxivId',
-        "eprint",
+        # "eprint",
         "pmid",
         "primaryClass",
         "series",
         "chapter",
         "school",
-        "organization",
+        # "organization",
         "howpublished",
         "keywords",
     ]
@@ -256,31 +256,40 @@ class Bib2df_Incremental(LibraryBase):
     @property
     def raw_df(self):
         """DataFrame of raw(ish) information read directly from bibtex file."""
+        # gemini improvement: filter nones and the space before @
         if self._raw_df.empty:
             logger.info("===>> creating raw_df property <<====")
-            # read text
+
             self.txt = self.bibtex_file_path.read_text(encoding="utf-8").translate(
                 self._char_map
             )
+
             if self.remap_dashes:
-                # basic remapping for dashes
                 self.txt, n = self._re_subs_compiled.subn(
                     lambda m: self._re_subs[m.group()], self.txt
                 )
-                logger.info(f"uber regex sub found {n = } replacements")
+                logger.info(f"remap dashes regex sub found {n = } replacements")
 
-            # split into references
-            self.stxt = re.split(r"^@", self.txt, flags=re.MULTILINE)
+            # Split on Start-of-line + optional space + @
+            # This consumes the indent and the @, leaving the type as the start of the chunk
+            # (?m) means multiline (like a flag)
+            self.stxt = re.split(r"(?m)^\s*@", self.txt)
 
-            # parse each line
-            parsed_lines = map(self.parse_line, self.stxt[1:])
+            # Process ALL chunks. parse_line handles filtering.
+            # Use a list comprehension to filter out Nones immediately
+            parsed_lines = [
+                res for res in map(self.parse_line, self.stxt)
+                if res is not None
+            ]
+
             self._raw_df = pd.DataFrame(parsed_lines)
 
-            # the bibtex row 0 is mendeley junk
-            # doing this keeps stxt and the df on the same index
+            # Reset index to be 1-based standard
             self._raw_df.index = range(1, 1 + len(self._raw_df))
+
             if self.fillna:
                 self._raw_df = self._raw_df.fillna("")
+
         return self._raw_df
 
     @property
@@ -599,12 +608,14 @@ class Bib2df_Incremental(LibraryBase):
         return self.raw_df.loc[self.raw_df.file == "", self._base_cols]
 
     @staticmethod
-    def parse_line(entry):
+    def parse_line_original(entry):
         result = {}
 
         # Step 1: Extract type and tag
         # windows GS bibtex pastes come in with \r\n
-        entry = entry.replace("\r\n  ", "\n")
+        logger.debug('working on entry = %s', entry)
+        entry = entry.replace("\r\n *", "\n")
+        logger.debug('working on adjusted entry = %s', entry)
         header_match = re.match(r"@?(\w+)\{([^,]+),", entry)
         if not header_match:
             logger.error("Error: Unable to parse entry header.")
@@ -614,14 +625,61 @@ class Bib2df_Incremental(LibraryBase):
         # Step 2: Remove header and final trailing '}'
         body = entry[header_match.end() :].strip()
         if body.endswith("}"):
-            body = body[:-1].strip() + ",\n"
+            body = body[:-1].strip()
 
-        for m in re.finditer(r" *([a-zA-Z\-]+) *= *{(.*?)},\n", body, flags=re.DOTALL):
+        logger.debug('working on body = %s', body)
+        # this is a bit of an art...
+        # for m in re.finditer(r" *([a-zA-Z\-]+) *= *{(.*?)},?\n", body, flags=re.DOTALL):
+        # Updated loop with robust regex
+        # 1. \s* handles indentation and trailing spaces (fixes eprint)
+        # 2. (?:\n|\Z) handles end of line OR end of string (fixes missing file)
+
+        for m in re.finditer(r"\s*([a-zA-Z\-]+)\s*=\s*\{(.*?)\}\s*,?\s*(?:\n|\Z)", body, flags=re.DOTALL):
             try:
                 k, v = m.groups()
                 result[k] = v
+                logger.debug("key = %s and value = %s from m = %s", k, v, m)
             except ValueError:
                 logger.info("going slow")
+                return Bib2df_Incremental.parse_line_slow(entry)
+        return result
+
+    @staticmethod
+    def parse_line(entry):
+        # 1. Early Exit and Normalization
+        if not entry or len(entry.strip()) < 5:
+            return None
+        entry = entry.replace('\r\n', '\n').replace('\r', '\n')
+
+        # 2. Extract Header
+        # Matches type{tag,
+        # We allow leading whitespace just in case split left artifacts
+        header_match = re.match(r"\s*@?([a-zA-Z]+)\s*\{\s*([^,]+),", entry)
+
+        if not header_match:
+            logger.error("Error: Unable to parse entry header for %s.", entry)
+            return None
+
+        result = {}
+        result["type"], result["tag"] = header_match.groups()
+
+        # 3. Extract Body
+        body = entry[header_match.end():].strip()
+        if body.endswith('}'):
+            body = body[:-1]
+
+        # 4. Parse Fields
+        # Keys: [a-zA-Z]+ only
+        # End anchor: (?:\n|\Z) matches newline OR end of string (fixing the missing 'file' issue)
+        field_pattern = r"\s*([a-zA-Z\-]+)\s*=\s*\{(.*?)\}\s*,?\s*(?:\n|\Z)"
+
+        for m in re.finditer(field_pattern, body, flags=re.DOTALL):
+            try:
+                k, v = m.groups()
+                result[k] = v.strip()
+                logger.debug("key = %s and value = %s from m = %s", k, v, m)
+            except ValueError:
+                logger.info("going slow for %s", entry)
                 return Bib2df_Incremental.parse_line_slow(entry)
         return result
 

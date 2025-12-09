@@ -1,0 +1,39 @@
+version: 1
+disable_existing_loggers: true
+
+formatters:
+  plain:
+    class: logging.Formatter
+    format: "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+    datefmt: "%H:%M:%S"
+
+  json:
+    class: pythonjsonlogger.jsonlogger.JsonFormatter
+    format: "%(asctime)s %(levelname)s %(name)s %(message)s"
+    rename_fields:
+      asctime: time
+      levelname: level
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: plain
+    stream: ext://sys.stderr
+
+  file_main:  
+    class: logging.handlers.RotatingFileHandler
+    formatter: json
+    filename: "C:/tmp/archivum.log.json"
+    maxBytes: 10485760        # 10 MB
+    backupCount: 5
+    encoding: utf8
+
+loggers:
+  archivum:
+    level: INFO
+    handlers: [file_main]
+    propagate: false
+
+root:
+  level: WARNING
+  handlers: [console]

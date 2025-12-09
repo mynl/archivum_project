@@ -795,9 +795,11 @@ def import_bibtex(bibtex_path: Path, pdf_dir: Path, add_hashes: bool, verbose: i
 
     # create importer
     b = Bib2df_Incremental(
-        bibtex_file_path=bibtex_path, pdf_dir=pdf_dir, reference_library=lib,
-        add_hashes=add_hashes
-    )
+            bibtex_file_path=bibtex_path,
+            pdf_dir=pdf_dir,
+            reference_library=lib,
+            add_hashes=add_hashes
+        )
     # do the import
     import_df = b.import_bibtex_file()
 
@@ -849,15 +851,6 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
     else:
         logger.info("Dry run mode: no changes applied.")
 
-    # if verbose == 0:
-    #     click.echo("Running silently.")
-    # elif verbose == 1:
-    #     click.echo("Running with standard verbosity (v).")
-    # elif verbose == 2:
-    #     click.echo("Running with high verbosity (vv).")
-    # elif verbose >= 3:
-    #     click.echo("Running with maximum loquacity (vvv or more).")
-
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open -- cannot import.")
@@ -892,9 +885,7 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
 
     p = doc_path if doc_path.is_dir() else doc_path.parent
     p = p / "bibtex-import.bib"
-    print(f'working with {p}')
     p = p.absolute()
-    print(f'working with {p}')
     if p.exists():
         p.unlink()
 
@@ -915,12 +906,13 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
         import_df = b.import_bibtex_file()
 
         if verbose > 0:
+            click.echo('Result of Import')
             qd(import_df)
         if verbose > 1:
             qd(b.import_analysis())
 
         if execute:
-            click.echo("Updating with {len(b.ported_df)} entries.")
+            click.echo(f"Updating with {len(b.ported_df)} entries.")
             b.update_library(save=True)
 
 

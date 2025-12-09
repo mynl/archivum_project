@@ -29,10 +29,19 @@ def dict_to_bibtex(data: Any) -> str:
         data = data._asdict()
 
     if not isinstance(data, dict):
+        logger.info('data cannot be coerced into a dict, returning ""')
         return ""
 
     # non empty elements
     data = {k: v for k, v in data.items() if v != ""}
+
+    # tidy up a bit
+    # TODO root this out at the source!
+    if (str(data.get('archivePrefix', '')).lower() == "arxiv" and
+        'eprint' in data and 'arxivID' in data
+        and data['arxivID'] == data['eprint']):
+        print('deleting from ', data)
+        del data['arxivID']
 
     max_len = max(len(k) for k in data)
 

@@ -6,26 +6,21 @@ Equivalent to and based on manager module in file_database.
 Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
 
-from functools import partial
 from importlib.resources import files
 import logging
 from pathlib import Path
-import re
 import subprocess
-from types import MethodType
 
 import yaml
 import pandas as pd
 from pydantic import ValidationError
+from IPython.display import display
 
 from querexfuzz.core import Querexfuzz
 
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
 from .trie import Trie
-
-# from . querex import querex_work
 from .utilities import TagAllocator
-from .document import Document
 from .config import Configurator
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex
@@ -470,12 +465,12 @@ class Library(LibraryBase):
 
         Lives in library/LIB_NAME/lib-name.bib with a symlink to config location.
         """
-        bibtex_path =  self.config_path / "bibtex.bib"
+        bibtex_path = self.config_path / "bibtex.bib"
         bibtex_path = Path(bibtex_path).absolute()
 
         # make the text for the bibtex file
         ans = []
-        drop_cols = [i for i in ["arc-source"] if i in self.ref_df]
+        drop_cols = [i for i in ["version", "arc-source"] if i in self.ref_df]
         for r, row in self.ref_df.drop(columns=drop_cols).iterrows():
             ans.append(dict_to_bibtex(row))
         txt = "\n\n".join(ans)
@@ -496,8 +491,13 @@ class Library(LibraryBase):
         if self.config.bibtex_file:
             # link there
             p = Path(self.config.bibtex_file).absolute()
-            if p.exists():
+            if p.exists() and not p.is_symlink():
                 p.unlink()
+            if p.exists(follow_symlinks=False):
+                if p.readlink().absolute() == bibtex_path:
+                    return # link already there
+                else:
+                    p.unlink()
             p.symlink_to(bibtex_path)
 
     def update_hashes(self):
@@ -519,10 +519,68 @@ class Library(LibraryBase):
         hashes = hash_many(missing_docs, workers=self.config.hash_workers)
         # hashes returns dict path->hash, so lookup on path
         self._doc_read_df.hash = self._doc_read_df.path.map(lambda x: hashes.get(x, ""))
-        # resave everything
+        # save everything
         self.save()
         # invalidate caches
         self.reset()
+
+    def reset_library(self):
+        """
+        Reset a library back to empty state.
+
+        USE WITH CARE!
+
+        Deletes all data files and the bibtex link if it exists.
+        """
+        assert self.name.lower() != "uber library", "Sorry, not deleting the uber library."
+
+        for p in self.config_path.rglob('*'):
+            if p.suffix != '.yaml' and not p.is_dir():
+                p.unlink()
+        audit_path = self.config_path / "import-audit"
+        for p in audit_path.glob('*'):
+            if p.is_dir():
+                p.rmdir()
+        if audit_path.exists():
+            audit_path.rmdir()
+        bt_link = Path(self.config.bibtex_file)
+        if bt_link.is_symlink() and bt_link.exists(follow_symlinks=False):
+            bt_link.unlink()
+
+    def initial_import_bibtex(self, bibtex_file_path, pdf_dir=None, qd=display, update=True):
+        """
+        Import a single bibtex file into library.
+
+        Use in prod when you know the bibtex will work to recreate from scratch.
+        """
+        from . import_bibtex import Bib2df_Incremental
+        bibtex_file_path = Path(bibtex_file_path)
+        print(f"Importing {bibtex_file_path.name.replace("_", " ")}")
+        assert bibtex_file_path.exists()
+        if pdf_dir is None:
+            pdf_dir = bibtex_file_path.parent
+        else:
+            pdf_dir = Path(pdf_dir)
+            assert pdf_dir.exists()
+
+        # create importer object
+        b = Bib2df_Incremental(
+            bibtex_file_path=bibtex_file_path,
+            pdf_dir=pdf_dir,
+            reference_library=self,
+            fillna=True,
+            qd=qd,
+        )
+        # import and report
+        import_df = b.import_bibtex_file()
+        qd(import_df, caption="Import stats")
+        # generally too much info
+        # qd(b.import_analysis())
+        qd(b.stats(), caption="Current library stats")
+        if update:
+            # actually update
+            b.update_library()
+            qd(self.stats(), caption="Updated library stats")
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

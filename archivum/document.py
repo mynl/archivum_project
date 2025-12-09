@@ -15,6 +15,7 @@ import unicodedata
 from pathlib import Path
 from typing import Dict, Optional, Tuple, Any
 
+from nameparser import HumanName
 import pymupdf  # type: ignore[import-untyped]  # fitz
 from rapidfuzz import fuzz
 
@@ -459,12 +460,15 @@ class Document:
         # Handle list return from lookup_arxiv
         if isinstance(data, list) and data:
             data = data[0]
+
         ans = {
             "title": data.get("title", ""),
             "author": data.get("author", ""),  # Assuming already stringified
             "year": str(data.get("year", "")),
             "arxiv_id": data.get("arxiv", ""),  # Adjust based on your arxiv module
         }
+        if not ans['arxiv_id'] and 'eprint' in data:
+            ans['arxiv_id'] = data['eprint']
         if 'doi' in data:
             ans['doi'] = data['doi']
         if 'journal' in data:
@@ -548,6 +552,9 @@ class Document:
                 val = str(v).replace("{", "\\{").replace("}", "\\}")
                 if k == 'title':
                     lines.append(f"  {k} = {{{{{val}}}}},")
+                elif k == "author":
+                    val = Document._sort_authors(val)
+                    lines.append(f"  {k} = {{{val}}},")
                 else:
                     lines.append(f"  {k} = {{{val}}},")
 
@@ -571,3 +578,15 @@ class Document:
         print_fn(f'{self.doc_path.name}\n'
             + f'{"-" * len(self.doc_path.name)}\n'
             + '\n'.join(self.log_messages))
+
+    @staticmethod
+    def _sort_authors(authors):
+        """Make last, first and ... """
+        a_list = authors.split(' and ')
+        out = []
+        for a in a_list:
+            hn = HumanName(a)
+            name_out = f'{hn.last}, {hn.first}' + (
+                f' {hn.middle}' if hn.middle else '')
+            out.append(name_out)
+        return ' and '.join(out)

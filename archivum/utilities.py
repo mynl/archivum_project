@@ -271,7 +271,7 @@ def suggest_name(author: str, title: str, year: str | int):
     split_author = author.split(" and ") if author else []
     dir_name = ", ".join([i.split(",")[0] for i in split_author][:3])
     if len(split_author) > 3:
-        dir_name = f"{dir_name} et al" if dir_name else "et al"
+        dir_name = f"{dir_name}, et al"
 
     file_name = f"{year}_{title}"
 
@@ -288,6 +288,7 @@ def rename(
     dir_name: str,
     file_name: str,
     hash_len: int = 6,
+    execute: bool = False,
 ) -> bool:
     """
     Hard link original file into pdf_dir/dir_name/file_name.
@@ -320,12 +321,14 @@ def rename(
         except Exception as e:
             logger.warning("Could not change file attributes for %s: %s", new_path, e)
         # -------------------------------------------------------------
-        new_path.unlink()
+        if execute:
+            new_path.unlink()
 
     # make new link
     logger.info("new: %s --> old: %s", new_path, original_doc_path)
     # print(f"{new_path} ==> {original_doc_path}")
 
     # create link
-    new_path.hardlink_to(original_doc_path)
+    if execute:
+        new_path.hardlink_to(original_doc_path)
     return True

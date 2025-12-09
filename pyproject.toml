@@ -16,6 +16,7 @@ dependencies = [
     "greater_tables",
     "lark",
     "latexcodec",
+    "nameparser",
     "numpy",
     "pandas",
     "pendulum",
