@@ -6,6 +6,7 @@ v 1.0.0
     Alpha release
     Uses querexfuzz with config files for each table; deleted unneeded files
     Added hashing capability
+    Added Library.history
 
 v 0.9.0
     New file layout
@@ -31,7 +32,7 @@ from pathlib import Path
 
 __appname__ = "archivum"
 __author__ = "Stephen J. Mildenhall"
-__version__ = "0.9.0"
+__version__ = "1.0.0"
 __date__ = "2025-03-06"
 
 

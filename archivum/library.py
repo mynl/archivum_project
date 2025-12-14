@@ -118,11 +118,11 @@ class Library(LibraryBase):
                 self._doc_read_df = pd.read_feather(self.config_path / "doc.feather")
             except FileNotFoundError:
                 return self._doc_df
-            pdf_dir = Path(self.config.pdf_dir_name)
+            doc_dir = Path(self.config.doc_dir_name)
 
             def get_rel_parent(p: Path) -> str:
-                if p.is_relative_to(pdf_dir):
-                    return str(p.relative_to(pdf_dir).parent)
+                if p.is_relative_to(doc_dir):
+                    return str(p.relative_to(doc_dir).parent)
                 return str(p.parent)  # Fallback: keep absolute parent
 
             # truncate path names to make more readable
@@ -343,7 +343,7 @@ class Library(LibraryBase):
         df = pd.concat(
             [Library(p).config_df for p in Library.get_library_path_list()], axis=1
         ).T.fillna("")
-        # df = df[['name', 'description', 'bibtex_file', 'pdf_dir_name', 'text_dir_name', 'extractor', ]]
+        # df = df[['name', 'description', 'bibtex_file', 'doc_dir_name', 'text_dir_name', 'extractor', ]]
         df = df.reset_index(drop=True)
         return df
 
@@ -547,26 +547,39 @@ class Library(LibraryBase):
         if bt_link.is_symlink() and bt_link.exists(follow_symlinks=False):
             bt_link.unlink()
 
-    def initial_import_bibtex(self, bibtex_file_path, pdf_dir=None, qd=display, update=True):
+    def initial_import_bibtex_files(self, bibtex_file_list, qd, update=False):
+        """
+        Iterate import file through a list of tuples (bibtex file, doc_dir).
+
+        If doc_dir is None it is the parent of the bibtex file.
+
+        E.g. uber library created from
+
+
+        """
+        for bibtex_file, doc_dir in bibtex_file_list:
+            self.initial_import_bibtex_file(bibtex_file, doc_dir, qd, update)
+
+    def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, qd=display, update=True):
         """
         Import a single bibtex file into library.
 
         Use in prod when you know the bibtex will work to recreate from scratch.
         """
         from . import_bibtex import Bib2df_Incremental
-        bibtex_file_path = Path(bibtex_file_path)
+        bibtex_file_path = Path(bibtex_file)
         print(f"Importing {bibtex_file_path.name.replace("_", " ")}")
         assert bibtex_file_path.exists()
-        if pdf_dir is None:
-            pdf_dir = bibtex_file_path.parent
+        if doc_dir is None:
+            doc_dir = bibtex_file_path.parent
         else:
-            pdf_dir = Path(pdf_dir)
-            assert pdf_dir.exists()
+            doc_dir = Path(doc_dir)
+            assert doc_dir.exists()
 
         # create importer object
         b = Bib2df_Incremental(
             bibtex_file_path=bibtex_file_path,
-            pdf_dir=pdf_dir,
+            doc_dir=doc_dir,
             reference_library=self,
             fillna=True,
             qd=qd,
@@ -581,6 +594,25 @@ class Library(LibraryBase):
             # actually update
             b.update_library()
             qd(self.stats(), caption="Updated library stats")
+
+    def history(self):
+        """The history of how self was built from the audit files."""
+        ans = []
+        for f in (self.config_path / 'import-audit').glob('*'):
+            for f in f.glob('*'):
+                if f.name.find('audit-info') > 0:
+                    df = pd.read_csv(f, index_col=0)
+                    df['audit'] = f.stem.split('.')[0]
+                    ans.append(df)
+        dfa = pd.concat(ans).set_index('audit', append=True).drop(columns='key').unstack(1).droplevel(0,1)
+        dfa.index = df['key'].values
+        dfa = dfa.sort_values('created', axis=1)
+        dfa = dfa.T
+        dfa.index.name = 'Import'
+        dfa.raw_entries = dfa.raw_entries.astype(int)
+        dfa.ported_entries = dfa.ported_entries.astype(int)
+        dfa['cum_entries'] = dfa.ported_entries.cumsum()
+        return dfa
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

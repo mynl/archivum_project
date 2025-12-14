@@ -489,7 +489,7 @@ def create(lib_name):
                 local_prompt("BibTeX File"),
                 default=f"\\S\\Telos\\biblio\\{lib_dir_name}-test.bib",
             ),
-            "pdf_dir_name": click.prompt(local_prompt("pdf dir name"),
+            doc_dir_name": click.prompt(local_prompt("doc dir name"),
                 default="\\S\\Library"
             ),
             "full_text": "true",
@@ -549,6 +549,17 @@ def stats():
         return
     logger.debug("Library stats %s", lib)
     qd(lib.stats().reset_index(drop=False))
+
+
+# ========================================================================================
+@entry.command()
+def history():
+    """Display library history based on imports."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+    qd(lib.history())
 
 
 # ========================================================================================
@@ -693,8 +704,6 @@ def query(start: str, database: str):
 
 
 # ========================================================================================
-
-
 @entry.command()
 @click.option("--author", "-a", help="Author name")
 @click.option("--title", "-t", help="Title of work")
@@ -750,7 +759,7 @@ def crossref(
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
     help="Directory containing PDFs referenced in the BibTeX file; "
-    "defaults to the library's pdf_dir_name.",
+    "defaults to the library's doc_dir_name.",
 )
 @click.option(
     "-v",
@@ -770,7 +779,7 @@ def crossref(
     is_flag=True,
     help="Actually perform the import; otherwise, do a dry run and report stats.",
 )
-def import_bibtex(bibtex_path: Path, pdf_dir: Path, add_hashes: bool, verbose: int, execute: bool):
+def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: int, execute: bool):
     """
     Import new references from a BibTeX file into the current library.
     """
@@ -796,7 +805,7 @@ def import_bibtex(bibtex_path: Path, pdf_dir: Path, add_hashes: bool, verbose: i
     # create importer
     b = Bib2df_Incremental(
             bibtex_file_path=bibtex_path,
-            pdf_dir=pdf_dir,
+            doc_dir=doc_dir,
             reference_library=lib,
             add_hashes=add_hashes
         )
@@ -900,7 +909,7 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
     if action:
         # create importer
         b = Bib2df_Incremental(
-            bibtex_file_path=p, pdf_dir=None, reference_library=lib
+            bibtex_file_path=p, doc_dir=None, reference_library=lib
         )
         # do the import
         import_df = b.import_bibtex_file()

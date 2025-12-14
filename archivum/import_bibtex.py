@@ -153,7 +153,7 @@ class Bib2df_Incremental(LibraryBase):
         self,
         *,
         bibtex_file_path,
-        pdf_dir,
+        doc_dir,
         reference_library,
         fillna=True,
         errors_mapper=None,
@@ -162,14 +162,14 @@ class Bib2df_Incremental(LibraryBase):
         qd=None,
     ):
         """
-        Read Path p into bibtex df, pdf_dir is a Path to pdf files (must exist)
+        Read Path p into bibtex df, doc_dir is a Path to pdf files (must exist)
 
         This class is very property driven...dataframes are created
         when needed. Eg the audit dir is only created if you get to that
         point.
 
         The one-time Mendeley porting version of this finds all
-        documents in pdf_dir. We don't need to do that here, we
+        documents in doc_dir. We don't need to do that here, we
         know the docs will exist in the right place. However,
         for the time being will keep the code, but only transfer
         over files as needed.
@@ -177,7 +177,7 @@ class Bib2df_Incremental(LibraryBase):
         afile = an actual file
         vfile = a named reference in the bibtex file that may not correspond to an afile
 
-        pdf_dir is where the afile documents live; all afiles are found.
+        doc_dir is where the afile documents live; all afiles are found.
 
         Use fillna=False to use the contents functions (see missing fields).
 
@@ -213,14 +213,14 @@ class Bib2df_Incremental(LibraryBase):
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
-        self.pdf_dir = Path(pdf_dir) if pdf_dir else None
+        self.doc_dir = Path(doc_dir) if doc_dir else None
         self.reference_library = reference_library or EMPTY_LIBRARY
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
         self.remap_dashes = remap_dashes
         self._add_hashes = add_hashes
         assert self.bibtex_file_path.exists(), "Bibtex file must exist"
-        if self.pdf_dir and not self.pdf_dir.exists():
+        if self.doc_dir and not self.doc_dir.exists():
             logger.info("PDF directory is None or does not exist")
 
         # if you write audits, also save  - this is a flag
@@ -323,7 +323,7 @@ class Bib2df_Incremental(LibraryBase):
         """
         if self._doc_df.empty and len(self._doc_df.columns) == 0:
             logger.info("===>> creating doc_df property <<====")
-            if self.pdf_dir is None or not self.pdf_dir.exists():
+            if self.doc_dir is None or not self.doc_dir.exists():
                 column_dtypes = {
                     "name": "object",
                     "path": "object",
@@ -345,10 +345,13 @@ class Bib2df_Incremental(LibraryBase):
                 )
             else:
                 # actually have documents
-                pdfs = list(self.pdf_dir.rglob("*.pdf"))
-                logger.warning("Found %s afiles (actual pdf files).", len(pdfs))
+                file_formats = self.reference_library.config['file_formats']
+                docs = list()
+                for ff in file_formats:
+                    docs.extend(f for f in self.doc_dir.rglob(ff) if f.is_file())
+                logger.warning("Found %s afiles (actual document files).", len(docs))
                 ans = []
-                for p in pdfs:
+                for p in docs:
                     p = p.absolute()
                     stat = p.stat(follow_symlinks=True)
                     ans.append(
@@ -361,7 +364,7 @@ class Bib2df_Incremental(LibraryBase):
                             "node": stat.st_ino,
                             "links": stat.st_nlink,
                             "size": stat.st_size,
-                            "suffix": p.suffix[1:],
+                            "suffix": p.suffix,
                             "hash": "",
                         }
                     )
@@ -391,7 +394,7 @@ class Bib2df_Incremental(LibraryBase):
                 # set variable
                 self._doc_df = df
                 logger.info(
-                    f"Scanned pdf folder and created doc_df with {len(ans)} files"
+                    f"Scanned documents folder and created doc_df with {len(ans)} files"
                 )
         return self._doc_df
 

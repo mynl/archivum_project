@@ -23,8 +23,8 @@ class Configurator(BaseModel):
     description: str = Field("", description="Optional longer description.")
     ref_columns: Optional[List[str]] = Field(default_factory=list, description="List of fields to include in reference output.")
     bibtex_file: str = Field(..., description="Name of BibTeX output file, created as a link, in addition to saving in library folder.")
-    pdf_dir_name: str = Field(..., description="Dir name where PDFs are expected to be stored. "
-        "Used only to truncate pdf file names, which are made relative to pdf_dir_name.")
+    doc_dir_name: str = Field(..., description="Dir name where actual document files (PDF, etc) are expected to be stored. "
+        "Used only to truncate pdf file names, which are made relative to doc_dir_name.")
     full_text: bool = Field(True, description="Whether to extract and store full text from PDFs.")
     text_dir_name: str = Field("pdf-full-text", description="Dir name for extracted text files. Used by the built in ripgrep function and to create text extracts.")
     extractor: Literal["pdftotext", "pymupdf"] = Field("pdftotext", description="PDF text extraction backend.")
