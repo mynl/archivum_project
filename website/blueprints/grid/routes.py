@@ -5,7 +5,7 @@ from . import grid_bp
 
 def _load_grid_data(library_path: Path) -> pd.DataFrame:
     # This function is now responsible for loading data for the grid
-    df = pd.read_feather(library_path)
+    df = pd.read_feather(library_path) #, dtype_backend="pyarrow")
     cols = ['tag', 'author', 'title', 'journal']
     df = df[cols]
     df = df.reset_index(drop=True)

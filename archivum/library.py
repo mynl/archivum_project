@@ -122,7 +122,7 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
             try:
-                self._doc_read_df = pd.read_feather(self.config_path / "doc.feather")
+                self._doc_read_df = pd.read_feather(self.config_path / "doc.feather") #, dtype_backend="pyarrow")
             except FileNotFoundError:
                 return self._doc_df
             doc_dir = Path(self.config.doc_dir_name)
@@ -161,7 +161,7 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._ref_df.empty:
             try:
-                self._ref_df = pd.read_feather(self.config_path / "ref.feather")
+                self._ref_df = pd.read_feather(self.config_path / "ref.feather") #, dtype_backend="pyarrow")
             except FileNotFoundError:
                 return self._ref_df
 
@@ -190,7 +190,7 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._ref_doc_df.empty:
             try:
-                self._ref_doc_df = pd.read_feather(self.config_path / "ref-doc.feather")
+                self._ref_doc_df = pd.read_feather(self.config_path / "ref-doc.feather") #, dtype_backend="pyarrow")
             except FileNotFoundError:
                 return self._ref_doc_df
 
@@ -225,7 +225,7 @@ class Library(LibraryBase):
             ).merge(self.doc_df, on="path", how="left")
             for c in ["node", "links", "size"]:
                 self._database[c] = self._database[c].fillna(0)
-            self._database.fillna("")
+            # self._database.fillna("")
 
             config_file = (
                 files("archivum.configurations") / "querexfuzz-database-config.yaml"
@@ -550,10 +550,12 @@ class Library(LibraryBase):
         for p in self.config_path.rglob('*'):
             if p.suffix != '.yaml' and not p.is_dir():
                 p.unlink()
-        audit_path = self.config_path / "import-audit"
-        for p in audit_path.glob('*'):
-            if p.is_dir():
-                p.rmdir()
+        for audit_path in [
+            self.config_path / "import-audit",
+            self.config_path / "enhance-audit"]:
+            for p in audit_path.glob('*'):
+                if p.is_dir():
+                    p.rmdir()
         if audit_path.exists():
             audit_path.rmdir()
         bt_link = Path(self.config.bibtex_file)
@@ -561,18 +563,36 @@ class Library(LibraryBase):
             bt_link.unlink()
         # clear local caches
         self.reset()
-    def initial_import_bibtex_files(self, bibtex_file_list, qd, update=False):
-        """
-        Iterate import file through a list of tuples (bibtex file, doc_dir).
 
-        If doc_dir is None it is the parent of the bibtex file.
+    def initial_import(self, *, dir_name="", dir_iterable=None, qd=display, update=False):
+        """
+        Iterate import dir_name or iterate over if iterable. Find
+        ! bibtex file - error if the bibtex file is not unique.
 
         E.g. uber library created from
 
-
         """
-        for bibtex_file, doc_dir in bibtex_file_list:
-            self.initial_import_bibtex_file(bibtex_file, doc_dir, qd, update)
+        dir_iterable = [dir_name] if dir_name != '' else dir_iterable
+
+        def find_bibtex(dir_name):
+            """Utility: find the (!) bibtex file in a directory."""
+            f = Path(dir_name)
+            bibs = list(f.glob('*.bib'))
+            if len(bibs) == 1:
+                return bibs[0]
+            else:
+                print("ERROR", f.name, bibs)
+                return None
+
+        for doc_dir in dir_iterable:
+            doc_dir = Path(doc_dir)
+            bibtex_file = find_bibtex(doc_dir)
+            if bibtex_file is not None:
+                # print(bibtex_file, doc_dir)
+                self.initial_import_bibtex_file(bibtex_file, doc_dir, qd, update)
+            else:
+                logger.warning('SKIPPING: No unique bibtex found for %s', doc_dir)
+                continue
 
     def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, qd=display, update=True):
         """
@@ -582,7 +602,7 @@ class Library(LibraryBase):
         """
         from . import_bibtex import Bib2df_Incremental
         bibtex_file_path = Path(bibtex_file)
-        print(f"Importing {bibtex_file_path.name.replace("_", " ")}")
+        print("-" * 80 + f"\nImporting: {bibtex_file_path}\n" + '-' * 80)
         assert bibtex_file_path.exists()
         if doc_dir is None:
             doc_dir = bibtex_file_path.parent
@@ -655,7 +675,10 @@ class Library(LibraryBase):
         timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
         p = self.config_path / "enhance-audit" / timestamp
         p.mkdir(parents=True, exist_ok=True)
-        self.save_enhance_audit(ans, p, "Ans")
+        try:
+            self.save_enhance_audit(ans, p, "Ans")
+        except Exception as e:
+            logger.warning('Error savings enhance audit, %s', e)
         if update:
             if ans.ref_doc_df is None:
                 raise ValueError('Not updating with no ref doc df')
@@ -664,14 +687,15 @@ class Library(LibraryBase):
             self._ref_doc_df = ans.ref_doc_df
             self.save()
             self.reset()
+        return ans
 
-    def save_enhance_audit_file(self, obj, base_path, name):
+    def save_enhance_audit(self, obj, base_path, name):
         """Save object as CSV if pandas, else JSON to the enhance-audit folder."""
         if isinstance(obj, Ans):
             for f in obj._fields:
                 objobj = getattr(obj, f)
-                if objobj:
-                    self.save_endhance_audit_file(objobj, f'{name}-{f}')
+                if objobj is not None:
+                    self.save_enhance_audit(objobj, base_path, f'{name}-{f}')
             return
 
         if isinstance(obj, (pd.DataFrame, pd.Series)):
@@ -680,8 +704,10 @@ class Library(LibraryBase):
         else:
             path = base_path / f'{name}.json'
             with path.open("w", encoding="utf-8") as f:
-                json.dump(obj, f, indent=4)
-
+                try:
+                    json.dump(obj, f, indent=4)
+                except TypeError:
+                    logger.warning('Object of type %s cannot be saved to json', type(obj))
         logger.info(f"Audit: {type(obj).__name__} saved to {path.name}.")
 
     # def schedule(self, execute=False):

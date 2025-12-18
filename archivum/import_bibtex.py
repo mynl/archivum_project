@@ -324,12 +324,13 @@ class Bib2df_Incremental(LibraryBase):
         if self._doc_df.empty and len(self._doc_df.columns) == 0:
             logger.info("===>> creating doc_df property <<====")
             if self.doc_dir is None or not self.doc_dir.exists():
+                dt_type = f'datetime64[ns, {self.reference_library.config.timezone}]'
                 column_dtypes = {
                     "name": "object",
                     "path": "object",
-                    "mod": "datetime64[ns, Europe/London]",
-                    "create": "datetime64[ns, Europe/London]",
-                    "access": "datetime64[ns, Europe/London]",
+                    "mod": dt_type,
+                    "create": dt_type,
+                    "access": dt_type,
                     "node": "int64",
                     "links": "int64",
                     "size": "int64",
@@ -366,7 +367,7 @@ class Bib2df_Incremental(LibraryBase):
                         }
                     )
                 df = pd.DataFrame(ans)
-                tz = "Europe/London"
+                tz = self.reference_library.config.timezone  # "Europe/London"
                 df["create"] = (
                     pd.to_datetime(df["create"], unit="ns")
                     .dt.tz_localize("UTC")
@@ -408,6 +409,17 @@ class Bib2df_Incremental(LibraryBase):
         :C\\:/S/new-papers/Blackwell/1953_Equivalent Comparisons of Experiments.pdf:pdf
         Oddly, empty vfiles are ::
         """
+        def proc_vfile(vf_drive, vf_name):
+            """create correct absolute Path from vf_name, str from bibtex file."""
+            # weirdly :c\:
+            vf_drive = f'{vf_drive[0]}:'
+            p = Path(vf_drive + vf_name)
+            if p.is_absolute():
+                return str(p.as_posix())
+            else:
+                p = self.bibtex_file_path.parent / vf_name
+                return str(p.as_posix())
+
         if self._vfile_df.empty:
             logger.info("===>> creating vfile_df property <<====")
             ans = []
@@ -426,7 +438,9 @@ class Bib2df_Incremental(LibraryBase):
                             continue
                         x = ref.split(":")
                         if len(x) == 4:
-                            ans.append([tag, *x[1:]])
+                            # drive, filename and type
+                            d, f, t = x[1:]
+                            ans.append([tag, d, proc_vfile(d, f), t])
                         else:
                             self._file_errs.append([tag, *x[1:]])
                 except AttributeError:
@@ -435,9 +449,9 @@ class Bib2df_Incremental(LibraryBase):
                 ans, columns=["tag", "drive", "vfile", "type"]
             )
             # resolve the file names
-            self._vfile_df.vfile = [
-                str(Path(vf).absolute().as_posix()) for vf in self._vfile_df.vfile
-            ]
+            # self._vfile_df.vfile = [
+            #     str(Path(vf).absolute().as_posix()) for vf in self._vfile_df.vfile
+            # ]
             logger.info(f"Created vfile_df with {len(self._vfile_df)} rows.")
         return self._vfile_df
 
@@ -454,7 +468,7 @@ class Bib2df_Incremental(LibraryBase):
         if self._ref_doc_df.empty and len(self._ref_doc_df.columns) == 0:
             logger.info("===>> creating ref_doc_df property <<====")
             actual_files = set(self.doc_df.path)
-            # two mode - there are or aren't actual files
+            # two modes - there are or aren't actual files
             if len(actual_files) == 0:
                 # branch 1: no actual files
                 column_dtypes = {
@@ -477,33 +491,39 @@ class Bib2df_Incremental(LibraryBase):
                 for i, r in self.vfile_df.iterrows():
                     if r.vfile not in actual_files:
                         missing_vfiles.append([i, r.vfile])
-                logger.info("\tFound %s missing vfiles", len(missing_vfiles))
-                logger.info("\tLevenshtein (rapidfuzz) matching in ref_doc...")
-                ans = []
-                for tag, m_vfile in missing_vfiles:
-                    best_match = min(
-                        actual_files,
-                        key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
+                if len(missing_vfiles) == 0:
+                    logger.info('GOOD NEWS: No missing vfiles!!')
+                    matcher = {}
+                else:
+                    logger.info("\tFound %s missing vfiles (%s of actual files)", len(missing_vfiles),
+                        f'{len(missing_vfiles) / len(actual_files):.1%}')
+                    logger.info("\tLevenshtein (rapidfuzz) matching in ref_doc...")
+                    ans = []
+                    for tag, m_vfile in missing_vfiles:
+                        best_match = min(
+                            actual_files,
+                            key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
+                        )
+                        ans.append(
+                            [
+                                tag,
+                                m_vfile,
+                                best_match,
+                                distance.Levenshtein.distance(m_vfile, best_match),
+                            ]
+                        )
+                        logger.debug('\tmatching for %s -> %s', m_vfile, best_match)
+                    # for reference
+                    self._best_match_df = pd.DataFrame(
+                        ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
                     )
-                    ans.append(
-                        [
-                            tag,
-                            m_vfile,
-                            best_match,
-                            distance.Levenshtein.distance(m_vfile, best_match),
-                        ]
-                    )
-                # for reference
-                self._best_match_df = pd.DataFrame(
-                    ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
-                )
-                logger.info("\t...Levenshtein matching completed")
-                matcher = {
-                    vfile: afile
-                    for vfile, afile in self._best_match_df[
-                        ["missing_vfile", "match_afile"]
-                    ].values
-                }
+                    logger.info("\t...Levenshtein matching completed")
+                    matcher = {
+                        vfile: afile
+                        for vfile, afile in self._best_match_df[
+                            ["missing_vfile", "match_afile"]
+                        ].values
+                    }
                 self._ref_doc_df = pd.DataFrame(
                     {
                         "tag": self.vfile_df.tag,
@@ -580,7 +600,7 @@ class Bib2df_Incremental(LibraryBase):
             df["proposed"] = df.accents.str.replace(
                 r"(\b)([A-Z])( |$)", r"\1\2.\3", case=True, regex=True
             )
-            logger.info(f"Field: authors\nDecode errors: {len(self._last_decode) = }")
+            logger.debug(f"Field: authors\nDecode errors: {len(self._last_decode) = }")
             self._author_map_df = df
             # debug
             self.trie = t
@@ -658,7 +678,7 @@ class Bib2df_Incremental(LibraryBase):
         header_match = re.match(r"\s*@?([a-zA-Z]+)\s*\{\s*([^,]+),", entry)
 
         if not header_match:
-            logger.error("Error: Unable to parse entry header for %s.", entry)
+            logger.warning("Skipping header")
             return None
 
         result = {}
@@ -691,7 +711,7 @@ class Bib2df_Incremental(LibraryBase):
         # Step 1: Extract type and tag
         header_match = re.match(r"(\w+)\{([^,]+),", entry)
         if not header_match:
-            logger.error("Error: Unable to parse entry header.")
+            logger.error("Skipping entry header.")
             return None
         result["type"], result["tag"] = header_match.groups()
 
@@ -904,7 +924,7 @@ class Bib2df_Incremental(LibraryBase):
             self._last_decode = []
             self._ported_df[f] = self._ported_df[f].map(self.tex_to_unicode)
             if len(self._last_decode):
-                logger.info(f"\tField: {f}\t{len(self._last_decode) = }")
+                logger.debug(f"\tField: {f}\t{len(self._last_decode) = }")
                 self._all_unicode_errors[f] = self._last_decode.copy()
             logger.debug(f"Fixed {f}")
 
@@ -1076,7 +1096,7 @@ class Bib2df_Incremental(LibraryBase):
         fn = self.bibtex_file_path.stem + suffix + ".csv"
         p = self._audit_dir_path / fn
         df.to_csv(p, encoding="utf-8")
-        logger.info(f"Audit: dataFrame, {len(df) = }, saved to {p.name}.")
+        logger.debug(f"Audit: dataFrame, {len(df) = }, saved to {p.name}.")
         # check about errors mapper
         if self.errors_mapper and not self._errors_mapper_saved:
             fn = self._audit_dir_path / "errors_mapper.json"

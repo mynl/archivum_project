@@ -491,6 +491,8 @@ def enhance_library(library_obj, ans = None) -> Ans:
     # Unpack library context
     ref_df = library_obj.ref_df
     ref_doc_df = library_obj.ref_doc_df
+    # need to trigger read of _doc_read_df
+    _ = library_obj.doc_df
     doc_df = library_obj._doc_read_df
     config = library_obj.config
     config_path = library_obj.config_path # Path to library root
@@ -520,7 +522,6 @@ def enhance_library(library_obj, ans = None) -> Ans:
     # Join with doc_df to get Hash and metadata
     # new_ref_doc columns: [tag, path]
     # doc_df columns: [path, hash, size, create, ...]
-
     # Inner join: we only care about files that actually exist in the read index
     merged_docs = new_ref_doc.merge(doc_df, on='path', how='inner')
 
