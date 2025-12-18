@@ -102,7 +102,6 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
         default_args["default_formatter"] = default_formatter
 
     default_args = default_args | gt_kwargs
-
     fGT = partial(GT, **default_args)
     display_func = display_func or ip_display
     caption_str = f"{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)"
@@ -332,3 +331,4 @@ def rename(
     if execute:
         new_path.hardlink_to(original_doc_path)
     return True
+

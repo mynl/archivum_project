@@ -14,7 +14,6 @@ dependencies = [
     "arxiv",
     "click",
     "greater_tables",
-    "lark",
     "latexcodec",
     "nameparser",
     "numpy",

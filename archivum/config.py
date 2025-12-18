@@ -1,16 +1,43 @@
 """
 Configuration model for archivum.
 """
-import datetime as dt
 import logging
 from pathlib import Path
-from typing import List, Literal, Optional, Callable, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Literal, Optional, Dict
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
 import yaml
 
-from . import LIBRARIES_DIR
-
 logger = logging.getLogger(__name__)
+
+
+def _get_config_diff(current: dict, base: dict) -> dict:
+    """
+    Returns a dict containing only keys from 'current' that are
+    different from or missing in 'base'. Handles nested dicts recursively.
+    """
+    diff = {}
+    for key, value in current.items():
+        # Case 1: Key does not exist in base -> New setting, must save.
+        if key not in base:
+            diff[key] = value
+            continue
+
+        base_value = base[key]
+
+        # Case 2: Both are dicts -> Recurse to find partial overrides.
+        if isinstance(value, dict) and isinstance(base_value, dict):
+            nested_diff = _get_config_diff(value, base_value)
+            if nested_diff:
+                diff[key] = nested_diff
+
+        # Case 3: Values differ -> Override, must save.
+        elif value != base_value:
+            diff[key] = value
+
+        # Case 4: Values are identical -> Do nothing (inherit from site).
+
+    return diff
+
 
 class Configurator(BaseModel):
     model_config = ConfigDict(
@@ -37,6 +64,16 @@ class Configurator(BaseModel):
     tag_name_mapper: dict[str, str] = Field(default_factory=dict,
         description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
 
+    enhancement_strategies: Dict[str, str] = Field(
+        default_factory=lambda: {
+            'year': 'mode',
+            'journal': 'longest',
+            'default': 'longest'
+        }
+    )
+    enhancement_cutoff_score: float = 75.0
+    enhancement_tag_regex: str = r'[a-z]*$'
+
     def write_template(self, path: Path):
         """Generate a clean default config file at the given path."""
         path = Path(path)
@@ -45,29 +82,89 @@ class Configurator(BaseModel):
         path.write_text(yaml_str, encoding="utf-8")
 
     def save(self, config_path: Path, backup: bool = True) -> None:
-            """Save config into Path as config.yaml and optionally back up."""
-            file_path = config_path / "config.yaml"
-            # 1. Handle Backup (Only if source exists)
-            if backup and file_path.exists():
-                bak_path = config_path / 'config.bak'
-                # Windows allows overwriting hardlinks only if we remove the target first
-                if bak_path.exists():
-                    bak_path.unlink()
-                # Create hardlink (atomic-ish on Windows NTFS)
-                bak_path.hardlink_to(file_path)
+        """
+        Saves the configuration to config.yaml, writing ONLY values that differ
+        from the site defaults (site-config.yaml).
 
-            # 2. Write File
-            # Do not unlink() first; "w" truncates.
-            # For true atomicity on Windows, write to temp and replace,
-            # but direct write is usually sufficient for configs.
-            with file_path.open("w", encoding="utf-8") as f:
-                yaml.safe_dump(
-                    self.model_dump(),
-                    f,
-                    sort_keys=False,
-                    default_flow_style=False,
-                    width=100,
-                    indent=2
-                )
+        Args:
+            config_path (Path): The folder containing the library configuration.
+            backup (bool): If True, creates a .bak copy of the existing config.
+        """
+        file_path = config_path / "config.yaml"
+        site_path = config_path.parent / "site-config.yaml"
+
+        # 1. Load Site Defaults (if available) for comparison
+        site_defaults = {}
+        if site_path.exists():
+            try:
+                with site_path.open('r', encoding='utf-8') as f:
+                    site_defaults = yaml.safe_load(f) or {}
+            except Exception as e:
+                logger.warning(f"Could not load site config for comparison: {e}")
+
+        # 2. Calculate Diff (Current vs Site)
+        # We only want to save specific overrides, not the whole blob.
+        current_data = self.model_dump()
+        data_to_save = _get_config_diff(current_data, site_defaults)
+
+        # 3. Handle Backup
+        if backup and file_path.exists():
+            bak_path = config_path / 'config.bak'
+            if bak_path.exists():
+                bak_path.unlink()
+            bak_path.hardlink_to(file_path)
+
+        # 4. Write Minimal Config
+        with file_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(
+                data_to_save,
+                f,
+                sort_keys=False,
+                default_flow_style=False,
+                width=100,
+                indent=2
+            )
 
 
+def _deep_merge(base: dict, overrides: dict) -> dict:
+    """
+    Recursively merges 'overrides' into 'base'.
+    """
+    for key, value in overrides.items():
+        if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+            base[key] = _deep_merge(base[key], value)
+        else:
+            base[key] = value
+    return base
+
+
+def load_configuration(lib_path: Path, **overrides) -> dict:
+    """
+    Load library config combining site, library and kw overrides.
+
+    Site path lives in lib_path.parent / "site-config.yaml"
+    """
+    config = {}
+
+    site_path = lib_path.parent / "site-config.yaml"
+
+    # Level 1: Site Config
+    if site_path.exists():
+        with open(site_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+    # Level 2: Library Overrides
+    lib_path = lib_path / "config.yaml"
+    if lib_path.exists():
+        with open(lib_path, 'r') as f:
+            lib_config = yaml.safe_load(f) or {}
+            config = _deep_merge(config, lib_config)
+
+    # Level 3: kw arguments
+    config = _deep_merge(config, overrides)
+
+    try:
+        return Configurator(**config)
+    except (ValidationError, OSError) as e:
+        print(e)
+        raise ValueError(f"Failed to load config {lib_path}") from e

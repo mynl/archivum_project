@@ -5,26 +5,26 @@ Equivalent to and based on manager module in file_database.
 
 Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
-
+import datetime as dt
 from importlib.resources import files
+import json
 import logging
 from pathlib import Path
 import subprocess
 
-import yaml
 import pandas as pd
-from pydantic import ValidationError
 from IPython.display import display
 
-from querexfuzz.core import Querexfuzz
+from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
 from .trie import Trie
 from .utilities import TagAllocator
-from .config import Configurator
+from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex
 from .hasher import hash_many
+from .enhancements import enhance_library, Ans
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,8 @@ class Library(LibraryBase):
 
     def __init__(self, library_dir_name: str = "", **overrides):
         """
-        Load YAML config from file. If None, defaults to DEFAULT_LIBRARY.
+        Load YAML config from library name. Combines site, library
+        and overrides.
 
         The archivum-config suffix optional and added if missing.
         If not found in current directory, looks in local (eg. for default config).
@@ -50,25 +51,31 @@ class Library(LibraryBase):
         if not self.config_path.exists():
             # one other idea
             self.config_path = LIBRARIES_DIR / library_dir_name.replace(" ", "-")
-            if not self.config_path.exists():
-                raise FileNotFoundError(
-                    "Library directory does not exist. Create first."
-                )
-        try:
-            raw = yaml.safe_load(
-                (self.config_path / "config.yaml").read_text(encoding="utf-8")
-            )
-            base_config = Configurator.model_validate(raw)
-        except FileNotFoundError:
-            raise
-        except (ValidationError, OSError) as e:
-            raise ValueError(f"Failed to load config {self.config_path}") from e
+        if not self.config_path.exists():
+            raise FileNotFoundError('Cannot find library directory.')
+        # if not self.config_path.exists():
+        #     # one other idea
+        #     self.config_path = LIBRARIES_DIR / library_dir_name.replace(" ", "-")
+        #     if not self.config_path.exists():
+        #         raise FileNotFoundError(
+        #             "Library directory does not exist. Create first."
+        #         )
+        # try:
+        #     raw = yaml.safe_load(
+        #         (self.config_path / "config.yaml").read_text(encoding="utf-8")
+        #     )
+        #     base_config = Configurator.model_validate(raw)
+        # except FileNotFoundError:
+        #     raise
+        # except (ValidationError, OSError) as e:
+        #     raise ValueError(f"Failed to load config {self.config_path}") from e
 
-        # access through config
-        # update and validate; need to merge to avoid repeated args
-        # merged = dict(base_config.model_dump(), **overrides)
-        merged = base_config.model_dump() | overrides
-        self.config = Configurator(**merged)
+        # # access through config
+        # # update and validate; need to merge to avoid repeated args
+        # # merged = dict(base_config.model_dump(), **overrides)
+        # merged = base_config.model_dump() | overrides
+
+        self.config = load_configuration(self.config_path, **overrides)
         self.text_dir_path = BASE_DIR / self.config.text_dir_name
         self.text_dir_full_name = str(self.text_dir_path)
         self.reset()
@@ -251,9 +258,15 @@ class Library(LibraryBase):
         importer is an import_bibtex.Bib2df_Incremental object.
         """
         # extract additions
-        ref_add = importer.ref_df
+        ref_add = importer.ref_df.copy()
         doc_add = importer.doc_df
         ref_doc_add = importer.ref_doc_df
+
+        # avoid proliferation of spurious columns
+        ref_cols = ref_add.columns
+        keep_cols = self.config.ref_columns
+        keep_cols = [i for i in keep_cols if i in ref_cols]
+        ref_add = ref_add[keep_cols]
 
         len_ref_add = len(ref_add)
         len_doc_add = len(doc_add)
@@ -546,7 +559,8 @@ class Library(LibraryBase):
         bt_link = Path(self.config.bibtex_file)
         if bt_link.is_symlink() and bt_link.exists(follow_symlinks=False):
             bt_link.unlink()
-
+        # clear local caches
+        self.reset()
     def initial_import_bibtex_files(self, bibtex_file_list, qd, update=False):
         """
         Iterate import file through a list of tuples (bibtex file, doc_dir).
@@ -613,6 +627,62 @@ class Library(LibraryBase):
         dfa.ported_entries = dfa.ported_entries.astype(int)
         dfa['cum_entries'] = dfa.ported_entries.cumsum()
         return dfa
+
+    @classmethod
+    def list_stats(cls):
+        """Combine stats df for all libraries."""
+        ans = []
+        libs = [d for d in LIBRARIES_DIR.glob('*') if d.is_dir()]
+        for nm in libs:
+            lib = cls(nm.name)
+            ans.append(lib.stats())
+        df = pd.concat(ans, axis=1, keys=[d.name for d in libs], names=['library', 'metric']).fillna(0)
+        df = df.astype(int)
+        return df
+
+    def find_docs(self, dir_path=None):
+        """Find all document files per the config or in provided dir_path."""
+        file_formats = self.config.file_formats
+        dir_path = Path(dir_path) or Path(self.config.doc_dir_name)
+        docs = list()
+        for ff in file_formats:
+            docs.extend(f for f in dir_path.rglob(ff) if f.is_file())
+        return docs
+
+    def enhance(self, update=False):
+        """Run the enhancement process, sort out duplicates etc."""
+        ans = enhance_library(self)
+        timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
+        p = self.config_path / "enhance-audit" / timestamp
+        p.mkdir(parents=True, exist_ok=True)
+        self.save_enhance_audit(ans, p, "Ans")
+        if update:
+            if ans.ref_doc_df is None:
+                raise ValueError('Not updating with no ref doc df')
+
+            self._ref_df = ans.ans_df
+            self._ref_doc_df = ans.ref_doc_df
+            self.save()
+            self.reset()
+
+    def save_enhance_audit_file(self, obj, base_path, name):
+        """Save object as CSV if pandas, else JSON to the enhance-audit folder."""
+        if isinstance(obj, Ans):
+            for f in obj._fields:
+                objobj = getattr(obj, f)
+                if objobj:
+                    self.save_endhance_audit_file(objobj, f'{name}-{f}')
+            return
+
+        if isinstance(obj, (pd.DataFrame, pd.Series)):
+            path = base_path / f'{name}.csv'
+            obj.to_csv(path, encoding="utf-8")
+        else:
+            path = base_path / f'{name}.json'
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(obj, f, indent=4)
+
+        logger.info(f"Audit: {type(obj).__name__} saved to {path.name}.")
 
     # def schedule(self, execute=False):
     #     """Set up the task schedule for the project."""

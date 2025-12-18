@@ -489,7 +489,7 @@ def create(lib_name):
                 local_prompt("BibTeX File"),
                 default=f"\\S\\Telos\\biblio\\{lib_dir_name}-test.bib",
             ),
-            doc_dir_name": click.prompt(local_prompt("doc dir name"),
+            doc_dir_name: click.prompt(local_prompt("doc dir name"),
                 default="\\S\\Library"
             ),
             "full_text": "true",
@@ -549,6 +549,13 @@ def stats():
         return
     logger.debug("Library stats %s", lib)
     qd(lib.stats().reset_index(drop=False))
+
+
+# ========================================================================================
+@entry.command()
+def list_stats():
+    """Display library stats for all libraries."""
+    qd(Library.list_stats(), show_index=True, vrule_widths=(1, 0, 0))
 
 
 # ========================================================================================
@@ -804,7 +811,7 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: i
 
     # create importer
     b = Bib2df_Incremental(
-            bibtex_file_path=bibtex_path,
+            bibtex_file_pgath=bibtex_path,
             doc_dir=doc_dir,
             reference_library=lib,
             add_hashes=add_hashes
@@ -829,13 +836,6 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: i
     type=click.Path(exists=True, dir_okay=True, path_type=Path),
 )
 @click.option(
-    "-r",
-    "--recursive",
-    is_flag=True,
-    show_default=True,
-    help="Search for pdfs recursively when DOC_PATH is a directory.",
-)
-@click.option(
     "-v",
     "--verbose",
     count=True,
@@ -847,13 +847,14 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: i
     is_flag=True,
     help="Actually perform the import; otherwise, do a dry run and report stats.",
 )
-def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
+def import_doc(doc_path: Path, verbose: int, execute: bool):
     """
     Explore importing new documents into the current library. Process
     is to write a temporary bibtex file and open it for editing.
     You can then import that when you are happy. It includes filenames.
 
-    If doc_path is a directory, [r]glob all pdf files in it.
+    If doc_path is a directory, rglob all document files in it.
+    Document file types defined in config.
     """
     if execute:
         logger.info("Execution enabled: changes will be applied.")
@@ -867,18 +868,19 @@ def import_doc(doc_path: Path, recursive: bool, verbose: int, execute: bool):
 
     # find the files
     if doc_path.is_dir():
-        if recursive:
-            doc_paths = list(doc_path.rglob("*.pdf"))
-        else:
-            doc_paths = list(doc_path.glob("*.pdf"))
+        doc_paths = lib.find_docs(doc_path)
         logger.info("Found %s files", len(doc_paths))
     else:
         doc_paths = [doc_path]
+
+    click.echo(f'Found {len(doc_paths)} potential docs for import.')
 
     # process the docs
     docs = []
     bibs = [f"% import from {doc_path.absolute()}"]
     for p in doc_paths:
+        if p.suffix.lower() != '.pdf':
+            click.echo(f'WARNING non-pdf {p.name}')
         try:
             logger.info('gathering import info for %s', p)
             doc = Document(p)

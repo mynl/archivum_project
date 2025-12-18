@@ -73,7 +73,7 @@ class LibraryBase:
 
     def stats_ref_fields(self):
         """Statistics on distinct values by field."""
-        if self.ref_df.emtpy: return pd.DataFrame()
+        if self.ref_df.empty: return pd.DataFrame()
         ans = {}
         for c in self.ref_df.columns:
             vc = self.ref_df[c].value_counts()

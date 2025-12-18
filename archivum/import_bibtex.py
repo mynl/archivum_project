@@ -345,11 +345,8 @@ class Bib2df_Incremental(LibraryBase):
                 )
             else:
                 # actually have documents
-                file_formats = self.reference_library.config['file_formats']
-                docs = list()
-                for ff in file_formats:
-                    docs.extend(f for f in self.doc_dir.rglob(ff) if f.is_file())
-                logger.warning("Found %s afiles (actual document files).", len(docs))
+                docs = self.reference_library.find_docs(self.doc_dir)
+                logger.info("Found %s afiles (actual document files).", len(docs))
                 ans = []
                 for p in docs:
                     p = p.absolute()
@@ -546,7 +543,7 @@ class Bib2df_Incremental(LibraryBase):
                 and not self.reference_library.ref_df.empty
             ):
                 ref_authors = self.distinct("author", self.reference_library.ref_df)
-                logger.warning(
+                logger.info(
                     "Building author Trie from reference library, "
                     f"{len(ref_authors)} distinct authors"
                 )
@@ -555,7 +552,7 @@ class Bib2df_Incremental(LibraryBase):
                 # e.g., it could be a start from scratch library
                 # prime the pump with the author names we have
                 ref_authors = self.distinct("author", self.raw_df)
-                logger.warning(
+                logger.info(
                     "Building author Trie from self.raw_df - no reference library authors; "
                     f"{len(ref_authors) = } distinct authors"
                 )
@@ -621,7 +618,8 @@ class Bib2df_Incremental(LibraryBase):
         logger.debug('working on adjusted entry = %s', entry)
         header_match = re.match(r"@?(\w+)\{([^,]+),", entry)
         if not header_match:
-            logger.error("Error: Unable to parse entry header.")
+            # this is expected, but note it
+            logger.info("Unable to parse entry header (generally expected).")
             return None
         result["type"], result["tag"] = header_match.groups()
 
