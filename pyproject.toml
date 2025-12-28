@@ -12,6 +12,7 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "arxiv",
+    "blake3",
     "click",
     "greater_tables",
     "latexcodec",
@@ -41,8 +42,8 @@ classifiers = [
 ]
 
 [tool.setuptools.packages.find]
+where = ["src"]
 include = ["archivum"]
-exclude = ["docs", "temp"]
 
 [tool.setuptools.dynamic]
 version = { attr = "archivum.__version__" }

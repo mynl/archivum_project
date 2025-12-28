@@ -35,7 +35,7 @@ from .utilities import (
 )
 from .trie import Trie
 from .library_base import LibraryBase
-from .hasher import hash_many
+from .hasher import hash_many3 as hash_many
 
 # set to True to override where audit files are stored to tmp
 # False is default

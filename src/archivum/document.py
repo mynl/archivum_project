@@ -23,6 +23,7 @@ from .arxiv import lookup_arxiv
 from .crossref import lookup_doi, search as lookup_xref_search
 from .utilities import sanitize_windows_component
 from .bibtex import dict_to_bibtex_crossref
+from .hasher import hash_many3
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class Document:
         self._new_doc_path: Optional[Path] = None
         self._text: str = ""
         self.book_mode = book_mode
+        self.hash: str = ""
 
         # Operational Status
         self.status = "NEW"  # NEW, SUCCESS, REVIEW_NEEDED, FAILED
@@ -590,3 +592,48 @@ class Document:
                 f' {hn.middle}' if hn.middle else '')
             out.append(name_out)
         return ' and '.join(out)
+
+
+def discover_docs(doc_path: Path, lib):
+    """
+    Discover documents in doc_path if a directory or about
+    doc_path if it is a file.
+
+    """
+    # find the files(s)
+    if doc_path.is_dir():
+        doc_paths = lib.find_docs(doc_path)
+        logger.info("Found %s files", len(doc_paths))
+    else:
+        doc_paths = [doc_path]
+
+    logger.info(f'Found {len(doc_paths)} potential docs for import.')
+    print(f'Found {len(doc_paths)} potential docs for import.')
+
+    # process the docs
+    docs = []
+    # path -> hash
+    doc_hashes = hash_many3(doc_paths, lib.config.hash_workers)
+    existing_hashes = set(lib.doc_df.hash)
+    duplicates = {k: v for k, v in doc_hashes.items() if v in existing_hashes}
+    new_doc_hashes = {k: v for k, v in doc_hashes.items() if v not in existing_hashes}
+    print(f'{len(new_doc_hashes) = } and {len(duplicates) = }.')
+
+    bibs = [f"% import from {doc_path.absolute()}"]
+    for p, h in new_doc_hashes.items():
+        if p.suffix.lower() != '.pdf':
+            logger.warning(f'WARNING non-pdf {p.name}')
+        try:
+            logger.info('gathering import info for %s', p)
+            doc = Document(p)
+            doc.hash = h
+            doc.process()
+            docs.append(doc)
+            bibs.append(doc.bibtex())
+        except Exception as e:
+            logger.error(f"Error for {p.name}: {e}")
+
+    # for the time being...
+    bib_str = "\n".join(bibs)
+    return bib_str, docs, duplicates
+

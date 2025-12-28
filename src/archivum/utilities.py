@@ -106,16 +106,24 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
     display_func = display_func or ip_display
     caption_str = f"{{caption}} (Truncation: {max_rows} rows/{max_string_length} cols)"
 
-    def qd(df, **kwargs):
-        """Generic display function."""
-        caption = kwargs.get("caption", None)
-        if caption:
-            kwargs["caption"] = caption_str.format(caption=caption)
-        if isinstance(df, list):
-            df = df[:max_rows]
-        else:
-            df = df.head(max_rows)
-        display_func(fGT(df, **kwargs))
+    if max_rows > 0:
+        def qd(df, **kwargs):
+            """Generic display function."""
+            caption = kwargs.get("caption", None)
+            if caption:
+                kwargs["caption"] = caption_str.format(caption=caption)
+            if isinstance(df, list):
+                df = df[:max_rows]
+            else:
+                df = df.head(max_rows)
+            display_func(fGT(df, **kwargs))
+    else:
+        def qd(df, **kwargs):
+            """Generic display function."""
+            caption = kwargs.get("caption", None)
+            if caption:
+                kwargs["caption"] = caption_str.format(caption=caption)
+            display_func(fGT(df, **kwargs))
 
     return qd
 

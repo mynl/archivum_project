@@ -2,6 +2,7 @@
 Finding duplicates, enhancing records, etc.
 """
 from collections import namedtuple
+from functools import partial
 import json
 import logging
 from difflib import SequenceMatcher
@@ -9,6 +10,8 @@ from functools import reduce
 from typing import Dict, List, Any, Callable, Tuple, Optional
 from pathlib import Path
 import re
+import unicodedata
+from IPython.display import display
 
 import fitz  # PyMuPDF
 import networkx as nx
@@ -34,6 +37,22 @@ Ans = namedtuple("Ans", [
     "title_map",        # Dict[tag -> best_title]
     "G"                 # The NetworkX graph object
 ])
+
+# A small, practical English stop-word set for titles.
+# Tune as you like (e.g., add domain-specific filler words).
+_DEFAULT_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "a", "an", "and", "are", "as", "at", "be", "but", "by",
+        "for", "from", "has", "have", "had", "he", "her", "hers",
+        "him", "his", "i", "if", "in", "into", "is", "it", "its",
+        "me", "my", "no", "not", "of", "on", "or", "our", "ours",
+        "she", "so", "such", "than", "that", "the", "their", "theirs",
+        "them", "then", "there", "these", "they", "this", "those",
+        "to", "too", "us", "was", "we", "were", "what", "when", "where",
+        "which", "who", "whom", "why", "with", "will", "you", "your", "yours",
+    }
+)
+
 
 # =================REFERENCES=========================
 # --- 1. Strategy Registry ---
@@ -147,25 +166,38 @@ def pick_best_title(t1: str, t2: str) -> str:
 
 
 # --- 3. Duplicate Identification (Blocking & Matching) ---
-def find_tag_duplicates(ref_df: pd.DataFrame, config: Configurator) -> pd.DataFrame:
+def find_duplicates(ref_df: pd.DataFrame, duplicate: str, config: Configurator) -> pd.DataFrame:
     """
     Identifies potential duplicate references within 'AuthorYYYY' blocks.
 
     Creates pairs_df with columns base_tag, tag_1, tag_2, score_mean.
 
-    Possible duplicates must have mean score >= config.enhancement_cutoff_score
+    Possible duplicates must have mean score >= config.enhancement_cutoff_score.
+
+    duplicate, field name, can be tag (usual operation on ref_df) or hash to
+    use on doc_df.
     """
+    assert duplicate in ('tag', 'hash'), f"duplicate = tag | hash, not {duplicate}"
     df_block = ref_df.copy()
-    df_block['base_tag'] = df_block['tag'].str.replace(config.enhancement_tag_regex, '', regex=True)
+    if duplicate == 'tag':
+        df_block['base_tag'] = df_block['tag'].str.replace(config.enhancement_tag_regex, '', regex=True)
+        grouped = df_block.groupby('base_tag')
+    elif duplicate == 'hash':
+        df_block.title = df_block.title.fillna('')
+        grouped = df_block.groupby('hash')
 
     results = []
-    grouped = df_block.groupby('base_tag')
-
+    # by hash, we KNOW these are duplicates, so can ignore the matching...
+    cut_off = config.enhancement_cutoff_score if duplicate == 'tag' else 0.
     for base_tag, group in grouped:
         if len(group) < 2: continue
 
         titles = group['title'].tolist()
-        tags = group['tag'].tolist()
+        if duplicate == 'tag':
+            tags = group[duplicate].tolist()
+        elif duplicate == 'hash':
+            tags = group['tag'].tolist()
+            # tags = list(group.index)
         n = len(titles)
 
         # 3 Scorer Ensemble
@@ -176,7 +208,7 @@ def find_tag_duplicates(ref_df: pd.DataFrame, config: Configurator) -> pd.DataFr
         m_final = (m_ratio + m_token + m_partial) / 3.0
 
         rows, cols = np.triu_indices(n, k=1)
-        mask = m_final[rows, cols] >= config.enhancement_cutoff_score
+        mask = m_final[rows, cols] >= cut_off
 
         for r, c in zip(rows[mask], cols[mask]):
             results.append({
@@ -197,13 +229,15 @@ def resolve_cluster_titles(cluster_tags: list, ref_map: dict) -> List[dict]:
     Sub-clusters a raw list into safe groups and picks a Title Winner for each.
 
     For example, if the cluster is Analysis I and Analysis II that is split into
-    two. If it is Analysis and Analysis. that is one cluster with title Analysis.
+    two. If it is "Analysis" and "Analysis."" that is one cluster with title
+    "Analysis".
 
     cluster_tags = tags of members of the cluster
     ref_map = tags to title
 
     returns a list of dicts {members, source_id, mapped_title}
     """
+    # breakpoint()
     titles = [ref_map[t] for t in cluster_tags]
     sub_groups: List[List[Tuple[str, str]]] = [] # List of lists of (tag, title)
 
@@ -245,20 +279,21 @@ def resolve_cluster_titles(cluster_tags: list, ref_map: dict) -> List[dict]:
     return resolved
 
 
-def create_golden_record(cluster: pd.DataFrame, survivor_idx: Any, config: Configurator) -> pd.Series:
+def create_golden_record(cluster: pd.DataFrame, survivor_idx: Any,
+                         config: Configurator) -> pd.Series:
     """
     Merges a cluster into one record based on config strategies.
     """
     # Start with Survivor to ensure valid baseline
     golden = cluster.loc[survivor_idx].copy()
 
-    # put tag back
+    # put tag back and add to ignored_fields -> can't change it again!
     golden['tag'] = survivor_idx
 
     ignored_fields = {'cluster_id', 'score', 'drop', 'source_id', 'mapped_title'}
 
     for col in cluster.columns:
-        if col in ignored_fields or col not in golden.index:
+        if col == 'tag' or col in ignored_fields or col not in golden.index:
             # note this does not remove the columns hence REMOVE step below
             continue
 
@@ -273,9 +308,16 @@ def create_golden_record(cluster: pd.DataFrame, survivor_idx: Any, config: Confi
         # Execute Strategy
         best_val = strategy_func(cluster[col])
 
-        if pd.notna(best_val):
-            golden[col] = best_val
+        try:
+            if pd.notna(best_val):
+                golden[col] = best_val
+        except ValueError:
+            best_val = best_val.iloc[0]
+            if pd.notna(best_val):
+                golden[col] = best_val
 
+            # print(f'Value error, {col=} and best-val=\n', best_val)
+            # print(cluster[col])
     # 4. REMOVE: Explicitly remove the processing columns
     # We use errors='ignore' in case one of them is missing for some reason
     golden = golden.drop(labels=ignored_fields, errors='ignore')
@@ -284,14 +326,16 @@ def create_golden_record(cluster: pd.DataFrame, survivor_idx: Any, config: Confi
 
 
 # --- 5. Main Pipeline ---
-def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
+def process_data_df(ref_df: pd.DataFrame, duplicate: str, config: Configurator) -> Ans:
     """
     Full Pipeline:
     1. Find Duplicates -> 2. Graph Cluster -> 3. Resolve (Safe/Beauty) -> 4. Merge Fields
 
-    ref_df = Library reference dataframe.
+    ref_df = Library reference dataframe or doc-related with hash field
 
-    If debug, return namedtuple
+    duplicate = tag | hash
+
+    Returns a namedtuple with all the details, ans_df is the most important.
 
         pairs_df            df of base_tag (truncated) tag_1 tag_2 score_mean defining
                             clusters
@@ -303,12 +347,10 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
         ans_df              one row per reference after de-duplication with best title
                             and enriched cols from other elements of the cluster. Has
                             len(df) - ... rows.
-
-    else just return ans_df
-
     """
+    assert duplicate in ('tag', 'hash'), f"duplicate = tag | hash, not {duplicate}"
     # 1. Identify Pairs
-    pairs_df = find_tag_duplicates(ref_df, config)
+    pairs_df = find_duplicates(ref_df, duplicate, config)
 
     # 2. Build Graph, edges connect potential duplicates
     G = nx.Graph()
@@ -317,8 +359,14 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
             G.add_edge(row['tag_1'], row['tag_2'], score=row['score_mean'])
 
     # Ensure all tags are nodes
-    G.add_nodes_from(ref_df['tag'].unique())
-    ref_map = ref_df.set_index('tag')['title'].to_dict()
+    if duplicate == 'tag':
+        G.add_nodes_from(ref_df[duplicate].unique())
+        ref_map = ref_df.set_index(duplicate)['title'].to_dict()
+    elif duplicate == 'hash':
+        G.add_nodes_from(ref_df['tag'].unique())
+        ref_map = ref_df[['tag', 'title']].set_index('tag')['title'].to_dict()
+        # G.add_nodes_from(ref_df.index.unique())
+        # ref_map = ref_df['title'].to_dict()
 
     # 3. Resolve Clusters
     # Pre-calculate maps for dataframe enrichment
@@ -342,18 +390,27 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
 
     # Enrich original DF to prepare for merging
     work_df = ref_df.copy()
-    work_df['cluster_id'] = work_df['tag'].map(cluster_id_map)
-    work_df['source_id'] = work_df['tag'].map(source_id_map)
-    work_df['mapped_title'] = work_df['tag'].map(title_map)
+    if duplicate == 'tag':
+        work_df['cluster_id'] = work_df[duplicate].map(cluster_id_map)
+        work_df['source_id'] = work_df[duplicate].map(source_id_map)
+        work_df['mapped_title'] = work_df[duplicate].map(title_map)
+        work_df = work_df.set_index(duplicate, drop=False)
+    elif duplicate == 'hash':
+        work_df['cluster_id'] = work_df['tag'].map(lambda x: cluster_id_map.get(x, x))
+        work_df['source_id'] = work_df['tag'].map(lambda x: source_id_map.get(x, x))
+        work_df['mapped_title'] = work_df['tag'].map(lambda x: title_map.get(x, x))
+        work_df = work_df.set_index('tag', drop=False)
+        # work_df['cluster_id'] = work_df.index.map(lambda x: cluster_id_map.get(x, x))
+        # work_df['source_id'] = work_df.index.map(lambda x: source_id_map.get(x, x))
+        # work_df['mapped_title'] = work_df.index.map(lambda x: title_map.get(x, x))
+        # already uses the index
 
     # 4. Merge / Scavenger Hunt
-    # Set index to 'tag' so lookup is O(1) and direct
-    work_df = work_df.set_index('tag', drop=False)
+    # Set index to duplicate so lookup is O(1) and direct
     final_records = []
-
-    for _, group in work_df.groupby('cluster_id'):
+    for _, group in tqdm(work_df.groupby('cluster_id'), desc="Consolidating connected components"):
         # We already know the survivor's tag (source_id)
-        # Since 'tag' is now the index, this IS the survivor_idx
+        # Since duplicate is now the index, this IS the survivor_idx
         survivor_idx = group['source_id'].iloc[0]
 
         # Pass it directly.
@@ -363,13 +420,27 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
         # Enforce the specific 'Beauty Contest' title
         golden['title'] = group['mapped_title'].iloc[0]
         golden['merge_count'] = len(group)
-
         final_records.append(golden)
 
-    ans_df = pd.DataFrame(final_records).reset_index(drop=True)
+    # final records can be df or series
+    try:
+        ans_df = pd.DataFrame(final_records)
+        if len(ans_df.loc[ans_df.index != ans_df.tag].head(10)) > 0:
+            print('TAG ISSUE!! Ignoring but INVESTIGATE')
+        ans_df = pd.DataFrame(final_records).reset_index(drop=True)
+    except pd.errors.InvalidIndexError:
+        logger.info('Consolidating golden records using DataFrame mode')
+        print('Consolidating golden records using DataFrame mode')
+        final_records_frames = [i if isinstance(i, pd.DataFrame) else i.to_frame().T
+                                for i in final_records]
+        ans_df = pd.concat(final_records_frames).reset_index(drop=True)
 
     # audit: Filter for rows where the Tag is NOT the Winner
-    dropped_df = work_df[work_df['tag'] != work_df['source_id']].copy()
+    if duplicate == 'tag':
+        dropped_df = work_df[work_df[duplicate] != work_df['source_id']].copy()
+    else:
+        dropped_df = work_df[work_df['tag'] != work_df['source_id']].copy()
+        # dropped_df = work_df[work_df.index != work_df['source_id']].copy()
 
     # Add the Survivor's title for comparison
     # Map the source_id to the title map we already built
@@ -390,8 +461,14 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
         )
 
     return Ans(
-        ans_df=ans_df, ref_doc_df=None, work_df=work_df, dropped_df=dropped_df,
-        pairs_df=pairs_df, cluster_id_map=cluster_id_map, source_id_map=source_id_map,
+        # working copies often dup tag as index which is painful
+        ans_df=ans_df,
+        ref_doc_df=None,
+        work_df=work_df.reset_index(drop=True),
+        dropped_df=dropped_df.reset_index(drop=True),
+        pairs_df=pairs_df,
+        cluster_id_map=cluster_id_map,
+        source_id_map=source_id_map,
         title_map=title_map, G=G)
 
 
@@ -400,7 +477,7 @@ def process_reference_df(ref_df: pd.DataFrame, config: Configurator) -> Ans:
 class FileFeatureCache:
     """
     Manages persistent caching of PDF features to avoid expensive re-scanning.
-    Stores data in 'file_features.json' inside the library config directory.
+        Stores data in 'file_features.json' inside the library config directory.
     """
 
     def __init__(self, config_path: Path):
@@ -478,9 +555,311 @@ def scan_doc_features(path: Path) -> Dict[str, Any]:
     return features
 
 
-def enhance_library(library_obj, ans = None) -> Ans:
+# organizer routines for doc naming
+
+def doc_merged_df(lib):
     """
-    Main entry point.
+    Make the merge for enhancing doc (filenames).
+
+    """
+    return pd.merge(
+                pd.merge(lib.ref_df, lib.ref_doc_df, on='tag', how='right'),
+                lib.doc_df, on='path', how='outer')
+
+
+def longest_n_words(words: list[str], n: int) -> list[str]:
+    """Return the longest n words, preserving original order among the selected words."""
+    if n <= 0:
+        return []
+    idx = sorted(range(len(words)), key=lambda i: len(words[i]), reverse=True)[:n]
+    keep = set(idx)
+    return [w for i, w in enumerate(words) if i in keep]
+
+
+def short_title(
+    title: str,
+    n_words: int,
+    *,
+    stop_words: set[str] | frozenset[str] = _DEFAULT_STOP_WORDS,
+    keep_numbers: bool = True,
+    use_longest: bool = True
+) -> str:
+    """
+    Convert a title into a short title:
+    - removes punctuation (treated as separators)
+    - removes stop words
+    - truncates to the first n_words remaining tokens or
+      longest n_words, retaining order (longer words are
+      more meaningful?!)
+
+    Parameters
+    ----------
+    title:
+        Input title string.
+    n_words:
+        Maximum number of words to keep (<= 0 yields "").
+    stop_words:
+        Stop-word set; compared case-insensitively.
+    keep_numbers:
+        If False, drops tokens that are purely numeric.
+    use_longest:
+        If True, pick the longest n_words
+
+    Returns
+    -------
+    str
+        Shortened title as a space-separated string.
+    """
+    # Handle trivial cases early.
+    if not title or n_words <= 0:
+        return ""
+
+    # Accents are no longer “inside” the letters;
+    # they are separate combining characters
+    # K = compatible, Decomposed
+    cleaned = unicodedata.normalize("NFKD", title)
+
+    # Remove punctuation-ish characters.
+    # Keep alphanumerics and space; everything else becomes "".
+    cleaned = re.sub(r"[^0-9A-Za-z \-]+", "", cleaned)
+
+    # Split into candidate tokens.
+    tokens = [t for t in cleaned.lower().split() if t]
+
+    # Filter stop words and (optionally) pure numbers.
+    stop = {w.casefold() for w in stop_words}
+    kept: list[str] = []
+    for tok in tokens:
+        # Drop pure numbers if requested.
+        if (not keep_numbers) and tok.isdigit():
+            continue
+        # Drop stop words (case-insensitive).
+        if tok.casefold() in stop:
+            continue
+        kept.append(tok)
+        # Truncate as soon as we hit n_words.
+        if len(kept) >= n_words:
+            break
+
+    if use_longest and len(kept) > n_words:
+        kept = longest_n_words(kept, n_words)
+
+    return " ".join(kept)
+
+
+_WINDOWS_RESERVED_NAMES: frozenset[str] = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
+def short_author(
+    author_field: str,
+    max_authors: int = 3,
+) -> str:
+    """
+    Convert a BibTeX-style author field like:
+        "Last, First and van Helsing, Abraham and Curie, Marie"
+    into a short author slug:
+        "last-van-helsing-curie"
+
+    Rules
+    -----
+    - Removes '{', '}', and '!' everywhere.
+    - Splits on the BibTeX author separator "and" (case-insensitive, whitespace tolerant).
+    - If an author chunk contains a comma, takes the family name as the substring before the first comma.
+    - If no comma appears in the chunk, treats the chunk as a title-like string and falls back to:
+        paper_title_to_short_title(chunk, 3)
+      then dash-joins those words.
+    - De-unicodes (NFKD + ASCII ignore) and slugifies conservatively.
+    - Returns at most `max_authors` family-name tokens, joined by "-".
+    """
+    def _deunicode_ascii(x: str) -> str:
+        x_norm = unicodedata.normalize("NFKD", x)
+        return x_norm.encode("ascii", "ignore").decode("ascii")
+
+    # Remove BibTeX braces and '!' globally.
+    raw = (author_field or "").replace("{", "").replace("}", "").replace("!", "").strip()
+    if not raw or max_authors <= 0:
+        return ""
+
+    # Split on BibTeX "and".
+    parts = [p.strip() for p in re.split(r"\s+\band\b\s+", raw, flags=re.IGNORECASE) if p.strip()]
+
+    family_tokens: list[str] = []
+    for part in parts:
+        if len(family_tokens) >= max_authors:
+            break
+
+        if "," in part:
+            tok = part.split(",", 1)[0].strip()
+            tok = _deunicode_ascii(tok)
+            if tok:
+                family_tokens.append(tok)
+        else:
+            # Not in "Last, First" form: treat as a title-like string.
+            tok = short_title(part, 3)
+            if tok:
+                family_tokens.append(tok)
+
+    return "-".join(family_tokens)
+
+
+def sanitize(
+    s: str,
+    *,
+    default: str = "untitled",
+    max_len: int = 180,
+    lowercase: bool = False,
+) -> str:
+    """
+    Sanitize a string into a Windows-friendly filename:
+    - replaces Unicode non-ASCII with nearest ASCII equivalent (diacritics stripped)
+    - removes Windows-invalid filename characters: <>:"/\\|?* and control chars
+    - collapses multiple "-" into one
+    - trims trailing spaces and dots (Windows disallows)
+    - avoids Windows reserved device names (CON, PRN, AUX, NUL, COM1.., LPT1..)
+    - truncates to max_len (and re-trims trailing dots/spaces after truncation)
+
+    Parameters
+    ----------
+    s:
+        Input string.
+    default:
+        Fallback if the result becomes empty.
+    max_len:
+        Maximum output length in characters.
+    lowercase:
+        If True, lowercases the slug.
+
+    Returns
+    -------
+    str
+        A Windows-safe filename slug (no extension is added/removed).
+    """
+    # Normalize to decomposed form, then strip diacritics by encoding to ASCII.
+    # This is dependency-free and yields a reasonable "nearest equivalent" for Latin scripts.
+    s_norm = unicodedata.normalize("NFKD", s or "")
+    s_ascii = s_norm.encode("ascii", "ignore").decode("ascii")
+
+    # Remove Windows-invalid characters and control characters.
+    # Invalid set: < > : " / \ | ? * plus ASCII control 0-31.
+    s_ascii = re.sub(r'[<>:"/\\\\|?*]', "", s_ascii)
+    s_ascii = "".join(ch for ch in s_ascii if ord(ch) >= 32)
+
+    # Keep a conservative character set: letters, digits, hyphen, dot.
+    # Replace everything else with hyphen as a separator.
+    s_ascii = re.sub(r"[^A-Za-z0-9. ]+", "-", s_ascii)
+
+    # Collapse multiple hyphens, then trim hyphens.
+    s_ascii = re.sub(r"-{2,}", "-", s_ascii).strip("-")
+
+    # Optional case normalization.
+    if lowercase:
+        s_ascii = s_ascii.lower()
+
+    # Windows forbids trailing spaces and dots in filenames.
+    s_ascii = s_ascii.rstrip(" .")
+
+    # Avoid empty result.
+    if not s_ascii:
+        s_ascii = default
+
+    # Avoid reserved device names (case-insensitive), both bare and before an extension.
+    # Example: "con.txt" is also invalid.
+    base = s_ascii.split(".", 1)[0]
+    if base.upper() in _WINDOWS_RESERVED_NAMES:
+        s_ascii = f"{s_ascii}-file"
+
+    # Enforce max length, then re-trim forbidden trailing chars.
+    if max_len is not None and max_len > 0 and len(s_ascii) > max_len:
+        s_ascii = s_ascii[:max_len].rstrip(" .-")
+
+    # Final fallback if truncation nuked everything.
+    if not s_ascii:
+        s_ascii = default
+
+    return s_ascii
+
+
+def robust_str_convert(df, column, default="Unknown"):
+    # Convert to string first to catch numeric types
+    # np.where handles vectorization; .isna() catches None/NaN
+    s = df[column].astype(str)
+    df[column] = np.where(
+        (df[column].isna()) | (s == "nan") | (s == "None") | (s == ""),
+        default,
+        s
+    )
+    return df
+
+
+def title_from_path(path: str):
+    """Guess a title from path string."""
+    title = ' '.join(i for i in re.split(r'[ \-_,]', Path(path).stem)
+                     if i.isalpha())
+    return title or "Unknown"
+
+
+def canonical_name(doc_hash: str,
+                   author: str,
+                   title: str,
+                   year: str,
+                   file_name: str,
+                   hash_len: int = 10, max_authors: int = 3,
+                   n_title_words: int = 10):
+    """Canonical doc name from ingredients. Assumes row has reasonable defaults."""
+    # guess possible title from filename if missing
+    if title == "Unknown" and file_name != "":
+        title = title_from_path(file_name)
+
+    return ('_'.join([
+        doc_hash[:hash_len],
+        str(year)[:4] or '9999',   # just to be careful
+        short_author(author, max_authors) or "Unknown",
+        sanitize(short_title(title, n_title_words)) or "Unknown",
+        ])
+    )
+
+
+def canonical_name_from_row(row):
+    return canonical_name(row.hash,
+                          row.author,
+                          row.title,
+                          row.year,
+                          row.path)
+
+
+def path_from_row(row, base_dir):
+    original = Path(row.path)
+    fn = canonical_name_from_row(row)
+    return str((base_dir / fn[:2] / fn).with_suffix(original.suffix).as_posix())
+
+
+def save_from_row(row, base_path):
+    """Do the "renaming" work: create new hardlink to the original file."""
+    original = Path(row.path)
+    fn = canonical_name_from_row(row)
+    path = (base_path / fn[:2] / fn).with_suffix(original.suffix)
+    if path.exists():
+        path.unlink()
+        # return 'exists'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.hardlink_to(original)
+    except OSError as e:
+        print(f'OS error for {fn}\n{e}')
+        print('continuing')
+        return 'error'
+    else:
+        return 'ok'
+
+
+# Main enhance routines, called from library
+def enhance_ref_df(library_obj, ans = None) -> Ans:
+    """
+    Main entry point for reference enhancement.
     1. Deduplicates References (Metadata).
     2. Migrates File Links (Hostile Takeover).
     3. Elects Best File (Physical).
@@ -499,7 +878,7 @@ def enhance_library(library_obj, ans = None) -> Ans:
 
     # --- Phase 1: Metadata Deduplication ---
     # allow quicker round tripping for debug
-    ans = ans or process_reference_df(ref_df, config)
+    ans = ans or process_data_df(ref_df, "tag", config)
     logger.info(f"Metadata Dedupe: {len(ref_df)} refs -> {len(ans.ans_df)} unique refs.")
 
     # --- Phase 2: The Hostile Takeover (Link Migration) ---
@@ -509,14 +888,16 @@ def enhance_library(library_obj, ans = None) -> Ans:
 
     new_ref_doc = ref_doc_df.copy()
 
-    # Map tags to their survivor. If no mapping exists (singleton), use original tag.
+    # Map tags to their survivor.
     # source_id_map contains ALL tags processed, so this covers everything in ref_df.
-    new_ref_doc['tag'] = new_ref_doc['tag'].map(ans.source_id_map).fillna(new_ref_doc['tag'])
+    assert set(new_ref_doc.tag) <= set(ans.source_id_map.keys()), "MISSING tag KEYS, unexpected"
+    new_ref_doc['tag'] = new_ref_doc['tag'].map(ans.source_id_map)  # not needed-->.fillna(new_ref_doc['tag'])
 
+    # because we mapped everything, this must be empty -> all tags are valid
     # Filter out links that now point to tags that don't exist in our final ans_df
     # (Clean up any pre-existing orphans)
     valid_tags = set(ans.ans_df['tag'])
-    new_ref_doc = new_ref_doc[new_ref_doc['tag'].isin(valid_tags)]
+    assert len(new_ref_doc[~new_ref_doc['tag'].isin(valid_tags)]) == 0, "Should be impossible"
 
     # --- Phase 3: Logical Hash Deduplication ---
     # Join with doc_df to get Hash and metadata
@@ -531,6 +912,8 @@ def enhance_library(library_obj, ans = None) -> Ans:
     merged_docs['path_len'] = merged_docs['path'].astype(str).str.len()
     merged_docs = merged_docs.sort_values(['tag', 'hash', 'path_len'])
 
+    # weirdly, there are several instances where the Mendeley bibtex file has
+    # the exact same doc in twice!
     unique_links = merged_docs.drop_duplicates(subset=['tag', 'hash'], keep='first')
 
     # --- Phase 4: Feature Scan & Caching ---
@@ -590,3 +973,32 @@ def enhance_library(library_obj, ans = None) -> Ans:
 
     # Return new Ans tuple with the updated ref_doc_df
     return ans._replace(ref_doc_df=final_ref_doc)
+
+
+def enhance_doc_df(library_obj, base_dir: str = "") -> Ans:
+    """Deal with the docs."""
+    config = library_obj.config
+    df = doc_merged_df(library_obj)
+    # part relevant for naming
+    bit = df[['tag', 'title', 'author', 'year', 'hash', 'path', 'size', 'mod', 'create']].copy().fillna('')
+
+    # process work - find hash duplicates, figure better names
+    da2 = process_data_df(bit, 'hash', config)
+
+    base = Path(base_dir)
+    base.mkdir(parents=True, exist_ok=True)
+
+    # add new file names to new_docs
+    hardlink_namer = partial(path_from_row, base_dir=base)
+    new_docs = da2.ans_df[['tag', 'title', 'author', 'year', 'hash', 'path']].copy()
+    new_docs['hardlink'] = new_docs.apply(hardlink_namer, axis=1)
+    # hash -> hardlink name
+    hash_hardlink_mapper = new_docs[['hash', 'hardlink']].set_index('hash', drop=True).hardlink.to_dict()
+
+    # do the work...obvs some duplication here...
+    hardlink_maker = partial(save_from_row, base_path=base)
+    audit = new_docs.apply(hardlink_maker, axis=1)
+    print('audit: should all be "ok"')
+    print(audit.value_counts())
+
+

@@ -105,14 +105,16 @@ class LibraryBase:
         # }, index=['Value']).T
         return stats
 
-    def distinct_value_counts(self, field):
-        """Return the top 20 distinct value counts for field."""
+    def distinct_value_counts(self, field,  *, top=20, frame_name='database'):
+        """Return the top top distinct value counts for field in frame_name."""
+        df = getattr(self, frame_name, None)
+        if df is None: return None
         return (None
-                if field not in self.database else
-                    self.database[field]
+                if field not in df else
+                    df[field]
                         .value_counts()
                         .to_frame('count')
                         .sort_values('count', ascending=False)
-                        .head(20)
+                        .head(top)
                 )
 

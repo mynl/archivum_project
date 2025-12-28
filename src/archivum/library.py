@@ -23,8 +23,8 @@ from .utilities import TagAllocator
 from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex
-from .hasher import hash_many
-from .enhancements import enhance_library, Ans
+from .hasher import hash_many3 as hash_many
+from .enhancements import enhance_ref_df, Ans
 
 logger = logging.getLogger(__name__)
 
@@ -564,7 +564,7 @@ class Library(LibraryBase):
         # clear local caches
         self.reset()
 
-    def initial_import(self, *, dir_name="", dir_iterable=None, qd=display, update=False):
+    def initial_import(self, *, dir_name="", dir_iterable=None, errors_mapper=None, qd=display, update=False):
         """
         Iterate import dir_name or iterate over if iterable. Find
         ! bibtex file - error if the bibtex file is not unique.
@@ -589,12 +589,12 @@ class Library(LibraryBase):
             bibtex_file = find_bibtex(doc_dir)
             if bibtex_file is not None:
                 # print(bibtex_file, doc_dir)
-                self.initial_import_bibtex_file(bibtex_file, doc_dir, qd, update)
+                self.initial_import_bibtex_file(bibtex_file, doc_dir, errors_mapper, qd, update)
             else:
                 logger.warning('SKIPPING: No unique bibtex found for %s', doc_dir)
                 continue
 
-    def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, qd=display, update=True):
+    def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, errors_mapper=None, qd=display, update=True):
         """
         Import a single bibtex file into library.
 
@@ -615,6 +615,7 @@ class Library(LibraryBase):
             bibtex_file_path=bibtex_file_path,
             doc_dir=doc_dir,
             reference_library=self,
+            errors_mapper=errors_mapper,
             fillna=True,
             qd=qd,
         )
@@ -663,15 +664,22 @@ class Library(LibraryBase):
     def find_docs(self, dir_path=None):
         """Find all document files per the config or in provided dir_path."""
         file_formats = self.config.file_formats
-        dir_path = Path(dir_path) or Path(self.config.doc_dir_name)
+        dir_path = (Path(self.config.doc_dir_name)
+                    if dir_path is None else Path(dir_path))
         docs = list()
         for ff in file_formats:
             docs.extend(f for f in dir_path.rglob(ff) if f.is_file())
         return docs
 
-    def enhance(self, update=False):
-        """Run the enhancement process, sort out duplicates etc."""
-        ans = enhance_library(self)
+    def enhance_refs(self, update=False):
+        """
+        Run the enhancement process on references only, sort out duplicates etc.
+
+        Designed as a one-time run on initial import. Thereafter the import
+        process itself guards against duplicates. It only addresses references and
+        makes no change to docs. See enhance_docs for the corresponding doc version.
+        """
+        ans = enhance_ref_df(self)
         timestamp = dt.datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
         p = self.config_path / "enhance-audit" / timestamp
         p.mkdir(parents=True, exist_ok=True)
