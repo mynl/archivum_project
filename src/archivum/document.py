@@ -637,3 +637,26 @@ def discover_docs(doc_path: Path, lib):
     bib_str = "\n".join(bibs)
     return bib_str, docs, duplicates
 
+
+def elaborate_duplicates(lib, duplicates, trim=True):
+    """
+    Find the refs corresponding to duplicate hashes from discover_docs.
+
+    Return the ref if available. Non-matched returned in missing_refs
+
+    Docs in missing_refs already exist in the Library but are orphans
+    with no associated reference record.
+    """
+    # find the docs
+    docs = lib.doc_df.loc[lib.doc_df.hash.isin(duplicates.values())]
+    # find the doc-refs
+    dr = lib.ref_doc_df.loc[lib.ref_doc_df.path.isin(docs.path)]
+    # find the refs
+    refs = lib.ref_df.loc[lib.ref_df.tag.isin(dr.tag)].copy()
+    refs['path'] = refs.tag.map(dr.set_index('tag').path.get)
+    if trim:
+        refs = refs[['tag', 'year', 'author', 'title', 'path']]
+    # still missing
+    missing_refs = docs.loc[~docs.path.isin(dr.path)]
+    # result
+    return refs, missing_refs
