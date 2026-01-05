@@ -26,6 +26,7 @@ python -m archivum.definitive_loader
 """
 from functools import partial
 from importlib.resources import files
+import json
 from pathlib import Path
 import argparse
 import logging
@@ -33,12 +34,16 @@ import logging.config
 import yaml
 
 import numpy as np
+import pandas as pd 
 
 import archivum.library as arcl
 import archivum.utilities as arcu
 import archivum.cli as cli
 import archivum.enhancements as arce
+from .enhancements import Ans
 
+
+logger = None
 
 qd = arcu.make_qd(
         display_func=print,
@@ -76,19 +81,53 @@ def ulprint(line, ul='='):
 
 
 def setup_logging():
-    # set up logging
-    logger_config = "logging-debug-file-only.yaml"
-    logger_config = "logging-warning.yaml"
-    logger_config = "logging-info-file-only.yaml"
+    # set up logging to permanent logging folder
+    global logger
+    logger_config = "logging-loader.yaml"
     with (files("archivum.configurations") / logger_config).open("r") as f:
         cfg = yaml.safe_load(f)
     logging.config.dictConfig(cfg)
 
-    logger = logging.getLogger("archivum.TEST")
-    logger.debug("debug - test")
-    logger.info("info - test")
-    logger.warning("warning - test")
-    logger.error("error - test")
+    logger = logging.getLogger(__name__)
+    logger.info("definitive_loader logger started")
+
+
+def discover_sources():
+    """Initial load sources only."""
+    source_root = Path("C:\\temp\\temp-arc\\original-sources")
+    all_base_files = [
+       source_root  / "Library",
+       source_root  / "Books",
+       source_root  / "Book_scans",
+    ]
+    new_base_files = [f for f in Path("C:\\temp\\temp-arc\\new-sources\\").glob("*") if f.is_dir()]
+
+    return all_base_files + new_base_files
+
+
+def load_enhance_audit(base_path: Path, name: str = "Ans") -> Ans:
+    """Read back the enhance-audit file."""
+    data = {}
+
+    for field in Ans._fields:
+        stem = f"{name}-{field}"
+        csv_path = base_path / f"{stem}.csv"
+        json_path = base_path / f"{stem}.json"
+
+        if field.endswith("df") and csv_path.exists():
+            data[field] = pd.read_csv(csv_path, index_col=0, encoding="utf-8")
+        elif field.endswith("map") and json_path.exists():
+            with json_path.open("r", encoding="utf-8") as f:
+                content = json.load(f)
+            # Check if this specific JSON represents the Graph
+            if field == "G" and isinstance(content, dict) and "nodes" in content:
+                data[field] = nx.readwrite.json_graph.node_link_graph(content)
+            else:
+                data[field] = content
+        else:
+            data[field] = None
+
+    return Ans(**data)
 
 
 def main():
@@ -103,22 +142,13 @@ def main():
     args = parser.parse_args()
 
     # see what you have
-    ulprint('Existing libraries')
-
     if args.show_stats:
+        ulprint('Existing libraries')
         qd(arcl.Library.list_stats(), vrule_widths=(1,0,0))
 
     # discover folders
-    source_root = Path(r"C:\temp\temp-arc\original-sources")
-    all_base_files = [
-       source_root  / "Library",
-       source_root  / "Books",
-       source_root  / "Book_scans",
-    ]
-    new_base_files = [f for f in Path("C:\\temp\\temp-arc\\new-sources\\").glob("*") if f.is_dir()]
-
-    full_build = all_base_files + new_base_files
-    print("Found directories")
+    full_build = discover_sources()
+    print(f"Found {len(full_build)} directories")
     print('\n'.join(str(p) for p in full_build))
 
     # Create raw library
@@ -137,7 +167,7 @@ def main():
     qd(raw_lib.stats())
 
     # expected situation
-    ulprint('Expected output')
+    ulprint('Expected output -> Raw')
     print("""
 ┍━━━━━━━━━━━━━┳━━━━━━━┯━━━━━━━━━━━┑
 │             ┃ refer │           │
@@ -171,7 +201,6 @@ def main():
                 errors_mapper=errors_mapper,
                 qd=qd,
                 update=True)
-
         ulprint('Test stats - pre-edits')
         qd(test_lib.stats())
 
@@ -193,4 +222,5 @@ def main():
 
 
 if __name__ == "__main__":
+    setup_logging()
     main()

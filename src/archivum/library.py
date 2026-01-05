@@ -709,6 +709,10 @@ class Library(LibraryBase):
         if isinstance(obj, (pd.DataFrame, pd.Series)):
             path = base_path / f'{name}.csv'
             obj.to_csv(path, encoding="utf-8")
+        elif isinstance(obj, nx.Graph):
+            path = base_path / f'{name}.json'
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(nx.readwrite.json_graph.node_link_data(obj), f, indent=4)
         else:
             path = base_path / f'{name}.json'
             with path.open("w", encoding="utf-8") as f:
