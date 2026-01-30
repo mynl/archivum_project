@@ -660,3 +660,5 @@ def elaborate_duplicates(lib, duplicates, trim=True):
     missing_refs = docs.loc[~docs.path.isin(dr.path)]
     # result
     return refs, missing_refs
+
+

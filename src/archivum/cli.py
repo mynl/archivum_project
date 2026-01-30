@@ -34,6 +34,7 @@ from prompt_toolkit.application.current import get_app
 from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
+from rich import print as rich_print
 
 # for uber loop
 from uber_shell import UberShell  # type: ignore[import-untyped]
@@ -830,6 +831,20 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: i
 
 
 # ========================================================================================
+@entry.command()
+def config():
+    """
+    Dump the current library config file.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open -- cannot import.")
+        return
+    c = lib.config.model_dump()
+    rich_print(c)
+
+
+# ========================================================================================
 @entry.command(name="import-doc")
 @click.argument(
     "doc_path",
@@ -1019,7 +1034,7 @@ def rg(args, n):
     "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
 )
 def tag(tag, all_docs):
-    """Open a document by its tag."""
+    """Get a document by its tag."""
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo(
