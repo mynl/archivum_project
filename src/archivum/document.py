@@ -89,35 +89,62 @@ class Document:
 
     def process(self):
         """
-        Orchestrates the discovery pipeline:
+        Orchestrates the discovery pipeline by prioritizing evidence:
         1. Gather: Collect raw info from Filename, PDF Metadata, and Visual OCR.
-        2. Rank: Choose the best local 'Anchor' to use for search.
-        3. Enhance: Query external APIs using the Anchor.
-        4. Verify: Validate API results against the Anchor.
+        2. Prioritized Enhance: Attempt lookup using a found DOI or ArXiv ID. If successful,
+           accept the result as definitive.
+        3. Fallback Enhance: If no ID was found, determine the best local 'Anchor',
+           search external APIs, and validate the results.
         """
+        self.log_messages.append(f"Starting processing for {self.doc_path.name}")
         # 1. Gather
         self._parse_filename()
         self._step_metadata()
         self._step_visual()
 
-        # 2. Rank / Anchor Selection
-        anchor_source, anchor_data = self._determine_anchor()
-        self.log_messages.append(f"Selected anchor source: {anchor_source}")
-
-        # 3. Enhance (API Search)
-        # If we found an ID (DOI/Arxiv) visually, that's an automatic win.
-        if self.candidates["visual"].get("doi") or self.candidates["visual"].get(
+        # 2. Prioritized Enhancement via found ID
+        visual_ids = self.candidates["visual"].get("doi") or self.candidates["visual"].get(
             "arxiv_id"
-        ):
+        )
+        if visual_ids:
+            self.log_messages.append(
+                "Found potential DOI/ArXiv ID from visual scan. Attempting direct lookup."
+            )
             self._step_id_lookup(self.candidates["visual"])
-        else:
-            self._step_search_api(anchor_data)
+            if self.candidates.get("api"):
+                self.log_messages.append(
+                    f"Direct lookup successful. API result: {self.candidates['api']}"
+                )
+                # High confidence - this is the best source of truth.
+                self.bib.update(self.candidates["api"])
+                self.status = "SUCCESS"
+                self.confidence_score = 100  # 100% confidence in a direct ID lookup
+                self.log_messages.append(
+                    "Setting status to SUCCESS with 100% confidence based on ID lookup."
+                )
+                return  # End of processing
 
-        # 4. Verify & Merge
+        # 3. Fallback to Anchor-based Search
+        self.log_messages.append(
+            "No definitive ID found or lookup failed. Falling back to anchor-based search."
+        )
+        anchor_source, anchor_data = self._determine_anchor()
+        self.log_messages.append(f"Selected anchor source: '{anchor_source}' with data: {anchor_data}")
+
+        if not anchor_data.get("title"):
+            self.log_messages.append("Anchor has no title. Cannot proceed with search.")
+            self.bib["title"] = self.doc_path.stem.replace("_", " ")
+            self.status = "FAILED"
+            return
+
+        self._step_search_api(anchor_data)
+
+        # 4. Verify & Merge for anchor-based search
         self._validate_and_merge(anchor_data)
 
-        # Final cleanup
-        if not self.bib["title"]:
+        # 5. Final cleanup
+        if not self.bib.get("title"):
+            self.log_messages.append("Processing failed to find a title.")
             self.bib["title"] = self.doc_path.stem.replace("_", " ")
             self.status = "FAILED"
 
@@ -206,6 +233,7 @@ class Document:
             )
 
         self.candidates["filename"] = candidate
+        self.log_messages.append(f"Parsed Filename: {candidate}")
 
     def _step_metadata(self):
         """Extract embedded PDF metadata."""
@@ -213,9 +241,10 @@ class Document:
         try:
             with pymupdf.open(self.doc_path) as doc:
                 meta = doc.metadata
-        except Exception:
-            c["error"] = "extracting md"
+        except Exception as e:
+            c["error"] = f"extracting md: {e}"
             self.candidates["metadata"] = c
+            self.log_messages.append(f"PDF Metadata Error: {c['error']}")
             return
 
         title = meta.get("title", "").strip()
@@ -241,6 +270,7 @@ class Document:
                 c["year"] = cdate[2:6]
 
         self.candidates["metadata"] = c
+        self.log_messages.append(f"Extracted Metadata: {c}")
 
     def _step_visual(self):
         """Visual scraping for Largest Text (Title) and IDs."""
@@ -250,18 +280,25 @@ class Document:
                 page = doc[0]
                 text_dict = page.get_text("dict")
                 raw_text = page.get_text("text")
-        except Exception:
+        except Exception as e:
+            c["error"] = f"visual extraction: {e}"
             self.candidates["visual"] = c
+            self.log_messages.append(f"Visual Scan Error: {c['error']}")
             return
 
         # ID Scraping
-        arxiv_match = re.search(r"arXiv:(\d{4}\.\d{4,5})", raw_text, re.IGNORECASE)
+        # Handles new (YYMM.NNNNN) and old (subject/YYMMNNN) formats, with versions
+        arxiv_match = re.search(
+            r"arXiv:((?:\d{4}\.\d{4,5}(?:v\d+)?)|(?:[a-z-]+(?:\.[A-Z]{2})?\/\d{7}(?:v\d+)?))",
+            raw_text,
+            re.IGNORECASE,
+        )
         if arxiv_match:
             c["arxiv_id"] = arxiv_match.group(1)
 
         doi_match = re.search(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", raw_text, re.IGNORECASE)
         if doi_match:
-            c["doi"] = doi_match.group(0)
+            c["doi"] = doi_match.group(0).rstrip(".") # clean trailing dots
 
         # Title Scraping (Largest Font)
         visual_title = self._find_largest_text(text_dict)
@@ -274,6 +311,7 @@ class Document:
             # but who knows where to truncate!
         c["title"] = visual_title
         self.candidates["visual"] = c
+        self.log_messages.append(f"Visual Scan Results: {c}")
 
     # ----------------------------------------------------------------------
     # 2. RANKING / ANCHOR
@@ -315,26 +353,12 @@ class Document:
         s_fn = score(fn)
         s_meta = score(meta)
 
-        # print('determining anchor based on:')
-        # print(vis, s_vis)
-        # print(fn, s_fn)
-        # print(meta, s_meta)
+        scores = {"visual": s_vis, "filename": s_fn, "metadata": s_meta}
+        best_source = max(scores, key=scores.get)
 
-        # Logic
-        best = "filename"
-        max_s = s_fn
+        self.log_messages.append(f"Anchor scores: {scores}")
 
-        if s_vis > max_s:
-            best = "visual"
-            max_s = s_vis
-
-        if s_meta > max_s:
-            best = "metadata"
-            max_s = s_meta
-
-        self.log_messages.append(f'Anchor determined from {best}, score {max_s}')
-
-        return best, self.candidates[best]
+        return best_source, self.candidates[best_source]
 
     # ----------------------------------------------------------------------
     # 3. EXTERNAL ENHANCEMENT
@@ -343,15 +367,17 @@ class Document:
     def _step_id_lookup(self, source_data):
         """Lookup by DOI or Arxiv ID."""
         if source_data.get("arxiv_id"):
-            # print("arxiv lookup", source_data["arxiv_id"])
-            res = lookup_arxiv(source_data["arxiv_id"])
+            arxiv_id = source_data["arxiv_id"]
+            self.log_messages.append(f"Looking up arXiv ID: {arxiv_id}")
+            res = lookup_arxiv(arxiv_id)
             if res:
                 self.candidates["api"] = self._normalize_arxiv(res)
                 return
 
         if source_data.get("doi"):
-            print("crossref doi lookup", source_data["doi"])
-            res = lookup_doi(source_data["doi"])
+            doi = source_data["doi"]
+            self.log_messages.append(f"Looking up DOI: {doi}")
+            res = lookup_doi(doi)
             if res:
                 self.candidates["api"] = self._normalize_crossref(res)
                 self.candidates['crossref-bib'] = dict_to_bibtex_crossref(res)
@@ -366,13 +392,16 @@ class Document:
         if anchor.get("author"):
             query += f" {anchor['author']}"
 
-        # logger.info(f"Searching Crossref: {query}")
-        print("crossref query lookup", query)
+        self.log_messages.append(f"Searching Crossref with query: '{query}'")
         results = lookup_xref_search(query, book_mode=self.book_mode)
         if results:
             # We take the top result tentatively
+            self.log_messages.append(f"Crossref search found {len(results)} results.")
             self.candidates["api"] = self._normalize_crossref(results[0])
             self.candidates['crossref-bib'] = dict_to_bibtex_crossref(results[0])
+        else:
+            self.log_messages.append("Crossref search returned no results.")
+
 
     # ----------------------------------------------------------------------
     # 4. VERIFY & MERGE
@@ -386,36 +415,40 @@ class Document:
 
         if not api:
             # No API result found. Use Anchor.
-            print('NO API RESULT')
+            self.log_messages.append("No API results to merge. Using local anchor.")
             self.bib.update(anchor)
+            # Downgrade status if anchor is weak (e.g., no author)
             self.status = "REVIEW_NEEDED" if not anchor.get("author") else "SUCCESS"
-            self.log_messages.append("No API results. Using local anchor.")
+            self.confidence_score = 40 # Low confidence score for anchor-only
             return
 
         # Validation: Compare API Title vs Anchor Title
         # We use Token Sort Ratio to handle word reordering
-        similarity = fuzz.token_sort_ratio(
-            str(anchor.get("title", "")).lower(), str(api.get("title", "")).lower()
-        )
-
+        anchor_title = str(anchor.get("title", "")).lower()
+        api_title = str(api.get("title", "")).lower()
+        similarity = fuzz.token_sort_ratio(anchor_title, api_title)
         self.confidence_score = similarity
+        
+        self.log_messages.append(f"Validating API title '{api_title}' against anchor title '{anchor_title}' (Similarity: {similarity}%)")
+
 
         if similarity > 80:
             # High Confidence: Accept API
+            self.log_messages.append("High confidence match. Accepting API results.")
             self.bib.update(api)
             self.status = "SUCCESS"
         elif similarity > 50:
-            # Medium Confidence: Accept API but flag
+            # Medium Confidence: Accept API but flag for review
+            self.log_messages.append(f"Medium confidence match. Accepting API results but flagging for review.")
             self.bib.update(api)
             self.status = "REVIEW_NEEDED"
-            self.log_messages.append(f"Medium match ({similarity}%). check title.")
         else:
-            # Low Confidence: Reject API, use Anchor
+            # Low Confidence: Reject API, use Anchor and flag for review
+            self.log_messages.append(
+                f"Low confidence match. Rejecting API result and using local anchor."
+            )
             self.bib.update(anchor)
             self.status = "REVIEW_NEEDED"
-            self.log_messages.append(
-                f"Rejected API match ({similarity}%). API found: '{api.get('title')}'"
-            )
 
     # ----------------------------------------------------------------------
     # UTILITIES & NORMALIZERS
@@ -444,7 +477,7 @@ class Document:
             or data.get("published-online")
             or data.get("created")
         )
-        if pub and "date-parts" in pub:
+        if pub and "date-parts" in pub and pub["date-parts"][0]:
             out["year"] = str(pub["date-parts"][0][0])
 
         out["doi"] = data.get("DOI", "")
@@ -475,6 +508,43 @@ class Document:
             ans['doi'] = data['doi']
         if 'journal' in data:
             ans['journal'] = data['journal']
+            journal_ref = data['journal']
+
+            # Attempt to extract volume, number, pages, and year from journal_ref
+            # Pages: e.g., 871-904, S1-S10
+            pages_match = re.search(r'(\d+[a-zA-Z]?--?\d+[a-zA-Z]?)', journal_ref)
+            if pages_match:
+                ans['pages'] = pages_match.group(1)
+
+            # Year: e.g., (1999) - careful not to overwrite more reliable year
+            year_match = re.search(r'\((\d{4})\)', journal_ref)
+            if year_match and not ans.get('year'): # Only set if year not already present
+                ans['year'] = year_match.group(1)
+
+            # Volume and Number:
+            # Common patterns: "Vol. X", "149", "no. 3"
+            volume_match = re.search(r'(?:Vol\.\s*)?(\d+)', journal_ref)
+            if volume_match:
+                ans['volume'] = volume_match.group(1)
+
+            number_match = re.search(r'no\.\s*(\d+)', journal_ref)
+            if number_match:
+                ans['number'] = number_match.group(1)
+
+            # Attempt to clean journal title by removing extracted parts
+            cleaned_journal_title = journal_ref
+            if ans.get('pages'):
+                cleaned_journal_title = cleaned_journal_title.replace(ans['pages'], '').strip(' ,')
+            if ans.get('year'):
+                cleaned_journal_title = re.sub(r'\(\s*' + re.escape(ans['year']) + r'\s*\)', '', cleaned_journal_title).strip(' ,')
+            if ans.get('number'):
+                cleaned_journal_title = re.sub(r'no\.\s*' + re.escape(ans['number']), '', cleaned_journal_title).strip(' ,')
+            if ans.get('volume'):
+                # This is tricky as volume can be just a number. Better to keep it messy for now or rely on specific patterns.
+                # For simplicity, let's keep the original journal string as the title for now
+                pass
+            
+            ans['journal'] = cleaned_journal_title.strip(' ,') # Set the cleaned title
         return ans
 
     def _find_largest_text(self, text_dict: Dict) -> str:
@@ -537,8 +607,22 @@ class Document:
             return ""
 
     def report(self, print_fn=print):
-        """Quick summary."""
+        """
+        Prints a comprehensive report of the discovery process, including the
+        steps taken, final status, and the resulting BibTeX entry.
+        """
+        print_fn(f"--- Report for: {self.doc_path.name} ---")
+        print_fn("\n[Discovery Log]")
+        for msg in self.log_messages:
+            print_fn(f"- {msg}")
+
+        print_fn("\n[Result]")
+        print_fn(f"- Final Status: {self.status}")
+        print_fn(f"- Confidence Score: {self.confidence_score}%")
+
+        print_fn("\n[BibTeX Entry]")
         print_fn(self.bibtex())
+        print_fn("--- End of Report ---\n")
 
     def bibtex(self) -> str:
         if not self.bib["title"]:
@@ -584,6 +668,8 @@ class Document:
     @staticmethod
     def _sort_authors(authors):
         """Make last, first and ... """
+        if not authors:
+            return ""
         a_list = authors.split(' and ')
         out = []
         for a in a_list:
