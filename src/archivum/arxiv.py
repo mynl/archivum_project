@@ -25,7 +25,7 @@ def lookup_arxiv(arxiv_id):
     try:
         paper = next(results)
     except StopIteration:
-        print("Paper not found.")
+        print(f"Paper with ID '{arxiv_id}' not found.")
         logger.warning("Paper %s not found.", arxiv_id)
         return
     # else, off to the races
