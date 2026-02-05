@@ -6,7 +6,7 @@ Steps
 
 1. Open test-library
 2. Clear
-3. Populate with library, books, scans, plus five days of additional files
+3. Populate with library, books, scans, plus six days of additional files
 4. Rationalize duplicates
 5. Rationalize hash duplicates
 6. Rename and move files
@@ -20,8 +20,9 @@ Code from
 Running
 =======
 
-```
+```python
 python -m archivum.definitive_loader
+```
 
 """
 from functools import partial
@@ -75,6 +76,7 @@ errors_mapper = {'Caicedo, Andr´es Eduardo': 'Caicedo, Andrés Eduardo',
 
 
 def ulprint(line, ul='='):
+    """Underlined (ul) print function."""
     print()
     print(line)
     print(ul * len(line))
@@ -94,13 +96,14 @@ def setup_logging():
 
 def discover_sources():
     """Initial load sources only."""
-    source_root = Path("C:\\temp\\temp-arc\\original-sources")
+    source_root = Path("C:\\S\\PDFs\\original-sources")
     all_base_files = [
        source_root  / "Library",
        source_root  / "Books",
        source_root  / "Book_scans",
     ]
-    new_base_files = [f for f in Path("C:\\temp\\temp-arc\\new-sources\\").glob("*") if f.is_dir()]
+    # sources from 2025-12-05 to 18
+    new_base_files = [f for f in Path("C:\\S\\PDFs\\new-sources\\").glob("*") if f.is_dir()]
 
     return all_base_files + new_base_files
 

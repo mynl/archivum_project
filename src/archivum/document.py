@@ -87,6 +87,12 @@ class Document:
     def __repr__(self):
         return f"Document({self.doc_path.name}) [{self.status}]"
 
+    def key(self):
+        """A reasonable default key to make reviewing easy. Filename based."""
+        n = self.doc_path.stem
+        n = "".join(c for c in n if c.isalnum())
+        return "f" + n[:20]
+
     def process(self):
         """
         Orchestrates the discovery pipeline by prioritizing evidence:
@@ -628,8 +634,8 @@ class Document:
         if not self.bib["title"]:
             return ""
 
-        # Key - will be over-ridden
-        cite_key = "Author2099"
+        # Key - will be over-ridden, but this helps the review process
+        cite_key = self.key() #  "Author2099"
 
         lines = [f"@{self.bib['type']}{{{cite_key},"]
 
