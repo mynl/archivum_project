@@ -5,16 +5,46 @@ Latin for "archive".
 PDF reference manager.
 
 
-## November 2025
+## 2026 Workflow: Adding New Documents
 
-Path to use and update uber-library...
+The current robust workflow for adding new batches of documents consists of two phases: staging/review and final import.
 
-1. Drop PDF into Mendeley.
-2. Let Mendeley extract metadata.
-3. Mendeley auto-exports a .bib file.
-4. Run: archivum import-mendeley path/to/library.bib
-5. Archivum adds reference, normalises names, stores PDF.
-6. Optional: remove entry from Mendeley.
+### 1. Staging and Metadata Extraction
+Gather your new PDF/DJVU files into a staging directory (e.g., `C:/S/PDFs/Batch6`). Run the following command to identify duplicates, extract metadata, and prepare a BibTeX file for review:
+
+```bash
+archivum import-doc C:/S/PDFs/Batch6 --execute
+```
+
+*   **`--flag-duplicates` (default True)**: Automatically hashes all files and checks them against your library.
+*   **`--delete` (optional)**: If duplicates are found, it offers to delete them from your staging folder.
+*   **Result**: It generates `bibtex-import.bib` in the staging folder and opens it in **Sublime Text**. You can review and edit the tags, titles, and authors here.
+
+### 2. Final Import and Organization
+Once you are happy with the `.bib` file, perform the final import. This step handles deduplication, re-mapping tags to standard `AuthorYYYY[a-z]` format, and **sharding** the physical files into the library's document store using hardlinks.
+
+```bash
+archivum import-bibtex C:/S/PDFs/Batch6 --execute
+```
+
+*   **Guardian Mode (default True)**: In this incremental mode, it performs a final hash check.
+*   **SKIP**: If both the file hash and metadata match an existing entry, it is kicked out.
+*   **Link Existing**: If only the hash matches, it creates a new reference but links it to the existing physical file (one file, many names).
+*   **Automatic Sharding**: Files are automatically hardlinked into the library's sharded directory structure (`/00/` to `/FF/`) with rich canonical names.
+
+### 3. Verification
+Use the `tag` and `hash` commands to verify your imports:
+
+```bash
+tag NAIC2023 -vv    # Show full metadata and linked document details
+hash 100F150A6 -o   # Find references matching a hash and open the doc
+```
+
+### Known Issues / TODO
+*   **Logging**: The logging output for `import-doc` and `import-bibtex` still needs to be refined and standardized.
+
+---
+
 
 ## File Structure
 

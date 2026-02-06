@@ -141,6 +141,7 @@ def main():
     parser.add_argument("-w", "--make-raw", action="store_true", help="Rebuilt raw library - default: no build")
     parser.add_argument("-t", "--make-test", action="store_true", help="Rebuilt test library - default: no build")
     parser.add_argument("-r", "--enhance-refs", action="store_true", help="Enhance refs in test library")
+    parser.add_argument("-d", "--organize-docs", action="store_true", help="Organize docs in test library")
 
     args = parser.parse_args()
 
@@ -221,7 +222,15 @@ def main():
         qd(test_lib.stats())
 
     # doc organizer
-
+    if args.organize_docs:
+        ulprint('Organizing documents into sharded structure')
+        # We use the config-defined doc_dir, or provide a specific one
+        # For the test library, we probably want them in a 'sharded' subfolder of the library
+        # sharded_base = test_lib.config_path / "sharded_docs"
+        sharded_base = "C:\\S\\AppData\\archivum\\docs"
+        arce.enhance_doc_df(test_lib, base_dir=str(sharded_base), update=True)
+        ulprint('Test stats - post-org docs')
+        qd(test_lib.stats())
 
 
 if __name__ == "__main__":

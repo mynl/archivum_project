@@ -85,6 +85,7 @@ class LibraryContext:
     matcher_tags = None
     matcher_titles = None
     matcher_tags_titles = None
+    matcher_hashes = None
 
     @classmethod
     def set(cls, lib):  # noqa
@@ -104,9 +105,11 @@ class LibraryContext:
         cls.candidates_tags = None
         cls.candidates_titles = None
         cls.candidates_tag_titles = None
+        cls.candidates_hashes = None
         cls.matcher_tags = None
         cls.matcher_titles = None
         cls.matcher_tags_titles = None
+        cls.matcher_hashes = None
 
     @classmethod
     def get_library_tags(cls):
@@ -143,6 +146,22 @@ class LibraryContext:
             cls.candidates_tag_titles = cls.current.all_tag_titles
             cls.matcher_tag_titles = FuzzyMatcherMultiHi(cls.candidates_tag_titles)
             return cls.candidates_tag_titles, cls.matcher_tag_titles
+
+    @classmethod
+    def get_library_hashes(cls):
+        """Fetch unique hashes from the current library context."""
+        if hasattr(cls, 'candidates_hashes') and cls.candidates_hashes is not None:
+            return cls.candidates_hashes, cls.matcher_hashes
+        if cls.current is None or cls.current == EMPTY_LIBRARY:
+            return [], None
+        else:
+            cls.candidates_hashes = sorted(
+                cls.current.doc_df["hash"].dropna().unique().astype(str).tolist()
+            )
+            # Filter out empty or 'Unknown'
+            cls.candidates_hashes = [h for h in cls.candidates_hashes if h and h != 'Unknown']
+            cls.matcher_hashes = FuzzyMatcherMultiHi(cls.candidates_hashes)
+            return cls.candidates_hashes, cls.matcher_hashes
 
 
 # ========================================================================================
@@ -523,6 +542,7 @@ def create(lib_name):
     "-d",
     "--details",
     is_flag=True,
+    show_default=True,
     help="Show detailed information about each library.",
 )
 def list_libraries(details):
@@ -577,6 +597,7 @@ def history():
     "--field",
     type=str,
     default="",
+    show_default=True,
     help="Show distinct values of field in each library field.",
 )
 def get_distinct_values(field):
@@ -613,6 +634,7 @@ def get_distinct_values(field):
     # Define the allowed choices as a list of strings
     type=click.Choice(["database", "doc", "ref", "ref-doc"]),
     default="database",
+    show_default=True,
     help='Database (dataframe) to process. Must be "database" (default), "doc", "ref", or "ref-doc".',
 )
 def query(start: str, database: str):
@@ -713,11 +735,11 @@ def query(start: str, database: str):
 
 # ========================================================================================
 @entry.command()
-@click.option("--author", "-a", help="Author name")
-@click.option("--title", "-t", help="Title of work")
-@click.option("--doi", "-d", help="DOI string")
-@click.option("--raw", "-r", is_flag=True, help="Show raw output.")
-@click.option("--keywords", "-k", help="Search keywords")
+@click.option("--author", "-a", help="Author name", show_default=True)
+@click.option("--title", "-t", help="Title of work", show_default=True)
+@click.option("--doi", "-d", help="DOI string", show_default=True)
+@click.option("--raw", "-r", is_flag=True, help="Show raw output.", show_default=True)
+@click.option("--keywords", "-k", help="Search keywords", show_default=True)
 def crossref(
     author: Union[str, None],
     title: Union[str, None],
@@ -759,51 +781,79 @@ def crossref(
 @entry.command(name="import-bibtex")
 @click.argument(
     "bibtex_path",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=click.Path(exists=True, dir_okay=True, path_type=Path),
 )
 @click.option(
     "-p",
-    "--pdf-dir",
+    "--doc-dir",
     type=click.Path(exists=True, file_okay=False, path_type=Path),
     default=None,
-    help="Directory containing PDFs referenced in the BibTeX file; "
-    "defaults to the library's doc_dir_name.",
+    help="Directory containing docs referenced in the BibTeX file; "
+    "defaults to the BibTeX file's directory.",
 )
 @click.option(
     "-v",
     "--verbose",
     count=True,
-    help="Increase verbosity. Specify -vv or -vvv for more detail.",
+    default=0,
+    show_default=True,
+    help="Increase verbosity: -v (Summary), -vv (Guardian Table), -vvv (Full Diagnostics).",
 )
 @click.option(
-    "-h",
-    "--add-hashes",
+    "-h/-nh",
+    "--add-hashes/--no-hashes",
+    "add_hashes",
     is_flag=True,
-    help="Hash input pdf files.",
+    default=True,
+    show_default=True,
+    help="Hash input pdf files (Default: True).",
+)
+@click.option(
+    "-i/-ni",
+    "--incremental/--no-incremental",
+    "incremental",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Guardian mode: Hash, check for duplicates in library, and shard/organize immediately (Default: True).",
 )
 @click.option(
     "-x",
     "--execute",
     is_flag=True,
+    show_default=True,
     help="Actually perform the import; otherwise, do a dry run and report stats.",
 )
-def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: int, execute: bool):
+def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incremental: bool, verbose: int, execute: bool):
     """
     Import new references from a BibTeX file into the current library.
+
+    bibtex_path can be a path to a specific bibtex file or a directory
+    containing a single bibtex file.
     """
     if execute:
         logger.info("Execution enabled: changes will be applied.")
     else:
         logger.info("Dry run mode: no changes applied.")
 
-    # if verbose == 0:
-    #     click.echo("Running silently.")
-    # elif verbose == 1:
-    #     click.echo("Running with standard verbosity (v).")
-    # elif verbose == 2:
-    #     click.echo("Running with high verbosity (vv).")
-    # elif verbose >= 3:
-    #     click.echo("Running with maximum verbosity (vvv or more).")
+    # Directory mode: find the unique bibtex file
+    if bibtex_path.is_dir():
+        search_dir = bibtex_path
+        bibs = list(search_dir.glob("*.bib"))
+        if len(bibs) == 1:
+            bibtex_file = bibs[0]
+            if doc_dir is None:
+                doc_dir = search_dir
+            bibtex_path = bibtex_file
+            logger.info(f"Found unique BibTeX file: {bibtex_path.name}")
+        else:
+            click.echo(f"Error: Directory must contain exactly one .bib file. Found {len(bibs)} in {search_dir}")
+            return
+
+    # File mode or resolved directory mode
+    if doc_dir is None:
+        doc_dir = bibtex_path.parent
+        logger.info(f"PDF directory not specified; defaulting to {doc_dir}")
 
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -812,18 +862,25 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, verbose: i
 
     # create importer
     b = Bib2df_Incremental(
-            bibtex_file_pgath=bibtex_path,
+            bibtex_file_path=bibtex_path,
             doc_dir=doc_dir,
             reference_library=lib,
-            add_hashes=add_hashes
+            add_hashes=add_hashes,
+            incremental=incremental
         )
     # do the import
     import_df = b.import_bibtex_file()
 
-    if verbose > 0:
-        qd(import_df)
-    if verbose > 1:
+    # Default / -v: summary table
+    qd(import_df)
+
+    # -vv: summary + Guardian Analysis table (Always run on full set)
+    if verbose == 2:
         qd(b.import_analysis())
+
+    # -vvv: summary + Full diagnostic table
+    if verbose >= 3:
+        qd(b.import_analysis_full())
 
     if execute:
         click.echo(f"Updating with {len(b.ported_df)} entries.")
@@ -851,95 +908,158 @@ def config():
     type=click.Path(exists=True, dir_okay=True, path_type=Path),
 )
 @click.option(
+    "-f/-nf",
+    "--flag-duplicates/--no-duplicates",
+    "flag_duplicates",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Check for hash duplicates in library before processing.",
+)
+@click.option(
+    "-d",
+    "--delete",
+    "delete_dupes",
+    is_flag=True,
+    show_default=True,
+    help="Delete duplicates from source folder if found.",
+)
+@click.option(
     "-v",
     "--verbose",
     count=True,
-    help="Increase verbosity. Specify -vv or -vvv for more detail.",
+    default=0,
+    show_default=True,
+    help="Increase verbosity.",
 )
 @click.option(
     "-x",
     "--execute",
     is_flag=True,
-    help="Actually perform the import; otherwise, do a dry run and report stats.",
+    show_default=True,
+    help="Actually perform the final import after review.",
 )
-def import_doc(doc_path: Path, verbose: int, execute: bool):
+def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbose: int, execute: bool):
     """
-    Explore importing new documents into the current library. Process
-    is to write a temporary bibtex file and open it for editing.
-    You can then import that when you are happy. It includes filenames.
+    Prepare new documents for import.
 
-    If doc_path is a directory, rglob all document files in it.
-    Document file types defined in config.
+    1. Checks for hash duplicates in the library.
+    2. Extracts metadata from new files.
+    3. Generates a .bib file for review in Sublime Text.
+    4. Optionally imports the reviewed file.
     """
-    if execute:
-        logger.info("Execution enabled: changes will be applied.")
-    else:
-        logger.info("Dry run mode: no changes applied.")
-
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open -- cannot import.")
         return
 
-    # find the files
+    # 1. Find the files
     if doc_path.is_dir():
         doc_paths = lib.find_docs(doc_path)
-        logger.info("Found %s files", len(doc_paths))
     else:
         doc_paths = [doc_path]
 
-    click.echo(f'Found {len(doc_paths)} potential docs for import.')
+    if not doc_paths:
+        click.echo(f"No documents found in {doc_path}")
+        return
 
-    # process the docs
-    docs = []
+    # 2. Pre-check for Duplicates
+    survivors = doc_paths
+    if flag_duplicates:
+        click.echo(f"Checking {len(doc_paths)} files for duplicates...")
+        from .hasher import hash_many3
+        hashes = hash_many3(doc_paths, workers=lib.config.hash_workers)
+
+        dupe_rows = []
+        new_paths = []
+
+        lib_docs = lib.doc_df
+        lib_ref_docs = lib.ref_doc_df
+        lib_refs = lib.ref_df
+
+        for p in doc_paths:
+            h = hashes.get(p)
+            if h and h in lib_docs.hash.values:
+                # Find matching info
+                match_paths = lib_docs[lib_docs.hash == h].path.tolist()
+                match_tags = lib_ref_docs[lib_ref_docs.path.isin(match_paths)].tag.tolist()
+                tag = match_tags[0] if match_tags else "Unknown"
+                title = lib_refs[lib_refs.tag == tag].title.iloc[0] if tag != "Unknown" else "N/A"
+
+                dupe_rows.append({
+                    "Staging File": p.name,
+                    "Hash": h[:12],
+                    "Match Tag": tag,
+                    "Match Title": title[:50]
+                })
+            else:
+                new_paths.append(p)
+
+        if dupe_rows:
+            click.secho(f"\nFound {len(dupe_rows)} duplicates already in library:", fg="yellow")
+            qd(pd.DataFrame(dupe_rows))
+
+            if delete_dupes:
+                if click.confirm(f"\nDelete these {len(dupe_rows)} duplicates from source?", default=False):
+                    for p in doc_paths:
+                        if p not in new_paths:
+                            p.unlink()
+                    click.echo("Duplicates deleted.")
+
+            survivors = new_paths
+        else:
+            click.echo("No duplicates found.")
+
+    if not survivors:
+        click.echo("No new documents to process.")
+        return
+
+    click.echo(f'Processing {len(survivors)} documents...')
+
+    # 3. Process the Survivors
     bibs = [f"% import from {doc_path.absolute()}"]
-    for p in doc_paths:
-        if p.suffix.lower() != '.pdf':
-            click.echo(f'WARNING non-pdf {p.name}')
+    for p in sorted(survivors):
+        if p.suffix.lower() not in {'.pdf', '.djvu'}:
+            click.echo(f'WARNING: Non-standard format {p.suffix} for {p.name}')
         try:
             logger.info('gathering import info for %s', p)
             doc = Document(p)
             doc.process()
-            docs.append(doc)
             bibs.append(doc.bibtex())
         except Exception as e:
-            click.echo(f"Error for {p.name}: {e}")
+            click.echo(f"Error extracting metadata for {p.name}: {e}")
 
-    # for the time being...
+    # 4. Generate Review File
     bib_str = "\n".join(bibs)
-    click.echo(bib_str)
+    p_review = doc_path if doc_path.is_dir() else doc_path.parent
+    p_review = p_review / "bibtex-import.bib"
+    p_review.write_text(bib_str, encoding='utf-8')
 
-    p = doc_path if doc_path.is_dir() else doc_path.parent
-    p = p / "bibtex-import.bib"
-    p = p.absolute()
-    if p.exists():
-        p.unlink()
+    click.echo(f"\nMetadata extracted. Review file created at: {p_review.name}")
 
-    p.write_text(bib_str, encoding='utf-8')
     try:
-        subprocess.run(f'"c:\\program files\\sublime text\\subl.exe" {p}', shell=False)
-    except Exception as e:
-        print(f'subprocess error {e}')
+        # Windows specific call to Sublime
+        subprocess.run(f'"c:\\program files\\sublime text\\subl.exe" "{p_review}"', shell=False)
+    except Exception:
+        click.echo("Could not open Sublime Text automatically. Please review the .bib file manually.")
 
-    action = click.confirm("Review file in Sublime...continue to import", default=False)
-
-    if action:
-        # create importer
+    # 5. Final Step
+    if click.confirm("\nContinue to import reviewed references?", default=False):
+        from .import_bibtex import Bib2df_Incremental
         b = Bib2df_Incremental(
-            bibtex_file_path=p, doc_dir=None, reference_library=lib
+            bibtex_file_path=p_review,
+            doc_dir=doc_path if doc_path.is_dir() else doc_path.parent,
+            reference_library=lib,
+            incremental=True # Always incremental for doc-import
         )
-        # do the import
         import_df = b.import_bibtex_file()
-
-        if verbose > 0:
-            click.echo('Result of Import')
-            qd(import_df)
-        if verbose > 1:
-            qd(b.import_analysis())
+        qd(import_df)
 
         if execute:
-            click.echo(f"Updating with {len(b.ported_df)} entries.")
             b.update_library(save=True)
+            click.echo("Library updated.")
+        else:
+            click.echo("Dry run complete. Use --execute to commit changes.")
 
 
 # ========================================================================================
@@ -1029,32 +1149,230 @@ def rg(args, n):
 
 
 @entry.command()
-@click.argument("tag", type=str)
+@click.argument("tag_regex", type=str)
 @click.option(
-    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+    "-i",
+    "--information",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Show information about matching entries.",
 )
-def tag(tag, all_docs):
-    """Get a document by its tag."""
+@click.option(
+    "-o",
+    "--open",
+    "open_doc",
+    is_flag=True,
+    help="Open preferred document(s) for the matched tags.",
+)
+@click.option(
+    "-a",
+    "--all-docs",
+    is_flag=True,
+    help="Open all documents associated with the matched tags.",
+)
+@click.option(
+    "-l",
+    "--limit",
+    type=int,
+    default=5,
+    show_default=True,
+    help="Maximum number of documents to open.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    default=0,
+    show_default=True,
+    help="Verbosity: none (Basic), -v (BibTeX + Docs), -vv (Full Stats).",
+)
+def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
+    """Get documents or information by tag (supports Regex)."""
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo(
-            "No library open...don't know where to look for text files. Returning"
-        )
-        return
-    if lib.ref_doc_df.empty:
-        click.echo("No referenced documents. Returning")
+        click.echo("No library open. Returning")
         return
 
-    df = lib.ref_doc_df.query("tag == @tag")
-    if len(df) == 0:
-        click.echo("No matching documents found to %s", tag)
-    if not all_docs:
-        df = df.iloc[:1]
-    if all_docs and len(df) > 5:
-        click.echo("Found %s docs, just opening first 5", len(df))
-        df = df.iloc[:5]
-    for d in df.path:
-        _open_document(d)
+    # 1. Find References using Regex
+    try:
+        mask = lib.ref_df.tag.str.contains(tag_regex, regex=True, na=False)
+        ref_matches = lib.ref_df[mask]
+    except Exception as e:
+        click.echo(f"Regex error: {e}")
+        return
+
+    if ref_matches.empty:
+        click.echo(f"No references found matching: {tag_regex}")
+        return
+
+    matched_tags = ref_matches.tag.tolist()
+    if len(ref_matches) > 1:
+        click.secho(f"Found {len(ref_matches)} references matching regex.", fg="cyan")
+
+    # 2. Find Associated Documents
+    doc_links = lib.ref_doc_df[lib.ref_doc_df.tag.isin(matched_tags)]
+    doc_details = doc_links.merge(lib.doc_df, on='path', how='inner')
+
+    # 3. Show Information
+    if information:
+        # Default: Basic
+        if verbose == 0:
+            # Join with hashes for summary
+            summary = ref_matches[['tag', 'title']].copy()
+            # map hash
+            hash_map = doc_details.groupby('tag')['hash'].first().str[:12].to_dict()
+            summary['hash'] = summary['tag'].map(lambda x: hash_map.get(x, "No Doc"))
+            qd(summary)
+
+        # -v: BibTeX + Docs
+        elif verbose == 1:
+            for t in matched_tags:
+                ref = ref_matches[ref_matches.tag == t]
+                click.secho(f"\n--- Reference Metadata [{t}] ---", fg="cyan")
+                metadata = ref.iloc[0].dropna()
+                metadata = metadata[metadata != ""]
+                qd(metadata.to_frame(name="value"))
+
+                # Docs for this specific tag
+                this_docs = doc_details[doc_details.tag == t]
+                if not this_docs.empty:
+                    click.secho(f"Linked Documents ({len(this_docs)}):", fg="cyan")
+                    cols = ['name', 'create', 'hash', 'size']
+                    this_docs_view = this_docs.copy()
+                    this_docs_view['hash'] = this_docs_view['hash'].str[:12]
+                    qd(this_docs_view[cols], show_index=True)
+
+        # -vv: Full Stats
+        else:
+            click.secho(f"\n--- Full Records for Matches ---", fg="magenta")
+            qd(ref_matches.T)
+            click.secho(f"\n--- Full Document Details ---", fg="magenta")
+            qd(doc_details)
+
+    # 4. Open Document
+    if open_doc or all_docs:
+        if doc_details.empty:
+            click.echo("No documents found to open.")
+            return
+
+        if all_docs:
+            to_open = doc_details.path.unique().tolist()
+        else:
+            # open_doc: prefer the 'preferred' one for each tag
+            if 'preferred' in doc_details.columns:
+                to_open = doc_details[doc_details.preferred == 1].path.unique().tolist()
+                if not to_open:
+                    to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+            else:
+                to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+
+        # Apply Limit
+        if len(to_open) > limit:
+            click.secho(f"Warning: Found {len(to_open)} files, but limit is {limit}. Only opening first {limit}.", fg="yellow")
+            to_open = to_open[:limit]
+
+        for d in to_open:
+            click.echo(f"Opening: {Path(d).name}")
+            _open_document(d)
+
+    # 4. Open Document
+    if open_doc or all_docs:
+        if doc_details.empty:
+            click.echo("No documents found to open.")
+            return
+
+        if all_docs:
+            to_open = doc_details.path.unique().tolist()
+        else:
+            # open_doc: prefer the 'preferred' one for each tag
+            if 'preferred' in doc_details.columns:
+                to_open = doc_details[doc_details.preferred == 1].path.unique().tolist()
+                if not to_open:
+                    to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+            else:
+                to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+
+        # Apply Limit
+        if len(to_open) > limit:
+            click.secho(f"Warning: Found {len(to_open)} files, but limit is {limit}. Only opening first {limit}.", fg="yellow")
+            to_open = to_open[:limit]
+
+        for d in to_open:
+            click.echo(f"Opening: {Path(d).name}")
+            _open_document(d)
+
+
+@entry.command()
+@click.argument("hash_str", type=str)
+@click.option(
+    "-o",
+    "--open",
+    "open_doc",
+    is_flag=True,
+    help="Open the document associated with the hash.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    default=0,
+    show_default=True,
+    help="Verbosity: none (Basic), -v (Detailed Ref Info).",
+)
+def hash(hash_str, open_doc, verbose):
+    """Get references and information by file hash."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    # 1. Find Documents with this hash (allowing for partial match if > 6 chars)
+    if len(hash_str) < 6:
+        click.echo("Please provide at least 6 characters of the hash.")
+        return
+
+    doc_matches = lib.doc_df[lib.doc_df.hash.str.startswith(hash_str.upper())]
+    if doc_matches.empty:
+        click.echo(f"No documents found with hash starting with: {hash_str}")
+        return
+
+    # 2. Find Linked Tags
+    paths = doc_matches.path.tolist()
+    links = lib.ref_doc_df[lib.ref_doc_df.path.isin(paths)]
+    tags = links.tag.unique().tolist()
+
+    if not tags:
+        click.echo(f"Found {len(doc_matches)} files but no references are linked to them.")
+        if verbose > 0:
+            qd(doc_matches[['name', 'hash', 'size']])
+    else:
+        # 3. Show Reference Info
+        # Join doc_df hash back to refs for display
+        refs = lib.ref_df[lib.ref_df.tag.isin(tags)].copy()
+
+        # We need a mapping of tag -> short_hash
+        tag_hash_map = links.merge(doc_matches[['path', 'hash']], on='path')
+        tag_hash_map = tag_hash_map.groupby('tag')['hash'].first().str[:12].to_dict()
+
+        refs['hash_12'] = refs['tag'].map(tag_hash_map)
+
+        click.secho(f"Found {len(tags)} references linked to hash {hash_str[:12]}...", fg="cyan")
+
+        if verbose == 0:
+            qd(refs[['tag', 'author', 'title', 'year', 'hash_12']])
+        else:
+            for _, row in refs.iterrows():
+                click.secho(f"\n--- {row.tag} ---", fg="yellow")
+                metadata = row.dropna()
+                metadata = metadata[metadata != ""]
+                qd(metadata.to_frame(name="value"), show_index=True)
+
+    # 4. Open
+    if open_doc:
+        for p in paths:
+            click.echo(f"Opening: {Path(p).name}")
+            _open_document(p)
 
 
 # doc title opening ======experimental-----------------
@@ -1080,7 +1398,7 @@ def tag(tag, all_docs):
 @entry.command()
 @click.argument("title", nargs=-1, required=True, type=str)
 @click.option(
-    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+    "-a", "--all-docs", is_flag=True, show_default=True, help="Open all docs if more than one match."
 )
 def title(title, all_docs):
     """Open a document by its title with fuzzy search (no spaces!)."""
@@ -1113,7 +1431,7 @@ def title(title, all_docs):
 @entry.command()
 @click.argument("title", nargs=-1, required=True, type=str)
 @click.option(
-    "-a", "--all-docs", is_flag=True, help="Open all docs if more than one match."
+    "-a", "--all-docs", is_flag=True, show_default=True, help="Open all docs if more than one match."
 )
 def tt(title, all_docs):
     """Open a document by its tag and title with fuzzy search (no spaces!)."""
@@ -1147,7 +1465,7 @@ def tt(title, all_docs):
 # =================================================
 # Uber using Gemini new technology Nov 2025
 @entry.command()
-@click.option("-l", "--lib-name", type=str, default="", help="Open library.")
+@click.option("-l", "--lib-name", type=str, default="", show_default=True, help="Open library.")
 @click.option(
     "-a",
     "--auto-open",
@@ -1155,7 +1473,7 @@ def tt(title, all_docs):
     show_default=True,
     help="If true, auto open the default library.",
 )
-@click.option("-d", "--debug", is_flag=True)
+@click.option("-d", "--debug", is_flag=True, show_default=True)
 def uber(lib_name="", auto_open=True, debug=False):
     """QT Standalone Shell. Optionally open library."""
     shell = UberShell("archivum", debug)
@@ -1185,6 +1503,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
     completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
+    completers["hash"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
 
     query_completer = WordCompleter(
         ["-d", "--database", "doc", "ref", "ref-doc", "database"],
@@ -1206,8 +1525,8 @@ def uber(lib_name="", auto_open=True, debug=False):
         }
     )
     completers["query"] = query_completer
-    completers["import_bibtex"] = PathCompleter(only_directories=False, expanduser=True)
-    completers["import_doc"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["import-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["import-doc"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)

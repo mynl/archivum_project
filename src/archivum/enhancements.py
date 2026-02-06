@@ -975,30 +975,101 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     return ans._replace(ref_doc_df=final_ref_doc)
 
 
-def enhance_doc_df(library_obj, base_dir: str = "") -> Ans:
-    """Deal with the docs."""
+def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
+    """
+    Organize all documents into a sharded hardlink structure.
+    
+    Ensures:
+    1. Rich naming for tagged files (Hash + Author + Year + Title).
+    2. Multiple names per file (one hardlink per tag).
+    3. Orphan protection (Skeleton naming for untagged files).
+    4. Sharding on the first two chars of the filename.
+    """
     config = library_obj.config
-    df = doc_merged_df(library_obj)
-    # part relevant for naming
-    bit = df[['tag', 'title', 'author', 'year', 'hash', 'path', 'size', 'mod', 'create']].copy().fillna('')
+    
+    # Get all three core dataframes
+    ref_df = library_obj.ref_df
+    ref_doc_df = library_obj.ref_doc_df
+    doc_df = library_obj.doc_df.copy() # Work on a copy
+    
+    # A. Ensure hashes are present (CRITICAL for sharding)
+    missing_mask = (doc_df['hash'].isna()) | (doc_df['hash'] == '') | (doc_df['hash'] == 'Unknown')
+    missing_hashes = doc_df[missing_mask]
+    if not missing_hashes.empty:
+        print(f"Doc Organizer: Hashing {len(missing_hashes)} files...")
+        from .hasher import hash_many3
+        paths = [Path(p) for p in missing_hashes.path]
+        hashes = hash_many3(paths, workers=config.hash_workers)
+        doc_df.loc[missing_mask, 'hash'] = doc_df.loc[missing_mask, 'path'].map(lambda x: hashes.get(Path(x), ''))
+        # If we found hashes, we should definitely update the library's internal state
+        library_obj._doc_read_df = doc_df
 
-    # process work - find hash duplicates, figure better names
-    da2 = process_data_df(bit, 'hash', config)
+    # 1. Capture ALL (Tag, Path) mappings (Rich links)
+    # Join Ref -> RefDoc -> Doc (Inner join ensures we only process files we have)
+    tagged_links = (
+        ref_doc_df.merge(ref_df, on='tag', how='inner')
+                  .merge(doc_df[['path', 'hash']], on='path', how='inner')
+    )
+    
+    # 2. Capture ALL Orphans (Files in doc_df with no Tag in ref_doc_df)
+    orphan_paths = set(doc_df.path) - set(ref_doc_df.path)
+    orphans = doc_df[doc_df.path.isin(orphan_paths)].copy()
+    orphans['tag'] = 'ORPHAN'
+    orphans['author'] = 'Unknown'
+    orphans['year'] = '9999'
+    # Use existing title or guess from filename
+    orphans['title'] = orphans.apply(lambda r: r.get('title') or title_from_path(r.path), axis=1)
+
+    # 3. Combine for processing
+    cols = ['tag', 'hash', 'author', 'year', 'title', 'path']
+    to_process = pd.concat([tagged_links[cols], orphans[cols]], ignore_index=True)
+    # Ensure no nans in naming ingredients
+    for c in ['hash', 'author', 'year', 'title']:
+        to_process[c] = to_process[c].fillna('Unknown')
 
     base = Path(base_dir)
     base.mkdir(parents=True, exist_ok=True)
-
-    # add new file names to new_docs
-    hardlink_namer = partial(path_from_row, base_dir=base)
-    new_docs = da2.ans_df[['tag', 'title', 'author', 'year', 'hash', 'path']].copy()
-    new_docs['hardlink'] = new_docs.apply(hardlink_namer, axis=1)
-    # hash -> hardlink name
-    hash_hardlink_mapper = new_docs[['hash', 'hardlink']].set_index('hash', drop=True).hardlink.to_dict()
-
-    # do the work...obvs some duplication here...
+    
+    # 4. Calculate new paths and perform hardlinking
+    to_process['new_path'] = to_process.apply(lambda r: path_from_row(r, base), axis=1)
+    
     hardlink_maker = partial(save_from_row, base_path=base)
-    audit = new_docs.apply(hardlink_maker, axis=1)
-    print('audit: should all be "ok"')
-    print(audit.value_counts())
+    results = to_process.apply(hardlink_maker, axis=1)
+    
+    # 5. Optional DB Update (Point library to the sharded files)
+    if update:
+        print("Doc Organizer: Updating library database with sharded paths...")
+        
+        # Build new ref_doc_df (Rich links only)
+        # We need to keep 'preferred' if it exists
+        new_ref_doc = to_process[to_process.tag != 'ORPHAN'].merge(
+            ref_doc_df[['tag', 'path', 'preferred']], on=['tag', 'path'], how='left'
+        )
+        new_ref_doc = new_ref_doc[['tag', 'new_path', 'preferred']].rename(columns={'new_path': 'path'})
+        
+        # Build new doc_df
+        # We merge the original doc stats with the new paths
+        new_doc_df = to_process.merge(doc_df, on=['path', 'hash'], how='inner')
+        new_doc_df['old_path'] = new_doc_df['path']
+        new_doc_df['path'] = new_doc_df['new_path']
+        new_doc_df['name'] = new_doc_df['path'].apply(lambda x: Path(x).name)
+        
+        # Keep original columns of doc_df
+        final_doc_df = new_doc_df[doc_df.columns].drop_duplicates(subset=['path'])
+        
+        # Commit to library object
+        library_obj._ref_doc_df = new_ref_doc
+        library_obj._doc_read_df = final_doc_df
+        library_obj.save()
+        library_obj.reset()
+
+    # 6. Report
+    print(f"Doc Organizer: Processed {len(to_process)} total links.")
+    print(f" - Rich links: {len(tagged_links)}")
+    print(f" - Orphan links: {len(orphans)}")
+    print("\nResult Status:")
+    print(results.value_counts())
+    
+    return results
 
 

@@ -13,6 +13,7 @@ ETL is, in principle, replayable.
 
 import json
 import logging
+from functools import partial
 from pathlib import Path
 import re
 from difflib import SequenceMatcher
@@ -37,6 +38,7 @@ from .trie import Trie
 from .library_base import LibraryBase
 from .hasher import hash_many3 as hash_many
 
+from .enhancements import save_from_row
 # set to True to override where audit files are stored to tmp
 # False is default
 
@@ -159,6 +161,7 @@ class Bib2df_Incremental(LibraryBase):
         errors_mapper=None,
         remap_dashes=False,
         add_hashes=False,
+        incremental=False,
         qd=None,
     ):
         """
@@ -218,7 +221,8 @@ class Bib2df_Incremental(LibraryBase):
         self.fillna = fillna
         self.errors_mapper = errors_mapper or {}
         self.remap_dashes = remap_dashes
-        self._add_hashes = add_hashes
+        self._add_hashes = add_hashes or incremental
+        self.incremental = incremental
         assert self.bibtex_file_path.exists(), "Bibtex file must exist"
         if self.doc_dir and not self.doc_dir.exists():
             logger.info("PDF directory is None or does not exist")
@@ -386,9 +390,12 @@ class Bib2df_Incremental(LibraryBase):
                 if self._add_hashes:
                     logger.info("Adding hashes")
                     missing_docs = df.path.values
-                    hashes = hash_many(missing_docs, workers=self.reference_library.config.hash_workers)
-                    # hashes returns dict path->hash, so lookup on path
-                    df.hash = df.path.map(lambda x: hashes.get(x, ""))
+                    hashes = hash_many(
+                        [Path(p) for p in missing_docs], 
+                        workers=self.reference_library.config.hash_workers
+                    )
+                    # hashes returns dict Path->hash, so lookup on Path(x)
+                    df.hash = df.path.map(lambda x: hashes.get(Path(x), ""))
                 # set variable
                 self._doc_df = df
                 logger.info(
@@ -678,7 +685,7 @@ class Bib2df_Incremental(LibraryBase):
         header_match = re.match(r"\s*@?([a-zA-Z]+)\s*\{\s*([^,]+),", entry)
 
         if not header_match:
-            logger.warning("Skipping header")
+            logger.debug("Skipping header")
             return None
 
         result = {}
@@ -965,39 +972,153 @@ class Bib2df_Incremental(LibraryBase):
         # self._ported_df = self._ported_df.set_index('tag')
 
         # ============================================================================================
+        # 1. Run Analysis on FULL unfiltered data
+        self._analysis_cache = self.import_analysis(lib_test=True)
+        
+        # 2. Filter duplicates in Incremental Mode
+        if self.incremental:
+            logger.info("Incremental Mode: Identifying and removing duplicates...")
+            if not self._analysis_cache.empty:
+                # ONLY kick out if it is a Skip action (Hash + Metadata match)
+                dupes_df = self._analysis_cache[self._analysis_cache.action == "SKIP (Dupe)"]
+                if not dupes_df.empty:
+                    dupe_tags = dupes_df.tag.unique()
+                    logger.warning(f"Kicking out {len(dupe_tags)} metadata+hash duplicates from import.")
+                    # We remove from ported_df based on the remapped tag
+                    self._ported_df = self._ported_df[~self._ported_df.tag.isin(dupe_tags)]
+                    # Update raw_df to match ported_df for reporting purposes
+                    self._raw_df = self._raw_df[self._raw_df.tag.isin(self._ported_df.tag)]
+                    
+                    # Force properties to re-evaluate for the actual import
+                    self._ref_df = pd.DataFrame()
+                    self._vfile_df = pd.DataFrame()
+                    self._ref_doc_df = pd.DataFrame()
+
+        # ============================================================================================
         # final checks and balances, and write out info
         self.save_audit_file(self.raw_df, ".raw-df")
         self.save_audit_file(self._ported_df, ".ported-df")
+        
+        num_raw = len(self.raw_df)
+        num_ported = len(self._ported_df)
+        num_dupes = num_raw - num_ported
+
+        import_info_dict = {
+            "created": str(self.timestamp),
+            "bibtex_file": str(self.bibtex_file_path.absolute()),
+            "raw_entries": num_raw,
+        }
+        
+        if self.incremental:
+            import_info_dict["duplicates"] = num_dupes
+            import_info_dict["net_entries"] = num_ported
+        else:
+            import_info_dict["ported_entries"] = num_ported
+
         import_info = pd.DataFrame(
-            {
-                "created": str(self.timestamp),
-                "bibtex_file": self.bibtex_file_path.absolute(),
-                "raw_entries": len(self.raw_df),
-                "ported_entries": len(self._ported_df),
-            }.items(),
+            import_info_dict.items(),
             columns=["key", "value"],
         )
         self.save_audit_file(import_info, ".audit-info")
         return import_info
 
-    def import_analysis(self, lib_test=False, strict=False):
+    def import_analysis(self, lib_test=True):
         """
-        Prepare for import of references/documents from a BibTeX file into
-        self.reference_library (may be None for a new library).
+        Prepare a detailed analysis of the import.
+        Returns a DataFrame with columns:
+        tag | author | title | hash match | doi match | title match | action
+        """
+        # Return cached analysis if available (ensures we see filtered records)
+        if hasattr(self, '_analysis_cache') and self._analysis_cache is not None:
+            return self._analysis_cache
 
-        Does the same work as interactive_import, but guesses. Nothing
-        is actually imported or written.
+        rows = []
+        # We MUST use the internal ported_df BEFORE it is filtered
+        # or reconstructed from raw_df
+        for idx, raw in self.raw_df.iterrows():
+            # Get the remapped tag if it exists in ported_df
+            tag = self._ported_df.loc[idx].tag if idx in self._ported_df.index else raw.tag
+            title = raw.title
+            author = raw.author[:25]
+            
+            # Get detailed duplicate info
+            dup_info = self._check_all_duplicates_v3(raw, tag, idx, lib_test=lib_test)
+            
+            # Format matches for display
+            def fmt_match(m):
+                if not m: return "N"
+                status = "doc" if m['has_doc'] else "no doc"
+                return f"Y ({status})"
 
-        If strict, counts adding columns (which is done as part of the
-        import as a change.) Usually don't want this.
+            hash_m = "Y" if dup_info['hash'] else "N"
+            doi_m = fmt_match(dup_info['doi'])
+            title_m = fmt_match(dup_info['title'])
+            
+            # Determine Action
+            action = "Import"
+            has_meta_match = (dup_info['doi'] or dup_info['title'])
+            
+            if dup_info['hash'] and has_meta_match:
+                action = "SKIP (Dupe)"
+            elif dup_info['hash']:
+                action = "Link Existing"
+            elif has_meta_match:
+                m = dup_info['doi'] or dup_info['title']
+                if not m['has_doc']:
+                    action = "Import (Fill)"
+                else:
+                    action = "Merge/Warn"
+            
+            rows.append({
+                "tag": tag,
+                "author": author,
+                "title": title[:50],
+                "hash match": hash_m,
+                "doi match": doi_m,
+                "title match": title_m,
+                "action": action
+            })
+            
+        return pd.DataFrame(rows)
+
+    def _check_all_duplicates_v3(self, raw_row, ported_tag, idx, lib_test=True):
+        """Standardized duplicate checker."""
+        res = {'hash': None, 'doi': None, 'title': None}
+        
+        # 1. Hash Check
+        if self._add_hashes:
+            # Find path in this import's doc_df
+            # Use the index to stay aligned
+            if idx in self.ported_df.index:
+                vfile_mask = self.vfile_df.tag == ported_tag
+                if vfile_mask.any():
+                    p_str = self.vfile_df[vfile_mask].vfile.iloc[0]
+                    p = Path(p_str)
+                    doc_mask = self.doc_df.path.map(lambda x: Path(x)) == p
+                    if doc_mask.any():
+                        h = self.doc_df[doc_mask].hash.iloc[0]
+                        if h and h in self.reference_library.doc_df.hash.values:
+                            res['hash'] = h
+
+        # 2. DOI/Title Check
+        for kind in ('doi', 'title'):
+            m = self._possible_duplicate_v2(raw_row, idx, kind, lib_test)
+            if m:
+                has_doc = m['match_tag'] in self.reference_library.ref_doc_df.tag.values
+                res[kind] = {'tag': m['match_tag'], 'has_doc': has_doc}
+        
+        return res
+
+    def import_analysis_full(self, lib_test=True, strict=False):
+        """
+        Original detailed diagnostic analysis.
+        Shows scores, field changes, and raw vs ported comparison.
         """
         results = []
         for (left, raw_input), (right, revised) in zip(
             self.raw_df.iterrows(), self.ported_df.iterrows()
         ):
             tag_in = raw_input.tag
-            # trim for ligo problem
-            # tag = revised.tag[:20]
             tag = revised.tag
             title = revised.title
             (
@@ -1023,7 +1144,6 @@ class Bib2df_Incremental(LibraryBase):
                 if temp:
                     change_cols = ",".join(temp)
                 else:
-                    # ? must be an index change
                     change = "-"
                     if strict:
                         index_change = set(revised.index) - set(raw_input.index)
@@ -1032,7 +1152,7 @@ class Bib2df_Incremental(LibraryBase):
                         change_cols = ""
             else:
                 change_cols = " no chg "
-            #
+            
             results.append(
                 [
                     tag_in,
@@ -1043,8 +1163,8 @@ class Bib2df_Incremental(LibraryBase):
                     score_tag,
                     match_title,
                     match_tag,
-                    raw_input.author,
-                    revised.author,
+                    raw_input.author[:20],
+                    revised.author[:20],
                     change,
                     change_cols,
                 ]
@@ -1069,14 +1189,84 @@ class Bib2df_Incremental(LibraryBase):
 
         return result_df
 
+    def _check_all_duplicates(self, ref_row, ref_row_idx, lib_test=True):
+        """Comprehensive check for all types of duplicates."""
+        res = {'hash': None, 'doi': None, 'title': None}
+        tag = ref_row.get('tag', '')
+        
+        # 1. Hash Check
+        if self._add_hashes:
+            mask = self.vfile_df.tag == tag
+            if mask.any():
+                path_str = self.vfile_df[mask].vfile.iloc[0]
+                path = Path(path_str)
+                # Lookup in this import's doc_df
+                # Ensure we compare Path objects or standardized posix strings
+                h_mask = self.doc_df.path.map(lambda x: Path(x)) == path
+                if h_mask.any():
+                    h = self.doc_df[h_mask].hash.iloc[0]
+                    if h and h in self.reference_library.doc_df.hash.values:
+                        res['hash'] = h
+
+        # 2. DOI/Title Check
+        for kind in ('doi', 'title'):
+            m = self._possible_duplicate_v2(ref_row, ref_row_idx, kind, lib_test)
+            if m:
+                # Check if the matched tag has a document
+                has_doc = m['match_tag'] in self.reference_library.ref_doc_df.tag.values
+                res[kind] = {'tag': m['match_tag'], 'has_doc': has_doc}
+        
+        return res
+
+    def _possible_duplicate_v2(self, ref_row, ref_row_idx, kind, lib_test):
+        """Helper for DOI/Title matching."""
+        # Initialize internal caches if needed
+        _ = self._possible_duplicate(ref_row, ref_row_idx, lib_test)
+        
+        val = ""
+        if kind == 'doi':
+            val = str(ref_row.get("doi", "") or "").strip().lower()
+            if not val: return None
+            mask = self._dois == val
+        else:
+            val = self._normalize_title(ref_row.get("title", ""))
+            if not val: return None
+            mask = self._existing_title_norm == val
+            
+        if self._self_test:
+            mask[ref_row_idx] = False
+            
+        if mask.any():
+            match_tag = self._possible_duplicate_tags.loc[mask].iloc[0]
+            return {'match_tag': match_tag}
+        return None
+
     def update_library(self, save=True):
         """
         Update self.library underlying files and save.
 
-        This will add ALL rows discovered...so make sure they are
-        what you want before you run! Look at import_analysis!
+        If self.incremental is True, also shards the new documents into the 
+        library's document store.
         """
         self.reference_library.update(self)
+
+        if self.incremental:
+            logger.info("Incremental Import: Sharding new documents...")
+            # Merge necessary metadata for sharding
+            # We use the newly created ref_df, ref_doc_df, and doc_df from THIS import
+            to_shard = (
+                self.ref_doc_df.merge(self.ref_df, on='tag', how='inner')
+                               .merge(self.doc_df[['path', 'hash']], on='path', how='inner')
+            )
+            
+            base_path = Path(self.reference_library.config.doc_dir_name)
+            if not base_path.is_absolute():
+                base_path = self.reference_library.config_path / base_path
+            
+            hardlink_maker = partial(save_from_row, base_path=base_path)
+            results = to_shard.apply(hardlink_maker, axis=1)
+            logger.info("Sharding complete: %s rich links created.", len(results))
+
         # create audit trail
         import_path = (
             self.reference_library.config_path / "import-audit" / self.timestamp
@@ -1194,6 +1384,34 @@ class Bib2df_Incremental(LibraryBase):
         title = ref_row.get("title", "")
         tag = ref_row.get("tag", "")
         title_norm = self._normalize_title(title)
+
+        # Hash Check (The "Guardian" logic)
+        if self.incremental and self._add_hashes:
+            # Check if this file hash already exists in the library
+            # Note: doc_df is the library's document database
+            # We need to find the hash of the file currently being imported
+            
+            # Use self.vfile_df to find the actual path for this tag
+            # (ref_row index is matching ported_df index which is 1-based, 
+            # but tag is always reliable)
+            mask = self.vfile_df.tag == tag
+            if mask.any():
+                current_path = self.vfile_df[mask].vfile.iloc[0]
+                # lookup in doc_df which contains hashes of files in this import
+                doc_mask = self.doc_df.path == current_path
+                if doc_mask.any():
+                    current_hash = self.doc_df[doc_mask].hash.iloc[0]
+                    
+                    if current_hash:
+                        lib_docs = self.reference_library.doc_df
+                        if current_hash in lib_docs.hash.values:
+                            # Find which tags in the library use this hash
+                            match_paths = lib_docs[lib_docs.hash == current_hash].path
+                            match_tags = self.reference_library.ref_doc_df[
+                                self.reference_library.ref_doc_df.path.isin(match_paths)
+                            ].tag.tolist()
+                            if match_tags:
+                                return "HASH", 100, 100, title, match_tags[0]
 
         # what are we checking against?
         if self._existing_title_norm is None or self._dois is None:

@@ -62,6 +62,7 @@ DEFAULT_GLOBAL_CONFIG = {
     "theme": "system",
     "debug_mode": False,
     "debug_dir": "",
+    "doc_store_lib": "docs",
     "version": __version__,
 }
 

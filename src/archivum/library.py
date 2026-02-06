@@ -564,7 +564,7 @@ class Library(LibraryBase):
         # clear local caches
         self.reset()
 
-    def initial_import(self, *, dir_name="", dir_iterable=None, errors_mapper=None, qd=display, update=False):
+    def initial_import(self, *, dir_name="", dir_iterable=None, errors_mapper=None, qd=display, update=False, incremental=False):
         """
         Iterate import dir_name or iterate over if iterable. Find
         ! bibtex file - error if the bibtex file is not unique.
@@ -589,12 +589,12 @@ class Library(LibraryBase):
             bibtex_file = find_bibtex(doc_dir)
             if bibtex_file is not None:
                 # print(bibtex_file, doc_dir)
-                self.initial_import_bibtex_file(bibtex_file, doc_dir, errors_mapper, qd, update)
+                self.initial_import_bibtex_file(bibtex_file, doc_dir, errors_mapper, qd, update, incremental=incremental)
             else:
                 logger.warning('SKIPPING: No unique bibtex found for %s', doc_dir)
                 continue
 
-    def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, errors_mapper=None, qd=display, update=True):
+    def initial_import_bibtex_file(self, bibtex_file, doc_dir=None, errors_mapper=None, qd=display, update=True, incremental=False):
         """
         Import a single bibtex file into library.
 
@@ -617,6 +617,7 @@ class Library(LibraryBase):
             reference_library=self,
             errors_mapper=errors_mapper,
             fillna=True,
+            incremental=incremental,
             qd=qd,
         )
         # import and report
