@@ -723,25 +723,52 @@ class Library(LibraryBase):
                     logger.warning('Object of type %s cannot be saved to json', type(obj))
         logger.info(f"Audit: {type(obj).__name__} saved to {path.name}.")
 
-    # def schedule(self, execute=False):
-    #     """Set up the task schedule for the project."""
-    #     schedule_time = self.config.get('schedule_time', '')
-    #     if schedule_time == "":
-    #         print('Scheduling not defined in config file. Exiting.')
-    #     schedule_frequency = self.schedule_frequency
-    #     task_name = f'file-db-task {self.project}'
-    #     cmd = [
-    #         "schtasks",
-    #         "/Create",
-    #         "/TN", task_name,
-    #         "/TR", f'file-db index -c "{str(self.config_path)}"',
-    #         "/SC", schedule_frequency,
-    #         "/ST", schedule_time,
-    #         "/F"  # force update if exists
-    #     ]
+    def audit_summary(self):
+        """Create a dataframe summarizing the imports used to create the library."""
+        lib_path = self.config_path
+        # 1. Map: Old BibTeX Tag -> Normalized Tag
+        audit_files = {}
+        # rglob finds all tag-mapping files across all import batches
+        for p in (lib_path / "import-audit").rglob("*audit-info.csv"):
+            df = pd.read_csv(p, index_col='key', usecols=[1, 2])
+            audit_files[p.name] = df
+        return pd.concat(audit_files.values(),
+                    keys=audit_files.keys()
+                    ).unstack(1).droplevel(0, axis=1)
 
-    #     if execute:
-    #         print('Executing:\n\n', ' '.join(cmd))
-    #         subprocess.run(cmd, check=True)
-    #     else:
-    #         print('Would execute\n\n', ' '.join(cmd))
+    def make_tag_mapper(self):
+        """Make a tag mapping dictionary for library"""
+        # Set this to your actual library path
+        lib_path = self.config_path
+        # 1. Map: Old BibTeX Tag -> Normalized Tag
+        import_map = {}
+        extra_map = {}
+        # rglob finds all tag-mapping files across all import batches
+        for p in (lib_path / "import-audit").rglob("*tag-mapping.csv"):
+            ln = p.name.split('.')[0]
+            if ln in ('library', 'books', 'book-scans'):
+                d = import_map
+            else:
+                d = extra_map
+            # print(p.parent.name, "-->", ln)
+            df = pd.read_csv(p, index_col=0)
+            # 'tag' is what was in your old .bib file
+            # 'proposed_tag' is what Archivum initially assigned
+            d.update(dict(zip(df['tag'], df['proposed_tag'])))
+
+        # 2. Map: Normalized Tag -> Final Survivor Tag
+        # We take the latest enhancement run as the source of truth
+        enhance_files = sorted((lib_path / "enhance-audit").rglob("Ans-work_df.csv"))
+        enhance_map = {}
+        if enhance_files:
+             latest_enhance = pd.read_csv(enhance_files[-1])
+             # 'tag' here is the normalized one
+             # 'source_id' is the survivor after deduplication
+             enhance_map = dict(zip(latest_enhance['tag'], latest_enhance['source_id']))
+
+        # 3. Final Chained Dict: Old Tag -> Final Survivor
+        final_tag_map = {
+             old: enhance_map.get(ported, ported)
+                 for old, ported in import_map.items()
+        }
+        return final_tag_map

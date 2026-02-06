@@ -79,3 +79,4 @@ Archivum is a personal document and reference management system (similar to Mend
 ## TODOs
 - **Logging**: Refine and standardize logging output for `import-doc` and `import-bibtex`.
 - **Entry Editing**: Implement an easy way to edit reference entries directly from the CLI (e.g., fixing tags with missing years like "Delaen").
+- **hash** command: use first 12 of hash not whole string.
