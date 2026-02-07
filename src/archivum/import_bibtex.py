@@ -27,7 +27,7 @@ from rapidfuzz import distance
 import numpy as np
 import pandas as pd
 
-from . import EMPTY_LIBRARY, DEBUG_DIR
+from . import EMPTY_LIBRARY, DEBUG_DIR, DOC_STORE_DIR
 from .utilities import (
     remove_accents,
     accent_mapper_dict,
@@ -38,7 +38,7 @@ from .trie import Trie
 from .library_base import LibraryBase
 from .hasher import hash_many3 as hash_many
 
-from .enhancements import save_from_row
+from .enhancements import save_from_row, path_from_row
 # set to True to override where audit files are stored to tmp
 # False is default
 
@@ -1248,8 +1248,6 @@ class Bib2df_Incremental(LibraryBase):
         If self.incremental is True, also shards the new documents into the 
         library's document store.
         """
-        self.reference_library.update(self)
-
         if self.incremental:
             logger.info("Incremental Import: Sharding new documents...")
             # Merge necessary metadata for sharding
@@ -1259,13 +1257,30 @@ class Bib2df_Incremental(LibraryBase):
                                .merge(self.doc_df[['path', 'hash']], on='path', how='inner')
             )
             
-            base_path = Path(self.reference_library.config.doc_dir_name)
-            if not base_path.is_absolute():
-                base_path = self.reference_library.config_path / base_path
-            
-            hardlink_maker = partial(save_from_row, base_path=base_path)
-            results = to_shard.apply(hardlink_maker, axis=1)
-            logger.info("Sharding complete: %s rich links created.", len(results))
+            if not to_shard.empty:
+                base_path = DOC_STORE_DIR
+                
+                # Perform hardlinking
+                hardlink_maker = partial(save_from_row, base_path=base_path)
+                results = to_shard.apply(hardlink_maker, axis=1)
+                logger.info("Sharding complete: %s rich links created.", len(results))
+
+                # Update paths in the importer so the library update uses the sharded paths
+                to_shard['new_path'] = to_shard.apply(lambda r: path_from_row(r, base_path), axis=1)
+                
+                # 1. Update ref_doc_df
+                new_ref_doc = to_shard[['tag', 'new_path']].rename(columns={'new_path': 'path'})
+                self._ref_doc_df = new_ref_doc
+                
+                # 2. Update doc_df
+                new_doc_df = to_shard.merge(self.doc_df, on=['path', 'hash'], how='inner')
+                new_doc_df['path'] = new_doc_df['new_path']
+                new_doc_df['name'] = new_doc_df['path'].apply(lambda x: Path(x).name)
+                self._doc_df = new_doc_df[self.doc_df.columns].drop_duplicates(subset=['path'])
+            else:
+                logger.info("Nothing to shard.")
+
+        self.reference_library.update(self)
 
         # create audit trail
         import_path = (

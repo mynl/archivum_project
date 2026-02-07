@@ -9,7 +9,9 @@ import datetime as dt
 from importlib.resources import files
 import json
 import logging
+import os
 from pathlib import Path
+import shutil
 import subprocess
 
 import pandas as pd
@@ -17,14 +19,20 @@ from IPython.display import display
 
 from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
-from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY
+from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, DOC_STORE_DIR
 from .trie import Trie
 from .utilities import TagAllocator
 from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex
 from .hasher import hash_many3 as hash_many
-from .enhancements import enhance_ref_df, Ans
+from .enhancements import (
+    enhance_ref_df,
+    Ans,
+    path_from_row,
+    save_from_row,
+    canonical_name_from_row
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +84,7 @@ class Library(LibraryBase):
         # merged = base_config.model_dump() | overrides
 
         self.config = load_configuration(self.config_path, **overrides)
-        self.text_dir_path = BASE_DIR / self.config.text_dir_name
+        self.text_dir_path = DOC_STORE_DIR / "full-text"
         self.text_dir_full_name = str(self.text_dir_path)
         self.reset()
 
@@ -125,7 +133,8 @@ class Library(LibraryBase):
                 self._doc_read_df = pd.read_feather(self.config_path / "doc.feather") #, dtype_backend="pyarrow")
             except FileNotFoundError:
                 return self._doc_df
-            doc_dir = Path(self.config.doc_dir_name)
+
+            doc_dir = DOC_STORE_DIR
 
             def get_rel_parent(p: Path) -> str:
                 if p.is_relative_to(doc_dir):
@@ -134,9 +143,12 @@ class Library(LibraryBase):
 
             # truncate path names to make more readable
             self._doc_df = self._doc_read_df.copy()
-            self._doc_df["tpath"] = [
-                get_rel_parent(p) for p in map(Path, self._doc_df.path)
-            ]
+            if not self._doc_df.empty and "path" in self._doc_df.columns:
+                self._doc_df["tpath"] = [
+                    get_rel_parent(p) for p in map(Path, self._doc_df.path)
+                ]
+            else:
+                self._doc_df["tpath"] = pd.Series(dtype=str)
 
             # set up querexfuzz
             config_file = (
@@ -311,15 +323,225 @@ class Library(LibraryBase):
         self.reset()
         logger.info("saved library and invalidated cache")
 
+    def remove_reference(self, tag: str):
+        """Remove a reference and its links from the library."""
+        if tag not in self.ref_df.tag.values:
+            logger.warning("Tag %s not found in ref_df", tag)
+        self._ref_df = self.ref_df[self.ref_df.tag != tag]
+        self._ref_doc_df = self.ref_doc_df[self.ref_doc_df.tag != tag]
+        self.save()
+        self.reset()
+
+    def update_reference(self, old_tag: str, new_data: dict):
+        """Update or add a reference. Handles tag changes."""
+        print('Warning: UNTESTED')
+        return
+        new_tag = new_data.get("tag")
+        if not new_tag:
+            raise ValueError("New data must contain a 'tag'")
+
+        # 1. Handle tag change or new tag
+        if old_tag != new_tag:
+            if new_tag in self.ref_df.tag.values:
+                raise ValueError(f"Tag '{new_tag}' already exists in library.")
+            if old_tag:
+                # Update links in ref_doc_df
+                self._ref_doc_df.loc[self._ref_doc_df.tag == old_tag, "tag"] = new_tag
+
+        # 2. Prepare new row
+        # Use existing row as base if updating
+        if old_tag and old_tag in self.ref_df.tag.values:
+            idx = self.ref_df.index[self.ref_df.tag == old_tag][0]
+            row = self.ref_df.loc[idx].copy()
+            for k, v in new_data.items():
+                row[k] = v
+            # If tag changed, we'll replace the old one
+            self._ref_df = self.ref_df.drop(idx)
+        else:
+            # Adding new
+            row = pd.Series(new_data)
+
+        # 3. Restrict to configured columns, but ENSURE tag and type are kept
+        keep_cols = set(self.config.ref_columns)
+        keep_cols.add("tag")
+        keep_cols.add("type")
+        row = row[row.index.isin(keep_cols)]
+
+        # 4. Append and save
+        self._ref_df = pd.concat(
+            [self.ref_df, row.to_frame().T], ignore_index=True
+        )
+        self.save()
+        self.reset()
+
+    def validate(self, task: str = "sharding", execute: bool = False, new_root: str = None):
+        """
+        Audit and fix library structure.
+        Tasks: 'sharding', 'rebase', 'missing'
+        """
+        base_path = DOC_STORE_DIR
+
+        report = []
+
+        def path_compare(l_str, r_str):
+            """compare two strings as resolved paths."""
+            if not l_str or not r_str:
+                return False
+            if str(l_str).lower() == str(r_str).lower():
+                return True
+            # physical check
+            try:
+                return os.path.samefile(l_str, r_str)
+            except (OSError, ValueError):
+                return False
+
+        if task == "sharding":
+            # 1. Join everything to see what we SHOULD have (unexploded authors)
+            # Use ref_df directly to avoid author explosion in self.database
+            db = (
+                self.ref_doc_df.merge(self.ref_df, on="tag", how="inner")
+            ).merge(self.doc_df, on="path", how="inner")
+
+            if db.empty:
+                return pd.DataFrame()
+
+            for _, row in db.iterrows():
+                if pd.isna(row.path) or not row.path:
+                    continue
+
+                # Calculate what the path should be
+                expected = path_from_row(row, base_path)
+                actual = row.path
+
+                if not path_compare(actual, expected):
+                    status = "Misplaced"
+                    if not os.path.exists(actual):
+                        status = "Missing"
+
+                    report.append({
+                        "tag": row.tag,
+                        "current": actual,
+                        "expected": expected,
+                        "status": status
+                    })
+
+                    if execute and status == "Misplaced":
+                        # Perform the "move" (hardlink + update)
+                        success = save_from_row(row, base_path)
+                        if success == 'ok':
+                            # Update metadata
+                            self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
+                            self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                        else:
+                            report[-1]["status"] = "Failed"
+
+        elif task == "rebase":
+            print('WARNING: not tested, setting execute to False')
+            execute = False
+            if not new_root:
+                raise ValueError("rebase task requires new_root")
+
+            new_root_path = Path(new_root)
+            old_root_path = base_path
+
+            for _, row in self.doc_df.iterrows():
+                actual = row.path
+                actual_p = Path(actual)
+                if actual_p.is_relative_to(old_root_path):
+                    rel = actual_p.relative_to(old_root_path)
+                    expected = str((new_root_path / rel).as_posix())
+                    report.append({
+                        "current": actual,
+                        "expected": expected,
+                        "status": "Rebase"
+                    })
+
+                    if execute:
+                        self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                        self._ref_doc_df.loc[self._ref_doc_df.path == actual, "path"] = expected
+
+        elif task == "missing":
+            for _, row in self.doc_df.iterrows():
+                if not os.path.exists(row.path):
+                    report.append({
+                        "tag": "N/A",
+                        "current": row.path,
+                        "expected": "N/A",
+                        "status": "Missing"
+                    })
+                    if execute:
+                        # remove from indices
+                        self._doc_read_df = self._doc_read_df[self._doc_read_df.path != row.path]
+                        self._ref_doc_df = self._ref_doc_df[self._ref_doc_df.path != row.path]
+
+        if execute and report:
+            self.save()
+            self.reset()
+
+        return pd.DataFrame(report)
+
     def save(self):
-        """Save config and all dataframes."""
-        # config.save handles the
+        """Save config and all dataframes with aggressive safety checks."""
+        # 1. ENSURE LOADED: Prevent lazy-load wiping by forcing properties to evaluate
+        ref_to_save = self.ref_df
+        _ = self.doc_ref_df
+        _ = self.doc_df
+        doc_to_save = self._doc_read_df
+        ref_doc_to_save = self._ref_doc_df
+
+        files_to_save = {
+            "ref.feather": ref_to_save,
+            "doc.feather": doc_to_save,
+            "ref-doc.feather": ref_doc_to_save
+        }
+
+        # 2. BACKUP & VALIDATE
+        backup_dir = self.config_path / "backups"
+        backup_dir.mkdir(exist_ok=True)
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        for filename, df in files_to_save.items():
+            target_path = self.config_path / filename
+            if target_path.exists():
+                try:
+                    # Check existing size
+                    disk_df = pd.read_feather(target_path)
+                    disk_len = len(disk_df)
+                    mem_len = len(df)
+
+                    # CRITICAL SAFETY: Never overwrite a populated file with an empty DF
+                    if disk_len > 0 and mem_len == 0:
+                        msg = f"CRITICAL: Wipe prevented! Attempted to save empty DF to {filename} (Disk has {disk_len} rows)."
+                        logger.error(msg)
+                        raise ValueError(msg)
+
+                    # WARNING: Warn if count drops significantly
+                    if mem_len < disk_len:
+                        logger.warning(f"Row count drop in {filename}: {disk_len} -> {mem_len}")
+
+                    # Create timestamped backup before overwrite
+                    shutil.copy2(target_path, backup_dir / f"{target_path.stem}_{timestamp}.feather")
+                except Exception as e:
+                    if isinstance(e, ValueError) and "CRITICAL" in str(e):
+                        raise
+                    logger.warning(f"Backup failed for {filename}: {e}")
+
+        # 3. ACTUAL SAVE
+        # config.save handles its own backup
         self.config.save(self.config_path, backup=True)
-        self._ref_df.to_feather(self.config_path / "ref.feather")
-        self._doc_read_df.to_feather(self.config_path / "doc.feather")
-        self._ref_doc_df.to_feather(self.config_path / "ref-doc.feather")
+
+        for filename, df in files_to_save.items():
+            df.to_feather(self.config_path / filename)
+
         # reproduce the bibtex file
         self.write_bibtex()
+
+        # 4. CLEANUP: Keep only last 10 backups
+        for stem in ["ref", "doc", "ref-doc"]:
+            backups = sorted(backup_dir.glob(f"{stem}_*.feather"))
+            if len(backups) > 10:
+                for b in backups[:-10]:
+                    b.unlink()
 
     # def querex(self, expr):
     #     """Run ``expr`` through the querex on database."""
@@ -359,6 +581,52 @@ class Library(LibraryBase):
         # df = df[['name', 'description', 'bibtex_file', 'doc_dir_name', 'text_dir_name', 'extractor', ]]
         df = df.reset_index(drop=True)
         return df
+
+    @staticmethod
+    def rename_library(old_name: str, new_name: str):
+        """Rename a library folder and update its internal name."""
+        old_path = LIBRARIES_DIR / old_name.replace(" ", "-")
+        if not old_path.exists():
+            old_path = LIBRARIES_DIR / old_name
+
+        if not old_path.exists():
+            raise FileNotFoundError(f"Source library '{old_name}' not found at {old_path}")
+
+        new_path = LIBRARIES_DIR / new_name.replace(" ", "-")
+        if new_path.exists():
+            raise FileExistsError(f"Destination library '{new_name}' already exists at {new_path}")
+
+        # Perform move
+        shutil.move(str(old_path), str(new_path))
+
+        # Update internal name
+        lib = Library(new_name)
+        new_config = lib.config.model_copy(update={"name": new_name})
+        new_config.save(new_path)
+        logger.info(f"Library renamed from '{old_name}' to '{new_name}'")
+
+    @staticmethod
+    def copy_library(old_name: str, new_name: str):
+        """Copy a library folder and update its internal name."""
+        old_path = LIBRARIES_DIR / old_name.replace(" ", "-")
+        if not old_path.exists():
+            old_path = LIBRARIES_DIR / old_name
+
+        if not old_path.exists():
+            raise FileNotFoundError(f"Source library '{old_name}' not found at {old_path}")
+
+        new_path = LIBRARIES_DIR / new_name.replace(" ", "-")
+        if new_path.exists():
+            raise FileExistsError(f"Destination library '{new_name}' already exists at {new_path}")
+
+        # Perform copy
+        shutil.copytree(str(old_path), str(new_path))
+
+        # Update internal name
+        lib = Library(new_name)
+        new_config = lib.config.model_copy(update={"name": new_name})
+        new_config.save(new_path)
+        logger.info(f"Library copied from '{old_name}' to '{new_name}'")
 
     def to_name_ex(self, name, strict=False):
         """Extend name to longest match using a Trie; in strict mode adds as key if missing."""
@@ -483,9 +751,14 @@ class Library(LibraryBase):
 
         # make the text for the bibtex file
         ans = []
-        drop_cols = [i for i in ["version", "arc-source"] if i in self.ref_df]
-        for r, row in self.ref_df.drop(columns=drop_cols).iterrows():
-            ans.append(dict_to_bibtex(row))
+        # Use ref_columns as the whitelist
+        allowed_fields = self.config.ref_columns
+
+        for _, row in self.ref_df.iterrows():
+            ans.append(dict_to_bibtex(row, allowed_fields=allowed_fields))
+
+        # Remove empty entries if any (dict_to_bibtex returns empty string on failure)
+        ans = [i for i in ans if i]
         txt = "\n\n".join(ans)
 
         # backup existing
@@ -640,11 +913,11 @@ class Library(LibraryBase):
                     df = pd.read_csv(f, index_col=0)
                     df['audit'] = f.stem.split('.')[0]
                     ans.append(df)
-        dfa = pd.concat(ans).set_index('audit', append=True).drop(columns='key').unstack(1).droplevel(0,1)
-        dfa.index = df['key'].values
-        dfa = dfa.sort_values('created', axis=1)
-        dfa = dfa.T
-        dfa.index.name = 'Import'
+        dfa = pd.concat(ans)
+        dfa.index = [i for i in dfa.key.map(lambda x: 1 if x=='created' else 0).cumsum()]
+        dfa.index.name = 'step'
+        dfa = dfa.set_index(['audit', 'key'], append=True).unstack(level='key').droplevel(0, 1)
+        dfa = dfa.fillna(0)
         dfa.raw_entries = dfa.raw_entries.astype(int)
         dfa.ported_entries = dfa.ported_entries.astype(int)
         dfa['cum_entries'] = dfa.ported_entries.cumsum()
@@ -663,10 +936,12 @@ class Library(LibraryBase):
         return df
 
     def find_docs(self, dir_path=None):
-        """Find all document files per the config or in provided dir_path."""
+        """Find all document files in provided dir_path."""
+        if dir_path is None:
+            raise ValueError("dir_path must be provided to find_docs")
+
         file_formats = self.config.file_formats
-        dir_path = (Path(self.config.doc_dir_name)
-                    if dir_path is None else Path(dir_path))
+        dir_path = Path(dir_path)
         docs = list()
         for ff in file_formats:
             docs.extend(f for f in dir_path.rglob(ff) if f.is_file())

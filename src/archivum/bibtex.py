@@ -5,59 +5,97 @@ v2  Hack off gemini, which actually was very poor for task at hand.
 v1  Gemini.
 """
 import logging
-from typing import Any
+import re
+from typing import Any, List
+import pandas as pd
 
 
 logger = logging.getLogger(__name__)
 
 
-def dict_to_bibtex(data: Any) -> str:
-    """
-    Converts a dict-like object (dict, pd.Series, DataFrame row) to a BibTeX string.
+def sanitize_for_latex(val: Any) -> str:
+    """Sanitize string for LaTeX compatibility."""
+    if pd.isna(val):
+        return ""
+    
+    # Handle numbers: convert 2017.0 to 2017
+    if isinstance(val, (float, int)):
+        if isinstance(val, float) and val.is_integer():
+            return str(int(val))
+        return str(val)
 
-    Assumes data is "sensible" - mostly used by Library.to_bibtex.
+    s = str(val)
+    
+    # 1. Nasty unicode dashes -> LaTeX dashes
+    s = s.replace('–', '--').replace('—', '---')
+    
+    # 2. LaTeX Special Characters (only if not already escaped)
+    # We use a negative lookbehind to avoid double escaping
+    # Handling &, %, _, #, { }
+    s = re.sub(r'(?<!\\)&', r'\&', s)
+    s = re.sub(r'(?<!\\)%', r'\%', s)
+    s = re.sub(r'(?<!\\)_', r'\_', s)
+    s = re.sub(r'(?<!\\)#', r'\#', s)
+    
+    return s
+
+
+def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
+    """
+    Converts a dict-like object to a sanitized BibTeX string.
     """
     if data is None:
         return ""
 
-    # Handle pandas objects (Series or DataFrame row)
+    # Handle pandas objects
     if hasattr(data, "to_dict"):
         data = data.to_dict()
-
+    
     # Handle NamedTuple (often returned by itertuples)
     if hasattr(data, "_asdict"):
         data = data._asdict()
 
     if not isinstance(data, dict):
-        logger.info('data cannot be coerced into a dict, returning ""')
         return ""
 
-    # non empty elements
-    data = {k: v for k, v in data.items() if v != ""}
+    # Standard header fields
+    bib_type = str(data.get('type', 'article')).lower()
+    cite_key = str(data.get('tag', 'unknown'))
 
-    # tidy up a bit
-    # TODO root this out at the source!
-    if (str(data.get('archivePrefix', '')).lower() == "arxiv" and
-        'eprint' in data and 'arxivID' in data
-        and data['arxivID'] == data['eprint']):
-        print('deleting from ', data)
-        del data['arxivID']
+    # Determine which fields to process
+    if allowed_fields:
+        # Use whitelist, excluding type/tag which are in the header
+        keys = [k for k in allowed_fields if k not in {'type', 'tag'}]
+    else:
+        # Fallback: process all fields except blacklisted ones
+        keys = [k for k in data.keys() if k not in {'type', 'tag'} 
+                and not k.startswith(('arc-', 'mendeley-'))
+                and k != 'merge_count']
 
-    max_len = max(len(k) for k in data)
+    # Filter out empty/NaN and sanitize
+    processed_data = {}
+    for k in keys:
+        v = data.get(k)
+        if pd.isna(v) or str(v).strip() in ("", "nan"):
+            continue
+        
+        sanitized_v = sanitize_for_latex(v)
+        if sanitized_v:
+            # Title preservation: wrap in double braces if it's a title/journal
+            # but ONLY if not already braced.
+            # We check for a single '{' at start to avoid triple bracing {{ { ... } }}
+            if k in ('title', 'journal', 'booktitle') and not str(sanitized_v).startswith('{'):
+                processed_data[k] = f"{{{sanitized_v}}}"
+            else:
+                processed_data[k] = sanitized_v
 
-    bib_type = data.get('type')
-    cite_key = data.get('tag')
+    if not processed_data:
+        return ""
 
-    if not bib_type:
-        logger.error('row missing type, %s', data.get('title'))
-
-    if not cite_key:
-        logger.error('row missing tag (citation key), %s', data.get('title'))
+    max_len = max(len(k) for k in processed_data)
 
     lines = [f"@{bib_type}{{{cite_key},"]
-    for k, v in data.items():
-        if k in {'type', 'tag'}:
-            continue
+    for k, v in processed_data.items():
         padding = " " * (max_len - len(k))
         lines.append(f"  {k}{padding} = {{{v}}},")
     lines.append("}")

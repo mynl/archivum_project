@@ -32,8 +32,8 @@ from pathlib import Path
 
 __appname__ = "archivum"
 __author__ = "Stephen J. Mildenhall"
-__version__ = "1.0.0"
-__date__ = "2025-03-06"
+__version__ = "2.0.0"
+__date__ = "2026-02-07"
 
 
 def _get_local_folder() -> Path:
@@ -51,7 +51,7 @@ def _get_local_folder() -> Path:
 # Core Paths
 BASE_DIR = _get_local_folder()
 LIBRARIES_DIR = BASE_DIR / "libraries"
-GLOBAL_CONFIG_PATH = BASE_DIR / "global_config.yaml"
+GLOBAL_CONFIG_PATH = BASE_DIR / "global-config.yaml"
 
 # Ensure Core Dirs Exist
 LIBRARIES_DIR.mkdir(exist_ok=True)
@@ -61,22 +61,26 @@ DEFAULT_GLOBAL_CONFIG = {
     "default_library": None,
     "theme": "system",
     "debug_mode": False,
-    "debug_dir": "",
-    "doc_store_lib": "docs",
-    "version": __version__,
+    "debug_dir": "debug",
+    "doc_store_lib": "sharded-library"
 }
 
 
 def _load_global_config() -> dict:
     """Loads global config or creates it with defaults if missing."""
     if not GLOBAL_CONFIG_PATH.exists():
-        try:
-            with open(GLOBAL_CONFIG_PATH, "w") as f:
-                yaml.dump(DEFAULT_GLOBAL_CONFIG, f, default_flow_style=False)
-            return DEFAULT_GLOBAL_CONFIG.copy()
-        except OSError as e:
-            print(f"Warning: Could not create config file: {e}", file=sys.stderr)
-            return DEFAULT_GLOBAL_CONFIG.copy()
+        # Check if old config exists and rename it
+        old_config = BASE_DIR / "global_config.yaml"
+        if old_config.exists():
+            old_config.rename(GLOBAL_CONFIG_PATH)
+        else:
+            try:
+                with open(GLOBAL_CONFIG_PATH, "w") as f:
+                    yaml.dump(DEFAULT_GLOBAL_CONFIG, f, default_flow_style=False)
+                return DEFAULT_GLOBAL_CONFIG.copy()
+            except OSError as e:
+                print(f"Warning: Could not create config file: {e}", file=sys.stderr)
+                return DEFAULT_GLOBAL_CONFIG.copy()
 
     try:
         with open(GLOBAL_CONFIG_PATH, "r") as f:
@@ -91,8 +95,17 @@ def _load_global_config() -> dict:
 # Initialize Global Config
 GLOBAL_CONFIG = _load_global_config()
 
-DEBUG_DIR = Path(GLOBAL_CONFIG["debug_dir"])
+def _resolve_path(p: str) -> Path:
+    path = Path(p)
+    if path.is_absolute():
+        return path
+    return BASE_DIR / path
+
+DEBUG_DIR = _resolve_path(GLOBAL_CONFIG["debug_dir"])
 DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+
+DOC_STORE_DIR = _resolve_path(GLOBAL_CONFIG["doc_store_lib"])
+DOC_STORE_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_LIBRARY = GLOBAL_CONFIG["default_library"]
 

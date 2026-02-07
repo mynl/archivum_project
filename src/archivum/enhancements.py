@@ -843,8 +843,11 @@ def save_from_row(row, base_path):
     fn = canonical_name_from_row(row)
     path = (base_path / fn[:2] / fn).with_suffix(original.suffix)
     if path.exists():
+        # if same file, do nothing
+        if path.samefile(original):
+            return 'ok'
         path.unlink()
-        # return 'exists'
+    
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         path.hardlink_to(original)

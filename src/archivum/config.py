@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Literal, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict, ValidationError
 import yaml
+from . import GLOBAL_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -43,27 +44,19 @@ class Configurator(BaseModel):
     model_config = ConfigDict(
         # make model immutable (no attribute reassignment)
         frozen=True,
-        extra="forbid"        # raise error on unexpected/extra fields
+        extra="forbid"        # strict by default
     )
-
+    # lib  specific
     name: str = Field(description="Human-readable name of the library.")
     description: str = Field("", description="Optional longer description.")
-    ref_columns: Optional[List[str]] = Field(default_factory=list, description="List of fields to include in reference output.")
     bibtex_file: str = Field(..., description="Name of BibTeX output file, created as a link, in addition to saving in library folder.")
-    doc_dir_name: str = Field(..., description="Dir name where actual document files (PDF, etc) are expected to be stored. "
-        "Used only to truncate pdf file names, which are made relative to doc_dir_name.")
-    full_text: bool = Field(True, description="Whether to extract and store full text from PDFs.")
-    text_dir_name: str = Field("pdf-full-text", description="Dir name for extracted text files. Used by the built in ripgrep function and to create text extracts.")
-    extractor: Literal["pdftotext", "pymupdf"] = Field("pdftotext", description="PDF text extraction backend.")
-    file_formats: List[str] = Field(["*.pdf"], description="Glob patterns for acceptable file types. NOT PLUGGED IN!")
-    hash_workers: int = Field(4, ge=1, description="Number of threads to use for hashing.")
-    last_indexed: int = Field(0, description="Unix timestamp of the last full-text index operation")
-    timezone: str = Field("Europe/London", description="Timezone to use for timestamp parsing and display")
-    tablefmt: str = Field("mixed_grid", description="Table format for display (see tabulate).")
-    max_table_inch_width: int = Field(12, gt=0, description="Maximum width for table display in inches.")
-    tag_name_mapper: dict[str, str] = Field(default_factory=dict,
-        description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
-
+    # global
+    debug_mode: bool = Field(description="Toggle for debug mode.")
+    default_library: str = Field(description="The default library name.")
+    debug_dir: Path = Field(description="Directory path for debug output.")
+    doc_store_lib: str = Field(description="Library name for document storage.")
+    theme: str = Field(description="UI theme setting (e.g., system, light, dark).")
+    ref_columns: Optional[List[str]] = Field(default_factory=list, description="List of fields to include in reference output.")
     enhancement_strategies: Dict[str, str] = Field(
         default_factory=lambda: {
             'year': 'mode',
@@ -73,38 +66,44 @@ class Configurator(BaseModel):
     )
     enhancement_cutoff_score: float = 75.0
     enhancement_tag_regex: str = r'[a-z]*$'
+    file_formats: List[str] = Field(["*.pdf"], description="Glob patterns for acceptable file types. NOT PLUGGED IN!")
+    full_text: bool = Field(True, description="Whether to extract and store full text from PDFs.")
+    text_dir_name: str = Field(description="Directory name for extracted text.")
+    extractor: Literal["pdftotext", "pymupdf"] = Field("pdftotext", description="PDF text extraction backend.")
+    hash_workers: int = Field(4, ge=1, description="Number of threads to use for hashing.")
+    last_indexed: int = Field(0, description="Timestamp of the last full-text index operation")
+    timezone: str = Field("Europe/London", description="Timezone to use for timestamp parsing and display")
+    tablefmt: str = Field("mixed_grid", description="Table format for display (see tabulate).")
+    max_table_inch_width: int = Field(12, gt=0, description="Maximum width for table display in inches.")
+    tag_name_mapper: dict[str, str] = Field(default_factory=dict,
+        description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
 
     def write_template(self, path: Path):
         """Generate a clean default config file at the given path."""
         path = Path(path)
-        yaml_str = yaml.dump(self.model_dump(), sort_keys=False)
+        # Use mode='json' to ensure Path objects are converted to strings for YAML
+        yaml_str = yaml.dump(self.model_dump(mode='json'), sort_keys=False)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml_str, encoding="utf-8")
 
     def save(self, config_path: Path, backup: bool = True) -> None:
         """
         Saves the configuration to config.yaml, writing ONLY values that differ
-        from the site defaults (site-config.yaml).
+        from the global defaults.
 
         Args:
             config_path (Path): The folder containing the library configuration.
             backup (bool): If True, creates a .bak copy of the existing config.
         """
         file_path = config_path / "config.yaml"
-        site_path = config_path.parent / "site-config.yaml"
 
-        # 1. Load Site Defaults (if available) for comparison
-        site_defaults = {}
-        if site_path.exists():
-            try:
-                with site_path.open('r', encoding='utf-8') as f:
-                    site_defaults = yaml.safe_load(f) or {}
-            except Exception as e:
-                logger.warning(f"Could not load site config for comparison: {e}")
+        # 1. Use GLOBAL_CONFIG for comparison
+        site_defaults = GLOBAL_CONFIG
 
-        # 2. Calculate Diff (Current vs Site)
+        # 2. Calculate Diff (Current vs Global)
         # We only want to save specific overrides, not the whole blob.
-        current_data = self.model_dump()
+        # Use mode='json' to ensure Path objects are converted to strings for YAML
+        current_data = self.model_dump(mode='json')
         data_to_save = _get_config_diff(current_data, site_defaults)
 
         # 3. Handle Backup
@@ -138,25 +137,19 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
     return base
 
 
-def load_configuration(lib_path: Path, **overrides) -> dict:
+def load_configuration(lib_path: Path, **overrides) -> Configurator:
     """
-    Load library config combining site, library and kw overrides.
-
-    Site path lives in lib_path.parent / "site-config.yaml"
+    Load library config combining global defaults, library and kw overrides.
     """
     config = {}
 
-    site_path = lib_path.parent / "site-config.yaml"
-
-    # Level 1: Site Config
-    if site_path.exists():
-        with open(site_path, 'r') as f:
-            config = yaml.safe_load(f)
+    # Level 1: Global Config (replaces site-config)
+    config = _deep_merge(config, GLOBAL_CONFIG)
 
     # Level 2: Library Overrides
-    lib_path = lib_path / "config.yaml"
-    if lib_path.exists():
-        with open(lib_path, 'r') as f:
+    lib_path_full = lib_path / "config.yaml"
+    if lib_path_full.exists():
+        with open(lib_path_full, 'r') as f:
             lib_config = yaml.safe_load(f) or {}
             config = _deep_merge(config, lib_config)
 
@@ -165,6 +158,30 @@ def load_configuration(lib_path: Path, **overrides) -> dict:
 
     try:
         return Configurator(**config)
-    except (ValidationError, OSError) as e:
+    except ValidationError as e:
+        # Check if this is an "extra forbidden" error
+        allowed_fields = set(Configurator.model_fields.keys())
+        input_keys = set(config.keys())
+        extra_keys = input_keys - allowed_fields
+
+        if extra_keys:
+            print("-" * 60)
+            print(f"WARNING: Legacy or extra configuration fields found in {lib_path_full}:")
+            for k in extra_keys:
+                print(f"  - {k}: {config[k]}")
+            print("These fields will be ignored. Run 'save' to clean up the config file.")
+            print("-" * 60)
+
+            # Filter and try again
+            filtered_config = {k: v for k, v in config.items() if k in allowed_fields}
+            try:
+                return Configurator(**filtered_config)
+            except ValidationError as e2:
+                print(e2)
+                raise ValueError(f"Failed to load config {lib_path} even after filtering legacy fields.") from e2
+        else:
+            print(e)
+            raise ValueError(f"Failed to load config {lib_path}") from e
+    except OSError as e:
         print(e)
         raise ValueError(f"Failed to load config {lib_path}") from e

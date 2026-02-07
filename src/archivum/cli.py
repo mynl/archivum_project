@@ -43,11 +43,11 @@ from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
 from .library import Library
 from .document import Document  # type: ignore[import-untyped]
-from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, DOC_STORE_DIR
 from .utilities import make_qd
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
-from .bibtex import dict_to_bibtex_crossref
+from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
 from .import_bibtex import Bib2df_Incremental
 
 
@@ -353,6 +353,150 @@ def entry():
 
 # ========================================================================================
 @entry.command()
+@click.option(
+    "-t",
+    "--task",
+    type=click.Choice(["sharding", "rebase", "missing"]),
+    default="sharding",
+    show_default=True,
+    help="Validation task to perform.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    show_default=True,
+    help="Actually perform the fixes; otherwise, do a dry run and report.",
+)
+@click.option(
+    "--new-root",
+    type=click.Path(exists=True, file_okay=False, path_type=Path),
+    help="New root directory for the 'rebase' task.",
+)
+def validate(task, execute, new_root):
+    """Audit and fix library structure."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    if execute:
+        click.secho(f"EXECUTING: {task}...", fg="red", bold=True)
+    else:
+        click.secho(f"DRY RUN: {task} audit...", fg="cyan")
+
+    report = lib.validate(task=task, execute=execute, new_root=new_root)
+
+    if report.empty:
+        click.echo("No issues found.")
+    else:
+        qd(report)
+        if not execute:
+            click.secho(f"\nFound {len(report)} items to address. Use -x --execute to fix.", fg="yellow")
+        else:
+            click.secho(f"\nProcessed {len(report)} items.", fg="green")
+
+
+# ========================================================================================
+@entry.command()
+@click.argument("tag", type=str)
+def edit(tag):
+    """Edit a reference entry interactively."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    # 1. Find the reference
+    row = lib.ref_df[lib.ref_df.tag == tag]
+    if row.empty:
+        click.echo(f"Reference '{tag}' not found.")
+        return
+
+    # 2. Convert to BibTeX
+    bib_str = dict_to_bibtex(row.iloc[0])
+
+    # 3. Edit in external editor
+    edited_bib = click.edit(bib_str, extension=".bib")
+    if edited_bib is None or edited_bib == bib_str:
+        click.echo("No changes made.")
+        return
+
+    # 4. Parse the edited BibTeX
+    new_data = Bib2df_Incremental.parse_line(edited_bib)
+    if not new_data:
+        click.echo("Error parsing edited BibTeX.")
+        return
+
+    # 5. Update the library
+    try:
+        lib.update_reference(tag, new_data)
+        click.echo(f"Reference '{tag}' updated.")
+    except Exception as e:
+        click.echo(f"Error updating reference: {e}")
+
+
+# ========================================================================================
+@entry.command()
+@click.argument("tag", type=str)
+@click.option("-x", "--execute",
+    is_flag=True,
+    default="sharding",
+    show_default=True,
+    help="Actually execute.")
+def delete(tag, execute):
+    """Delete a reference from the library."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    # always ask regardless
+    if not click.confirm(f"Are you sure you want to delete '{tag}'?"):
+        return
+
+    if not execute:
+        return
+
+    try:
+        lib.remove_reference(tag)
+        click.echo(f"Reference '{tag}' deleted.")
+    except Exception as e:
+        click.echo(f"Error deleting reference: {e}")
+
+
+# ========================================================================================
+@entry.command()
+@click.argument("old_name", type=str)
+@click.argument("new_name", type=str)
+def rename_library(old_name, new_name):
+    """Rename a library folder and update its internal name."""
+    click.echo('UNTESTED - sorry, not doing that...')
+    return
+    try:
+        Library.rename_library(old_name, new_name)
+        click.echo(f"Library '{old_name}' renamed to '{new_name}'.")
+    except Exception as e:
+        click.echo(f"Error renaming library: {e}")
+
+
+# ========================================================================================
+@entry.command()
+@click.argument("old_name", type=str)
+@click.argument("new_name", type=str)
+def copy_library(old_name, new_name):
+    """Copy a library folder and update its internal name."""
+    click.echo('UNTESTED - sorry, not doing that...')
+    return
+    try:
+        Library.copy_library(old_name, new_name)
+        click.echo(f"Library '{old_name}' copied to '{new_name}'.")
+    except Exception as e:
+        click.echo(f"Error copying library: {e}")
+
+
+# ========================================================================================
+@entry.command()
 @click.argument("lib_name", type=str)
 def open(lib_name):
     """Open a library by name and set it as current."""
@@ -400,32 +544,13 @@ def close():
     needs to change.
     """
     lib = LibraryContext.get()
+    nm = lib.name
     if lib.is_empty:
         click.secho("No library open; ignoring.")
         return
     logger.info("Closing library %s", lib)
-    lib = LibraryContext.get()
     LibraryContext.clear()
-
-
-# ========================================================================================
-# @entry.command()
-# @click.argument('other_lib_name', type=str)
-# def merge(other_lib_name):
-#     """Merge another library into the current library."""
-#     lib = LibraryContext.get()
-#     if lib.is_empty:
-#         return
-
-#     logger.info("Merging %s into %s", other_lib_name, lib)
-#     logger.todo('Implement merge!')
-#     # TODO: Implement merge logic
-#     # try:
-#     #     other = Library(other_lib_name)
-#     # except Exception as e:
-#     #     logger.error(e)
-#     # else:
-#     #     logger.todo('PERFORM MERGE!!')
+    click.secho(f"Library {nm} closed.")
 
 
 # ========================================================================================
@@ -440,6 +565,8 @@ def create(lib_name):
 
     Library must not already exist.
     """
+    click.echo('UNTESTED - sorry, not doing that...')
+    return
     lib_name = ' '.join(lib_name)
     lib_dir_name = lib_name.replace(" ", "-")
 
@@ -509,14 +636,7 @@ def create(lib_name):
                 local_prompt("BibTeX File"),
                 default=f"\\S\\Telos\\biblio\\{lib_dir_name}-test.bib",
             ),
-            doc_dir_name: click.prompt(local_prompt("doc dir name"),
-                default="\\S\\Library"
-            ),
-            "full_text": "true",
-            "text_dir_name": click.prompt(
-                local_prompt("Full text Directory"), default=str(BASE_DIR / "pdf-full-text")
-            ),
-            "file_formats": ["*.pdf"],
+            "full_text": True,
             "hash_workers": click.prompt(
                 local_prompt("Number of hash workers"), default=8, type=int
             ),
@@ -703,7 +823,7 @@ def query(start: str, database: str):
                     elif expr.startswith("open "):
                         expr = expr[5:].strip()
                     logger.info(f"{expr=}")
-                    tags = result.loc[result.tag.str.contains(expr, regex=True), "tag"]
+                    tags = result.loc[result.tag.str.contains(expr, regex=True, case=False), "tag"]
                     tags = sorted(set(tags.values))
                     docs = lib.ref_doc_df.query("tag in @tags").path.values
                     logger.info(f"{docs=}")
@@ -1187,7 +1307,14 @@ def rg(args, n):
     show_default=True,
     help="Verbosity: none (Basic), -v (BibTeX + Docs), -vv (Full Stats).",
 )
-def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
+@click.option(
+    "-f",
+    "--file",
+    "show_file",
+    is_flag=True,
+    help="Show the file name associated with a tag instead of the title.",
+)
+def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
     """Get documents or information by tag (supports Regex)."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -1196,7 +1323,7 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
 
     # 1. Find References using Regex
     try:
-        mask = lib.ref_df.tag.str.contains(tag_regex, regex=True, na=False)
+        mask = lib.ref_df.tag.str.contains(tag_regex, regex=True, na=False, case=False)
         ref_matches = lib.ref_df[mask]
     except Exception as e:
         click.echo(f"Regex error: {e}")
@@ -1218,8 +1345,15 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
     if information:
         # Default: Basic
         if verbose == 0:
-            # Join with hashes for summary
-            summary = ref_matches[['tag', 'title']].copy()
+            # Join with details for summary
+            if show_file:
+                summary = ref_matches[['tag']].copy()
+                # map name
+                name_map = doc_details.groupby('tag')['name'].first().to_dict()
+                summary['filename'] = summary['tag'].map(lambda x: name_map.get(x, "No Doc"))
+            else:
+                summary = ref_matches[['tag', 'title']].copy()
+
             # map hash
             hash_map = doc_details.groupby('tag')['hash'].first().str[:12].to_dict()
             summary['hash'] = summary['tag'].map(lambda x: hash_map.get(x, "No Doc"))
@@ -1276,33 +1410,6 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
             click.echo(f"Opening: {Path(d).name}")
             _open_document(d)
 
-    # 4. Open Document
-    if open_doc or all_docs:
-        if doc_details.empty:
-            click.echo("No documents found to open.")
-            return
-
-        if all_docs:
-            to_open = doc_details.path.unique().tolist()
-        else:
-            # open_doc: prefer the 'preferred' one for each tag
-            if 'preferred' in doc_details.columns:
-                to_open = doc_details[doc_details.preferred == 1].path.unique().tolist()
-                if not to_open:
-                    to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
-            else:
-                to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
-
-        # Apply Limit
-        if len(to_open) > limit:
-            click.secho(f"Warning: Found {len(to_open)} files, but limit is {limit}. Only opening first {limit}.", fg="yellow")
-            to_open = to_open[:limit]
-
-        for d in to_open:
-            click.echo(f"Opening: {Path(d).name}")
-            _open_document(d)
-
-
 @entry.command()
 @click.argument("hash_str", type=str)
 @click.option(
@@ -1321,20 +1428,22 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose):
     help="Verbosity: none (Basic), -v (Detailed Ref Info).",
 )
 def hash(hash_str, open_doc, verbose):
-    """Get references and information by file hash."""
+    """Get references and information by file hash (supports Regex)."""
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open. Returning")
         return
 
-    # 1. Find Documents with this hash (allowing for partial match if > 6 chars)
-    if len(hash_str) < 6:
-        click.echo("Please provide at least 6 characters of the hash.")
+    # 1. Find Documents with this hash
+    try:
+        mask = lib.doc_df.hash.str.contains(hash_str, regex=True, na=False, case=False)
+        doc_matches = lib.doc_df[mask]
+    except Exception as e:
+        click.echo(f"Regex error: {e}")
         return
 
-    doc_matches = lib.doc_df[lib.doc_df.hash.str.startswith(hash_str.upper())]
     if doc_matches.empty:
-        click.echo(f"No documents found with hash starting with: {hash_str}")
+        click.echo(f"No documents found with hash matching: {hash_str}")
         return
 
     # 2. Find Linked Tags
@@ -1501,6 +1610,8 @@ def uber(lib_name="", auto_open=True, debug=False):
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
     completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["edit"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["delete"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
     completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
     completers["hash"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)

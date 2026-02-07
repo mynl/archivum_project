@@ -22,14 +22,38 @@ Archivum is a personal document and reference management system (similar to Mend
 - **Location**: Libraries are stored in the user's local app data directory:
     - Windows: `%LOCALAPPDATA%\archivum\libraries\<lib_name>`
     - Unix: `~/.local/share/archivum/libraries/<lib_name>/`
+- **Global Configuration**: `global-config.yaml` in the app data directory stores app-wide settings:
+    - `doc_store_lib`: The root directory for the sharded document library.
+    - `default_library`: The name of the library to open by default.
 - **Data Formats**:
     - **Metadata**: Stored as Pandas DataFrames in `.feather` files for high-performance reading/writing.
         - `ref.feather`: Bibliographic reference data.
         - `doc.feather`: Document file metadata (path, hash, etc.).
         - `ref-doc.feather`: Junction table mapping references (`tag`) to physical files (`path`).
-    - **Configuration**: `config.yaml` stores library-specific settings (paths, formats, etc.).
+    - **Library Config**: `config.yaml` stores library-specific settings (name, description, bibtex_file).
     - **BibTeX**: A `bibtex.bib` file is automatically generated and kept in sync with the reference database.
 - **Core Class (`Library`)**: The `Library` class in `src/archivum/library.py` is the central hub for data access. It lazily loads DataFrames and provides methods for querying, saving, and auditing.
+
+## Configuration Hierarchy & Ownership
+
+### 1. Global Config (`global-config.yaml`)
+- **Location**: `%LOCALAPPDATA%\archivum\global-config.yaml`
+- **Ownership**: Controls the CLI environment and provides global defaults for all libraries.
+- **CLI/Env Fields**:
+    - `doc_store_lib`: Root directory for the sharded document library (Default: `sharded-library`).
+    - `default_library`: Name of the library to open by default.
+    - `debug_dir`: Directory for audit/debug logs (Default: `debug`).
+    - `theme`: UI theme (`system`, `light`, `dark`).
+- **Library Default Fields**: Includes shared policies such as `ref_columns`, `enhancement_strategies`, `timezone`, `tablefmt`, `extractor`, `hash_workers`, and `tag_name_mapper`.
+
+### 2. Library Config (`config.yaml`)
+- **Location**: `.../archivum/libraries/<lib_name>/config.yaml`
+- **Ownership**: Library-specific identity. It only needs to contain overrides for the global defaults.
+- **Strict Pydantic Model (`Configurator`)**:
+    - `name`: Human-readable name.
+    - `description`: Optional text.
+    - `bibtex_file`: Absolute path to the synchronized `.bib` file.
+    - (Any other field from Global Config can be overridden here).
 
 ### 2. Querying Engine
 - **Querexfuzz**: Archivum uses a specialized querying engine called `querexfuzz`. It extends Pandas DataFrames with a `.querex()` method, allowing for a combination of regex, SQL-like syntax, and fuzzy matching.
@@ -76,7 +100,20 @@ Archivum is a personal document and reference management system (similar to Mend
 4. **Open**: Documents can be opened directly from the CLI/REPL using their `tag` or `title`.
 5. **Sync**: Changes are saved back to `.feather` files and the `.bib` file.
 
+## Design Philosophy
+- **Non-Destructive**: Archivum should never autonomously delete source files. Sharding and organization operations use hardlinks to ensure the original files remain untouched in their source locations. Deletion is only permitted via explicit user commands or when explicitly confirmed (e.g., during duplicate cleanup in `import-doc`).
+- **Production Environment**: This is a production system. All operations must be performed with extreme care. Avoid "hacking" or experimental changes that could corrupt the library metadata or the document store.
+- **Shared Document Store**: Multiple libraries share a single physical sharded document store (`doc_store_lib`). Be aware that different libraries might have slightly different metadata for the same file hash, which could lead to "fighting" over the canonical filename.
+
 ## TODOs
 - **Logging**: Refine and standardize logging output for `import-doc` and `import-bibtex`.
 - **Entry Editing**: Implement an easy way to edit reference entries directly from the CLI (e.g., fixing tags with missing years like "Delaen").
 - **hash** command: use first 12 of hash not whole string.
+- Review the bibtex file build - seems some nans and non-unicode dashes creeping in.
+- bibtex: {Frezal2017, title       = {{Insurance Regulation: the 1-year 99.5}}, is broken
+- bibtex: P\cedzich2016
+- @article{Scott2009,
+- need a way to put in a ref with no doc - eg Simon Convexity is missing.
+- Rename a library (test library!!)
+- ?Mass scan of pdfs for new docs?
+- https://acrobat.adobe.com/link/home/
