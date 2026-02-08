@@ -335,10 +335,14 @@ class Library(LibraryBase):
     def update_reference(self, old_tag: str, new_data: dict):
         """Update or add a reference. Handles tag changes."""
         print('Warning: UNTESTED')
-        return
+
         new_tag = new_data.get("tag")
         if not new_tag:
             raise ValueError("New data must contain a 'tag'")
+
+        # 0. ensure data loaded
+        ref_df = self.ref_df
+        ref_doc_df = self.ref_doc_df
 
         # 1. Handle tag change or new tag
         if old_tag != new_tag:
@@ -484,7 +488,7 @@ class Library(LibraryBase):
         """Save config and all dataframes with aggressive safety checks."""
         # 1. ENSURE LOADED: Prevent lazy-load wiping by forcing properties to evaluate
         ref_to_save = self.ref_df
-        _ = self.doc_ref_df
+        _ = self.ref_doc_df
         _ = self.doc_df
         doc_to_save = self._doc_read_df
         ref_doc_to_save = self._ref_doc_df

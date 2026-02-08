@@ -437,6 +437,43 @@ def edit(tag):
 
 
 # ========================================================================================
+@entry.command(name="line-to-tag")
+@click.argument("n", type=int)
+@click.pass_context
+def line_to_tag(ctx, n):
+    """Find the BibTeX entry surrounding line n in the library file."""
+    print('UNTESTED.')
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open.")
+        return
+
+    bib_path_str = lib.config.bibtex_file
+    if not bib_path_str:
+        click.echo("No BibTeX file configured for this library.")
+        return
+
+    bib_path = Path(bib_path_str)
+    if not bib_path.exists():
+        click.echo(f"BibTeX file not found: {bib_path}")
+        return
+
+    try:
+        with open(bib_path, "r", encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except Exception as e:
+        click.echo(f"Error reading BibTeX file: {e}")
+        return
+
+    if n < 1 or n > len(lines):
+        click.echo(f"Line number {n} is out of range (1-{len(lines)}).")
+        return
+
+    bit = lines[max(0, n - 10):n + 10]
+    click.echo('\n'.join(bit))
+
+
+# ========================================================================================
 @entry.command()
 @click.argument("tag", type=str)
 @click.option("-x", "--execute",
