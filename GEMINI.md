@@ -117,3 +117,11 @@ Archivum is a personal document and reference management system (similar to Mend
 - Rename a library (test library!!)
 - ?Mass scan of pdfs for new docs?
 - https://acrobat.adobe.com/link/home/
+
+
+# File Organizaion
+
+* Definitive library is \s\ShardedDocLibrary
+* On Kolmogorov old Books, Book_scans, and Library are in ~\RawDocs and are Linked back to their original locations in S. These links will obviously work only on Kolmogorov.
+* The two copies are hard links of one another - spot checked and seems to work.
+* Since sharded doc lib is in S it syncs to Google Drive (which means VPS has access in theory...)
