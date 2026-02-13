@@ -27,7 +27,7 @@ from rapidfuzz import distance
 import numpy as np
 import pandas as pd
 
-from . import EMPTY_LIBRARY, DEBUG_DIR, DOC_STORE_DIR
+from . import EMPTY_LIBRARY
 from .utilities import (
     remove_accents,
     accent_mapper_dict,
@@ -1258,7 +1258,7 @@ class Bib2df_Incremental(LibraryBase):
             )
             
             if not to_shard.empty:
-                base_path = DOC_STORE_DIR
+                base_path = self.reference_library.doc_store_path
                 
                 # Perform hardlinking
                 hardlink_maker = partial(save_from_row, base_path=base_path)
@@ -1363,7 +1363,7 @@ class Bib2df_Incremental(LibraryBase):
         If created, copies the input bibtex file (hard link).
         """
         if self.__audit_dir_path is None:
-            self.__audit_dir_path = DEBUG_DIR / "imports" / self.timestamp
+            self.__audit_dir_path = self.reference_library.debug_dir_path / "imports" / self.timestamp
             # ensure it exists
             self.__audit_dir_path.mkdir(parents=True, exist_ok=True)
             logger.info("Created audit path at %s", str(self.__audit_dir_path))

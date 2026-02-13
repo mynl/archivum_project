@@ -43,7 +43,7 @@ from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
 from .library import Library
 from .document import Document  # type: ignore[import-untyped]
-from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, DOC_STORE_DIR
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
 from .utilities import make_qd
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search

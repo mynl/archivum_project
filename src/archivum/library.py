@@ -19,7 +19,7 @@ from IPython.display import display
 
 from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
-from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, DOC_STORE_DIR, FULL_TEXT_DIR
+from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, resolve_path
 from .trie import Trie
 from .utilities import TagAllocator
 from .config import load_configuration
@@ -62,31 +62,18 @@ class Library(LibraryBase):
             self.config_path = LIBRARIES_DIR / library_dir_name.replace(" ", "-")
         if not self.config_path.exists():
             raise FileNotFoundError('Cannot find library directory.')
-        # if not self.config_path.exists():
-        #     # one other idea
-        #     self.config_path = LIBRARIES_DIR / library_dir_name.replace(" ", "-")
-        #     if not self.config_path.exists():
-        #         raise FileNotFoundError(
-        #             "Library directory does not exist. Create first."
-        #         )
-        # try:
-        #     raw = yaml.safe_load(
-        #         (self.config_path / "config.yaml").read_text(encoding="utf-8")
-        #     )
-        #     base_config = Configurator.model_validate(raw)
-        # except FileNotFoundError:
-        #     raise
-        # except (ValidationError, OSError) as e:
-        #     raise ValueError(f"Failed to load config {self.config_path}") from e
-
-        # # access through config
-        # # update and validate; need to merge to avoid repeated args
-        # # merged = dict(base_config.model_dump(), **overrides)
-        # merged = base_config.model_dump() | overrides
 
         self.config = load_configuration(self.config_path, **overrides)
-        self.text_dir_path = FULL_TEXT_DIR
+        self.doc_store_path = resolve_path(self.config.doc_store_lib)
+        self.doc_store_path.mkdir(parents=True, exist_ok=True)
+
+        self.text_dir_path = resolve_path(self.config.full_text_lib)
+        self.text_dir_path.mkdir(parents=True, exist_ok=True)
         self.text_dir_full_name = str(self.text_dir_path)
+
+        self.debug_dir_path = resolve_path(str(self.config.debug_dir))
+        self.debug_dir_path.mkdir(parents=True, exist_ok=True)
+
         self.reset()
 
     def __repr__(self):
@@ -135,7 +122,7 @@ class Library(LibraryBase):
             except FileNotFoundError:
                 return self._doc_df
 
-            doc_dir = DOC_STORE_DIR
+            doc_dir = self.doc_store_path
 
             def get_rel_parent(p: Path) -> str:
                 if p.is_relative_to(doc_dir):
@@ -160,13 +147,6 @@ class Library(LibraryBase):
                 self._doc_df,
                 "querex",
             )
-            # older version
-            # set base cols
-            # base_cols = ["name", "create", "size", "tpath"]
-            # querex = partial(
-            #     querex_work, base_cols=base_cols, bang_field="name", recent_field="mod"
-            # )
-            # self._doc_df.querex = MethodType(querex, self._doc_df)
         return self._doc_df
 
     @property
@@ -186,16 +166,6 @@ class Library(LibraryBase):
                 self._ref_df,
                 "querex",
             )
-
-            # set base cols
-            # base_cols = ["tag", "author", "title", "journal"]
-            # querex = partial(
-            #     querex_work,
-            #     base_cols=base_cols,
-            #     bang_field="author",
-            #     recent_field="year",
-            # )
-            # self._ref_df.querex = MethodType(querex, self._ref_df)
         return self._ref_df
 
     @property
@@ -215,13 +185,6 @@ class Library(LibraryBase):
                 self._ref_doc_df,
                 "querex",
             )
-
-            # set base cols
-            # base_cols = ["tag", "path"]
-            # querex = partial(
-            #     querex_work, base_cols=base_cols, bang_field="path", recent_field="tag"
-            # )
-            # self._ref_doc_df.querex = MethodType(querex, self._ref_doc_df)
         return self._ref_doc_df
 
     @property
@@ -248,16 +211,6 @@ class Library(LibraryBase):
                 self._database,
                 "querex",
             )
-
-            # # set base cols
-            # base_cols = ["tag", "author", "title", "journal", "create"]
-            # querex = partial(
-            #     querex_work,
-            #     base_cols=base_cols,
-            #     bang_field="author",
-            #     recent_field="mod",
-            # )
-            # self._database.querex = MethodType(querex, self._database)
         return self._database
 
     def update(self, importer):
@@ -384,7 +337,7 @@ class Library(LibraryBase):
         Audit and fix library structure.
         Tasks: 'sharding', 'rebase', 'missing'
         """
-        base_path = DOC_STORE_DIR
+        base_path = self.doc_store_path
 
         report = []
 
@@ -863,8 +816,7 @@ class Library(LibraryBase):
         # Handle errors
         failures = [(to_extract[i], err) for i, (ok, err) in enumerate(results) if not ok]
         if failures:
-            error_file = Path(self.config.debug_dir) / "full-text-errors.md"
-            error_file.parent.mkdir(parents=True, exist_ok=True)
+            error_file = self.debug_dir_path / "full-text-errors.md"
             
             with error_file.open("a", encoding="utf-8") as f:
                 f.write(f"\n## Full Text Extraction Errors - {dt.datetime.now().isoformat()}\n")

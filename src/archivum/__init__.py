@@ -2,6 +2,10 @@
 archivum project.
 ===================
 
+v 1.1
+    Text extraction
+    rg 
+
 v 1.0.0
     Alpha release
     Uses querexfuzz with config files for each table; deleted unneeded files
@@ -96,20 +100,13 @@ def _load_global_config() -> dict:
 # Initialize Global Config
 GLOBAL_CONFIG = _load_global_config()
 
-def _resolve_path(p: str) -> Path:
+def resolve_path(p: str) -> Path:
+    """Resolves a path relative to BASE_DIR if it's not absolute."""
     path = Path(p)
     if path.is_absolute():
         return path
     return BASE_DIR / path
 
-DEBUG_DIR = _resolve_path(GLOBAL_CONFIG["debug_dir"])
-DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-
-DOC_STORE_DIR = _resolve_path(GLOBAL_CONFIG["doc_store_lib"])
-DOC_STORE_DIR.mkdir(parents=True, exist_ok=True)
-
-FULL_TEXT_DIR = _resolve_path(GLOBAL_CONFIG.get("full_text_lib", "full-text"))
-FULL_TEXT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_LIBRARY = GLOBAL_CONFIG["default_library"]
 
