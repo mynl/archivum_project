@@ -1128,3 +1128,36 @@ class Library(LibraryBase):
                  for old, ported in import_map.items()
         }
         return final_tag_map
+
+    def get_tag_info(self, tag: str) -> pd.DataFrame:
+        """
+        Collate all information about a tag from ref, doc, and ref-doc.
+        Returns a 2-column DataFrame: [Field, Value]
+        """
+        if tag not in self.ref_df.tag.values:
+            return pd.DataFrame()
+
+        # 1. Metadata
+        ref_row = self.ref_df[self.ref_df.tag == tag].iloc[0].dropna()
+        info = []
+        for k, v in ref_row.items():
+            if v != "":
+                info.append({"Field": k, "Value": str(v)})
+
+        # 2. Files
+        links = self.ref_doc_df[self.ref_doc_df.tag == tag]
+        if not links.empty:
+            docs = links.merge(self.doc_df, on="path", how="left")
+            for i, (_, doc) in enumerate(docs.iterrows(), 1):
+                pref = " [PREFERRED]" if doc.get("preferred") == 1 else ""
+                h = f" (hash: {doc.hash[:12]})" if pd.notna(doc.get("hash")) else ""
+                info.append(
+                    {
+                        "Field": f"Document {i}{pref}",
+                        "Value": f"{doc.path}{h}",
+                    }
+                )
+        else:
+            info.append({"Field": "Documents", "Value": "[None Linked]"})
+
+        return pd.DataFrame(info)

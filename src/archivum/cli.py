@@ -374,7 +374,15 @@ def entry():
     help="New root directory for the 'rebase' task.",
 )
 def validate(task, execute, new_root):
-    """Audit and fix library structure."""
+    """
+    Audit and fix library structure.
+
+    \b
+    Tasks:
+    - sharding: verify files are in the correct hash-based folders.
+    - rebase: update paths if the root storage has moved.
+    - missing: find documents in the index that don't exist on disk.
+    """
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open. Returning")
@@ -400,7 +408,13 @@ def validate(task, execute, new_root):
 # ========================================================================================
 @entry.command()
 @click.argument("tag", type=str)
-def edit(tag):
+@click.option(
+    "-i",
+    "--info",
+    is_flag=True,
+    help="Show all information about the tag before editing.",
+)
+def edit(tag, info):
     """Edit a reference entry interactively."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -413,7 +427,15 @@ def edit(tag):
         click.echo(f"Reference '{tag}' not found.")
         return
 
-    # 2. Convert to BibTeX
+    # 2. Show info if requested
+    if info:
+        click.secho(f"Information for Tag: {tag}", fg="cyan", bold=True)
+        tag_info = lib.get_tag_info(tag)
+        qd(tag_info)
+        click.echo("") # spacer
+        return 
+
+    # 3. Convert to BibTeX
     bib_str = dict_to_bibtex(row.iloc[0])
 
     # 3. Edit in external editor
@@ -908,10 +930,11 @@ def crossref(
     """
     Fetch metadata from Crossref and output BibTeX.
 
+    \b
     Priority:
     1. DOI (if provided)
     2. Title (if provided without author/keywords)
-    3. Generic Search (using provided keywords, title, author)
+    3. Generic Search (using keywords, title, author)
     """
     result = None
 
@@ -1060,7 +1083,7 @@ def config():
 
 
 # ========================================================================================
-@entry.command(name="import-doc")
+@entry.command(name="stage-docs")
 @click.argument(
     "doc_path",
     type=click.Path(exists=True, dir_okay=True, path_type=Path),
@@ -1079,6 +1102,7 @@ def config():
     "--delete",
     "delete_dupes",
     is_flag=True,
+    default=False,
     show_default=True,
     help="Delete duplicates from source folder if found.",
 )
@@ -1090,25 +1114,18 @@ def config():
     show_default=True,
     help="Increase verbosity.",
 )
-@click.option(
-    "-x",
-    "--execute",
-    is_flag=True,
-    show_default=True,
-    help="Actually perform the final import after review.",
-)
-def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbose: int, execute: bool):
+def stage_docs(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbose: int):
     """
-    Prepare new documents for import.
+    Prepare new documents for import by staging metadata in a BibTeX file.
 
+    \b
     1. Checks for hash duplicates in the library.
     2. Extracts metadata from new files.
     3. Generates a .bib file for review in Sublime Text.
-    4. Optionally imports the reviewed file.
     """
     lib = LibraryContext.get()
     if lib.is_empty:
-        click.echo("No library open -- cannot import.")
+        click.echo("No library open -- cannot stage documents.")
         return
 
     # 1. Find the files
@@ -1163,6 +1180,8 @@ def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
                         if p not in new_paths:
                             p.unlink()
                     click.echo("Duplicates deleted.")
+            else:
+                click.secho("\nRun again with -d to delete these duplicates from source.", fg="cyan")
 
             survivors = new_paths
         else:
@@ -1177,7 +1196,7 @@ def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
     # 3. Process the Survivors
     bibs = [f"% import from {doc_path.absolute()}"]
     for p in sorted(survivors):
-        if p.suffix.lower() not in {'.pdf', '.djvu'}:
+        if p.suffix.lower() not in {'.pdf', '.djvu', '.epub'}:
             click.echo(f'WARNING: Non-standard format {p.suffix} for {p.name}')
         try:
             logger.info('gathering import info for %s', p)
@@ -1193,7 +1212,7 @@ def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
     p_review = p_review / "bibtex-import.bib"
     p_review.write_text(bib_str, encoding='utf-8')
 
-    click.echo(f"\nMetadata extracted. Review file created at: {p_review.name}")
+    click.secho(f"\nMetadata extracted. Review file created at: {p_review.name}", fg="green")
 
     try:
         # Windows specific call to Sublime
@@ -1201,23 +1220,8 @@ def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
     except Exception:
         click.echo("Could not open Sublime Text automatically. Please review the .bib file manually.")
 
-    # 5. Final Step
-    if click.confirm("\nContinue to import reviewed references?", default=False):
-        from .import_bibtex import Bib2df_Incremental
-        b = Bib2df_Incremental(
-            bibtex_file_path=p_review,
-            doc_dir=doc_path if doc_path.is_dir() else doc_path.parent,
-            reference_library=lib,
-            incremental=True # Always incremental for doc-import
-        )
-        import_df = b.import_bibtex_file()
-        qd(import_df)
-
-        if execute:
-            b.update_library(save=True)
-            click.echo("Library updated.")
-        else:
-            click.echo("Dry run complete. Use --execute to commit changes.")
+    click.echo("\nRun the following command to complete the import after review:")
+    click.secho(f"archivum import-bibtex {p_review.name} -x", fg="cyan", bold=True)
 
 
 @entry.command(name="extract-text")
