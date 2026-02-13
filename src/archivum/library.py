@@ -19,13 +19,14 @@ from IPython.display import display
 
 from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
-from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, DOC_STORE_DIR
+from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, DOC_STORE_DIR, FULL_TEXT_DIR
 from .trie import Trie
 from .utilities import TagAllocator
 from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex
 from .hasher import hash_many3 as hash_many
+from .document import Document, extract_text_for_paths
 from .enhancements import (
     enhance_ref_df,
     Ans,
@@ -84,7 +85,7 @@ class Library(LibraryBase):
         # merged = base_config.model_dump() | overrides
 
         self.config = load_configuration(self.config_path, **overrides)
-        self.text_dir_path = DOC_STORE_DIR / "full-text"
+        self.text_dir_path = FULL_TEXT_DIR
         self.text_dir_full_name = str(self.text_dir_path)
         self.reset()
 
@@ -813,6 +814,130 @@ class Library(LibraryBase):
         self.save()
         # invalidate caches
         self.reset()
+
+    def extract_all_text(self, force: bool = False, workers: int = None, execute: bool = False):
+        """
+        Extract text for all documents in the library.
+        If force=False, only extracts if the text file doesn't exist.
+        If execute=False, does nothing but log what would be done.
+        """
+        if self.doc_df.empty:
+            logger.info("Empty library! Cannot extract text.")
+            return
+
+        workers = workers or self.config.hash_workers
+        
+        # We need hashes for naming
+        self.update_hashes()
+
+        to_extract = []
+        for _, row in self.doc_df.iterrows():
+            p = Path(row.path)
+            doc = Document(p)
+            doc.hash = row.hash
+            if force or not doc.text_exists(self.text_dir_path, self.config.extractor):
+                to_extract.append(p)
+
+        if not to_extract:
+            logger.info("No text extracts to process.")
+            return
+
+        if not execute:
+            logger.info(f"DRY RUN: Would extract text for {len(to_extract)} files.")
+            print(f"DRY RUN: Would extract text for {len(to_extract)} files.")
+            return
+
+        logger.info(f"Extracting text for {len(to_extract)} files...")
+        
+        # Pass hashes for correct naming
+        path_to_hash = {Path(row.path): row.hash for _, row in self.doc_df.iterrows()}
+        
+        results = extract_text_for_paths(
+            to_extract,
+            self.text_dir_path,
+            extractor=self.config.extractor,
+            workers=workers,
+            hashes=path_to_hash,
+        )
+
+        # Handle errors
+        failures = [(to_extract[i], err) for i, (ok, err) in enumerate(results) if not ok]
+        if failures:
+            error_file = Path(self.config.debug_dir) / "full-text-errors.md"
+            error_file.parent.mkdir(parents=True, exist_ok=True)
+            
+            with error_file.open("a", encoding="utf-8") as f:
+                f.write(f"\n## Full Text Extraction Errors - {dt.datetime.now().isoformat()}\n")
+                for p, err in failures:
+                    f.write(f"- `{p}`: {err}\n")
+            
+            logger.warning(f"Logged {len(failures)} extraction errors to {error_file}")
+            print(f"Logged {len(failures)} extraction errors to {error_file}")
+
+    def get_text_info(self):
+        """
+        Get info about the text: number of docs, number with text files etc.,
+        split by extension.
+        """
+        if self.doc_df.empty:
+            return pd.DataFrame()
+
+        # Update hashes if needed to ensure we can check text_exists
+        self.update_hashes()
+
+        results = []
+        for _, row in self.doc_df.iterrows():
+            p = Path(row.path)
+            doc = Document(p)
+            doc.hash = row.hash
+            exists = doc.text_exists(self.text_dir_path, self.config.extractor)
+            results.append({
+                "path": row.path,
+                "suffix": p.suffix.lower(),
+                "has_text": exists
+            })
+        
+        df = pd.DataFrame(results)
+        
+        # Summary
+        summary = df.groupby("suffix")["has_text"].agg(["count", "sum"]).rename(
+            columns={"count": "Total Docs", "sum": "With Text"}
+        )
+        summary["Missing"] = summary["Total Docs"] - summary["With Text"]
+        return summary
+
+    def clean_text_extracts(self, execute: bool = False):
+        """
+        Find (and delete if execute) text files with no corresponding document in the library.
+        """
+        if not self.text_dir_path.exists():
+            return []
+
+        # 1. Get all expected text paths
+        expected_paths = set()
+        for _, row in self.doc_df.iterrows():
+            doc = Document(Path(row.path))
+            doc.hash = row.hash
+            expected_paths.add(str(doc.text_path(self.text_dir_path, self.config.extractor).absolute()))
+
+        # 2. Find all actual text files
+        actual_files = list(self.text_dir_path.rglob(f"*.{self.config.extractor}.md"))
+        
+        orphans = []
+        for f in actual_files:
+            if str(f.absolute()) not in expected_paths:
+                orphans.append(f)
+
+        if not execute:
+            if orphans:
+                print(f"DRY RUN: Found {len(orphans)} orphaned text files.")
+            return orphans
+
+        for f in orphans:
+            logger.info(f"Deleting orphaned text file: {f}")
+            f.unlink()
+        
+        return orphans
 
     def reset_library(self):
         """

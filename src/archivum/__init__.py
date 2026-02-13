@@ -62,7 +62,8 @@ DEFAULT_GLOBAL_CONFIG = {
     "theme": "system",
     "debug_mode": False,
     "debug_dir": "debug",
-    "doc_store_lib": "sharded-library"
+    "doc_store_lib": "docs",
+    "full_text_lib": "full-text",
 }
 
 
@@ -106,6 +107,9 @@ DEBUG_DIR.mkdir(parents=True, exist_ok=True)
 
 DOC_STORE_DIR = _resolve_path(GLOBAL_CONFIG["doc_store_lib"])
 DOC_STORE_DIR.mkdir(parents=True, exist_ok=True)
+
+FULL_TEXT_DIR = _resolve_path(GLOBAL_CONFIG.get("full_text_lib", "full-text"))
+FULL_TEXT_DIR.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_LIBRARY = GLOBAL_CONFIG["default_library"]
 

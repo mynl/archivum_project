@@ -1220,6 +1220,100 @@ def import_doc(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
             click.echo("Dry run complete. Use --execute to commit changes.")
 
 
+@entry.command(name="extract-text")
+@click.option(
+    "-m",
+    "--missing",
+    is_flag=True,
+    help="Print which docs are missing their text.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    help="Actually perform the extraction/cleaning work.",
+)
+@click.option(
+    "-c",
+    "--clean",
+    is_flag=True,
+    help="Find (and delete if -x) text files with no corresponding document.",
+)
+@click.option(
+    "-i",
+    "--info",
+    is_flag=True,
+    help="Print info about the text: number of docs, number with text files etc.",
+)
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Force re-extraction even if the text file already exists.",
+)
+@click.option(
+    "-w",
+    "--workers",
+    type=int,
+    default=8,
+    help="Number of worker threads to use.",
+)
+def extract_text(missing, execute, clean, info, force, workers):
+    """Manage text extraction for documents in the library."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    if info:
+        click.secho(f"Text extraction info for {lib.name}:", fg="cyan", bold=True)
+        summary = lib.get_text_info()
+        if summary.empty:
+            click.echo("No documents in library.")
+        else:
+            qd(summary.reset_index())
+
+    if missing:
+        click.secho(f"Documents missing text extracts in {lib.name}:", fg="yellow", bold=True)
+        # We can reuse get_text_info logic or just find them
+        lib.update_hashes()
+        missing_docs = []
+        for _, row in lib.doc_df.iterrows():
+            doc = Document(Path(row.path))
+            doc.hash = row.hash
+            if not doc.text_exists(lib.text_dir_path, lib.config.extractor):
+                missing_docs.append({"tag": row.get('tag', 'N/A'), "name": Path(row.path).name})
+
+        if not missing_docs:
+            click.echo("No missing text extracts.")
+        else:
+            qd(pd.DataFrame(missing_docs))
+
+    if clean:
+        if execute:
+            click.secho("Cleaning orphaned text extracts...", fg="red", bold=True)
+        else:
+            click.secho("Auditing orphaned text extracts (DRY RUN)...", fg="cyan")
+        orphans = lib.clean_text_extracts(execute=execute)
+        if not orphans:
+            click.echo("No orphaned text files found.")
+        else:
+            if not execute:
+                click.echo(f"Found {len(orphans)} orphaned files. Use -x to delete.")
+
+    # Always attempt extraction only if -x is set and no other "pure report" flag was requested
+    # OR if they specifically want to execute the missing ones.
+    if execute:
+        # If -c was set, it's already handled above
+        # If -m or -i were set, we still might want to run extraction
+        # User said: "-x actually do work (default False, safeguard)"
+        click.echo(f"Starting full-text indexing for library: {lib.name}")
+        lib.extract_all_text(force=force, workers=workers, execute=True)
+    elif not (info or missing or clean):
+        # If just 'extract-text' with no flags, show info as default?
+        click.echo("No action specified. Use -i for info, -m for missing, -c for clean, or -x to execute extraction.")
+
+
 # ========================================================================================
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
@@ -1252,16 +1346,12 @@ def rg(args, n):
     elif return_value:
         console.print("OTHER MYSTERIOUS ERROR??")
 
-    # otherwise all good - printout
-    # for search and replace in resulting filenames
     prefix = str(lib.text_dir_full_name)
     print(lib)
     try:
-        suffix = f".{lib.extractor}.md"
+        suffix = f".{lib.config.extractor}.md"
     except AttributeError:
-        print("ATTRIBUTE ERROR...here is dir lib")
-        print(dir(lib))
-        print("RETURNING")
+        print("ATTRIBUTE ERROR...RETURNING")
         return
     last_file = ""
     fc = 0

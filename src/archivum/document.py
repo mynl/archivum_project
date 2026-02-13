@@ -12,12 +12,15 @@ import logging
 import re
 import subprocess
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, List
 
 from nameparser import HumanName
 import pymupdf  # type: ignore[import-untyped]  # fitz
 from rapidfuzz import fuzz
+from tqdm import tqdm
 
 from .arxiv import lookup_arxiv
 from .crossref import lookup_doi, search as lookup_xref_search
@@ -583,23 +586,116 @@ class Document:
     # OUTPUTS
     # ----------------------------------------------------------------------
 
-    def extract_text(self) -> str:
+    def text_path(self, text_dir_path: Path, extractor: str) -> Path:
         """
-        Extracts text using pdftotext.
+        Return Path to where text is or will be stored.
+        Mirrors the sharded structure: text_dir / first_2_of_fn / fn.md
+        where fn starts with first 12 chars of hash.
+        """
+        from .enhancements import canonical_name_from_row
+
+        # We need the hash and other info for canonical_name.
+        # If hash is missing, this will be 'Unknown'.
+        # Assuming Document object might have been populated with hash.
+        # If not, it uses whatever is available.
+        
+        # To strictly follow "names start with 12 chars of the hash", 
+        # and "mirroring the files", we use the sharded filename.
+        
+        # If we are in the library context, we can use canonical_name_from_row.
+        # But Document is standalone.
+        
+        # Heuristic: if we don't have bib info, use stem.
+        # But the requirement says "names start with 12 chars of the hash".
+        
+        # Let's check if Document has a helper to get its "sharded" name.
+        if hasattr(self, 'hash') and self.hash:
+            h12 = self.hash[:12]
+        else:
+            # Try to extract hash from current path if it looks sharded
+            match = re.search(r'([A-F0-9]{12,})', self.doc_path.name)
+            h12 = match.group(1)[:12] if match else "Unknown"
+
+        # Sharded structure: h12[:2] / h12 - ... .md
+        # To mirror the files exactly: if the file is at /SHARD/DIR/FILE.pdf
+        # text is at /TEXT_DIR/DIR/FILE_WITHOUT_EXT.md?
+        # User said: "mirroring the files (under docs, sharded, names start with 12 chars of the hash."
+        
+        # In Archivum, sharded files are at: base_path / fn[:2] / fn
+        # where fn = hash[:10] + ...
+        
+        # If the file is already sharded, we can mirror its parent.
+        parent_shard = self.doc_path.parent.name # e.g. "A1"
+        
+        # Filename starts with 12 chars of hash
+        # If the current filename already starts with a hash, we just change extension.
+        # If it doesn't, we should ideally use the hash.
+        
+        # Let's use a simpler "mirroring" logic: 
+        # text_path = text_dir_path / parent_shard / (h12 + "_" + doc_path.stem + ".md")
+        # No, "names start with 12 chars of the hash" and "mirroring the files".
+        
+        # If self.doc_path is already sharded (e.g. .../A1/HASH-Title.pdf)
+        # then we want .../full-text/A1/HASH-Title.extractor.md
+        
+        # If it's NOT sharded, we still put it in a shard-like structure.
+        shard = h12[:2]
+        
+        # The filename should start with h12.
+        # If the doc_path.stem already starts with h12, use it.
+        # Otherwise, prepend it.
+        stem = self.doc_path.stem
+        if not stem.startswith(h12):
+            stem = f"{h12}_{stem}"
+            
+        return text_dir_path / shard / f"{stem}.{extractor}.md"
+
+    def text_exists(self, text_dir_path: Path, extractor: str) -> bool:
+        """Check if text file exists."""
+        return self.text_path(text_dir_path, extractor).exists()
+
+    def extract_text(self, text_dir_path: Optional[Path] = None, extractor: str = "pdftotext") -> str:
+        """
+        Extracts text using pdftotext (or pymupdf as fallback/alternative).
         Stores result in self._text and returns it.
+        If text_dir_path is provided, also saves to disk.
         """
         if self._text:
             return self._text
 
+        # Check disk if path provided
+        if text_dir_path:
+            tp = self.text_path(text_dir_path, extractor)
+            if tp.exists():
+                self._text = tp.read_text(encoding="utf-8")
+                return self._text
+
+        suffix = self.doc_path.suffix.lower()
+        
         try:
             logger.info("extract text: %s", self.doc_path)
-            # -raw: content stream order, -nopgbrk: no page breaks
-            result = subprocess.run(
-                ["pdftotext", "-raw", "-nopgbrk", str(self.doc_path), "-"],
-                capture_output=True,
-                check=True,
-            )
-            text = result.stdout.decode("utf-8", errors="replace").replace("\r", "")
+            
+            text = ""
+            # Only use pdftotext for PDFs
+            if suffix == ".pdf" and extractor == "pdftotext":
+                # -raw: content stream order, -nopgbrk: no page breaks
+                result = subprocess.run(
+                    ["pdftotext", "-raw", "-nopgbrk", str(self.doc_path), "-"],
+                    capture_output=True,
+                    check=True,
+                )
+                text = result.stdout.decode("utf-8", errors="replace").replace("\r", "")
+            else:
+                # Use pymupdf for everything else (it supports EPUB, and many others)
+                # It might not support DJVU depending on build, but it's our best shot.
+                try:
+                    with pymupdf.open(self.doc_path) as doc:
+                        text = "\n".join(page.get_text("text") for page in doc)
+                except Exception as e:
+                    raise RuntimeError(f"PyMuPDF extraction failed for {suffix}: {e}") from e
+
+            if not text.strip():
+                raise ValueError("Extracted text is empty.")
 
             # Fix hyphenation (word-\nword -> wordword)
             text = re.sub(r"(\w+)-\n(\w+)", r"\1\2", text)
@@ -607,10 +703,16 @@ class Document:
             text = unicodedata.normalize("NFC", text)
 
             self._text = text
+
+            if text_dir_path:
+                tp = self.text_path(text_dir_path, extractor)
+                tp.parent.mkdir(parents=True, exist_ok=True)
+                tp.write_text(text, encoding="utf-8")
+
             return text
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        except (subprocess.CalledProcessError, FileNotFoundError, Exception) as e:
             logger.error(f"Error extracting text for {self.doc_path.name}: {e}")
-            return ""
+            raise  # Re-raise to be caught by batch processor
 
     def report(self, print_fn=print):
         """
@@ -684,6 +786,35 @@ class Document:
                 f' {hn.middle}' if hn.middle else '')
             out.append(name_out)
         return ' and '.join(out)
+
+
+def extract_text_for_paths(
+    pdf_paths: List[Path],
+    text_dir_path: Path,
+    extractor: str = "pdftotext",
+    workers: int = 4,
+    hashes: Optional[Dict[Path, str]] = None,
+):
+    """Batch extract text from a list of PDF paths."""
+
+    def _task(p):
+        try:
+            doc = Document(p)
+            if hashes and p in hashes:
+                doc.hash = hashes[p]
+            doc.extract_text(text_dir_path=text_dir_path, extractor=extractor)
+            return True, None
+        except Exception as e:
+            msg = f"Failed to extract text for {p.name}: {e}"
+            logger.error(msg)
+            return False, str(e)
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(
+            tqdm(executor.map(_task, pdf_paths), total=len(pdf_paths), desc="Extracting Text")
+        )
+
+    return results
 
 
 def discover_docs(doc_path: Path, lib):

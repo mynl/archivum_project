@@ -55,6 +55,7 @@ class Configurator(BaseModel):
     default_library: str = Field(description="The default library name.")
     debug_dir: Path = Field(description="Directory path for debug output.")
     doc_store_lib: str = Field(description="Library name for document storage.")
+    full_text_lib: str = Field(description="Library name for full-text storage.")
     theme: str = Field(description="UI theme setting (e.g., system, light, dark).")
     ref_columns: Optional[List[str]] = Field(default_factory=list, description="List of fields to include in reference output.")
     enhancement_strategies: Dict[str, str] = Field(
@@ -68,7 +69,6 @@ class Configurator(BaseModel):
     enhancement_tag_regex: str = r'[a-z]*$'
     file_formats: List[str] = Field(["*.pdf"], description="Glob patterns for acceptable file types. NOT PLUGGED IN!")
     full_text: bool = Field(True, description="Whether to extract and store full text from PDFs.")
-    text_dir_name: str = Field(description="Directory name for extracted text.")
     extractor: Literal["pdftotext", "pymupdf"] = Field("pdftotext", description="PDF text extraction backend.")
     hash_workers: int = Field(4, ge=1, description="Number of threads to use for hashing.")
     last_indexed: int = Field(0, description="Timestamp of the last full-text index operation")
