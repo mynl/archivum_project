@@ -437,43 +437,6 @@ def edit(tag):
 
 
 # ========================================================================================
-@entry.command(name="line-to-tag")
-@click.argument("n", type=int)
-@click.pass_context
-def line_to_tag(ctx, n):
-    """Find the BibTeX entry surrounding line n in the library file."""
-    print('UNTESTED.')
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo("No library open.")
-        return
-
-    bib_path_str = lib.config.bibtex_file
-    if not bib_path_str:
-        click.echo("No BibTeX file configured for this library.")
-        return
-
-    bib_path = Path(bib_path_str)
-    if not bib_path.exists():
-        click.echo(f"BibTeX file not found: {bib_path}")
-        return
-
-    try:
-        with open(bib_path, "r", encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except Exception as e:
-        click.echo(f"Error reading BibTeX file: {e}")
-        return
-
-    if n < 1 or n > len(lines):
-        click.echo(f"Line number {n} is out of range (1-{len(lines)}).")
-        return
-
-    bit = lines[max(0, n - 10):n + 10]
-    click.echo('\n'.join(bit))
-
-
-# ========================================================================================
 @entry.command()
 @click.argument("tag", type=str)
 @click.option("-x", "--execute",
@@ -775,6 +738,44 @@ def get_distinct_values(field):
         qd(df)
     else:
         click.echo(f"Field {field} not found in library database.")
+
+
+# ========================================================================================
+@entry.command()
+@click.argument("expr", nargs=-1)
+@click.option(
+    "-d",
+    "--database",
+    type=click.Choice(["database", "doc", "ref", "ref-doc"]),
+    default="database",
+    show_default=True,
+    help='Database (dataframe) to process. Must be "database" (default), "doc", "ref", or "ref-doc".',
+)
+def q(expr: tuple, database: str):
+    """Execute a single query and return immediately."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know what to query. Returning")
+        return
+    if database == "ref":
+        df = lib.ref_df
+    elif database == "doc":
+        df = lib.doc_df
+    elif database == "ref-doc":
+        df = lib.ref_doc_df
+    else:
+        df = lib.database
+
+    if getattr(df, 'querex', None) is None:
+        click.echo(f'querex not attached to {database}, exiting.')
+        return
+
+    expr_str = " ".join(expr)
+    try:
+        result = df.querex(expr_str)
+        qd(result)
+    except Exception as e:
+        click.echo(f"[Error] {e}")
 
 
 # ========================================================================================
@@ -1673,6 +1674,7 @@ def uber(lib_name="", auto_open=True, debug=False):
         }
     )
     completers["query"] = query_completer
+    completers["q"] = query_completer
     completers["import-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
     completers["import-doc"] = PathCompleter(only_directories=False, expanduser=True)
 
