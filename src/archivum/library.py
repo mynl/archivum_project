@@ -891,6 +891,40 @@ class Library(LibraryBase):
         
         return orphans
 
+    def audit(self):
+        """
+        Perform a comprehensive structural audit of the library.
+        Returns a dictionary of findings.
+        """
+        findings = {
+            "missing_physical_files": [],
+            "orphan_docs": [],
+            "missing_docs": [],
+            "broken_tag_links": [],
+            "broken_path_links": [],
+            "orphan_extracts": []
+        }
+
+        # 1. Missing Physical Files
+        for _, row in self.doc_df.iterrows():
+            if not os.path.exists(row.path):
+                findings["missing_physical_files"].append(row.path)
+
+        # 2. Orphan Docs (in doc.feather but not in ref-doc.feather)
+        findings["orphan_docs"] = self.doc_df[~self.doc_df.path.isin(self.ref_doc_df.path)].path.tolist()
+
+        # 3. Missing Docs (Tags with no linked documents)
+        findings["missing_docs"] = self.ref_df[~self.ref_df.tag.isin(self.ref_doc_df.tag)].tag.tolist()
+
+        # 4. Broken Links
+        findings["broken_tag_links"] = self.ref_doc_df[~self.ref_doc_df.tag.isin(self.ref_df.tag)].tag.tolist()
+        findings["broken_path_links"] = self.ref_doc_df[~self.ref_doc_df.path.isin(self.doc_df.path)].path.tolist()
+
+        # 5. Orphan Text Extracts
+        findings["orphan_extracts"] = self.clean_text_extracts(execute=False)
+
+        return findings
+
     def reset_library(self):
         """
         Reset a library back to empty state.

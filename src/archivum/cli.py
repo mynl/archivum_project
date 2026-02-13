@@ -351,6 +351,84 @@ def entry():
         sys.stdout.reconfigure(encoding="utf-8")
 
 
+@entry.command()
+@click.option("-v", "--verbose", is_flag=True, help="Show full lists of problematic items.")
+@click.option("-x", "--execute", is_flag=True, help="Actually perform fixes (e.g., cleaning orphans).")
+def audit(verbose, execute):
+    """
+    \b
+    Perform a comprehensive structural audit of the library:
+    - Missing Files: References pointing to files that don't exist.
+    - Orphan Docs: Document metadata without any reference linking to it.
+    - Missing Docs: References with no linked documents.
+    - Broken Links: ref-doc mappings with invalid tags or paths.
+    - Orphan Extracts: Text extracts for documents no longer in library.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    click.secho(f"Auditing library: {lib.name}", fg="cyan", bold=True)
+
+    findings = lib.audit()
+
+    # 1. Missing Physical Files
+    missing = findings["missing_physical_files"]
+    if missing:
+        click.secho(f"!! Found {len(missing)} missing physical files.", fg="red")
+        if verbose:
+            for f in missing: click.echo(f"  - {f}")
+    else:
+        click.echo("OK: All documented files exist.")
+
+    # 2. Orphan Docs
+    orphans = findings["orphan_docs"]
+    if orphans:
+        click.secho(f"!! Found {len(orphans)} orphan document records (no reference linked).", fg="yellow")
+        if verbose:
+            for p in orphans: click.echo(f"  - {p}")
+    else:
+        click.echo("OK: All document records are linked to references.")
+
+    # 3. Missing Docs
+    missing_docs = findings["missing_docs"]
+    if missing_docs:
+        click.secho(f"?? Found {len(missing_docs)} references without documents.", fg="blue")
+        if verbose:
+            for t in missing_docs:
+                title = lib.ref_df[lib.ref_df.tag == t].title.iloc[0]
+                click.echo(f"  - {t}: {title[:60]}...")
+    else:
+        click.echo("OK: All references have at least one document.")
+
+    # 4. Broken Links
+    broken_tags = findings["broken_tag_links"]
+    if broken_tags:
+        click.secho(f"!! Found {len(broken_tags)} broken tag links in ref-doc.", fg="red")
+        if verbose:
+            click.echo(f"  - Tags: {broken_tags}")
+
+    broken_paths = findings["broken_path_links"]
+    if broken_paths:
+        click.secho(f"!! Found {len(broken_paths)} broken path links in ref-doc.", fg="red")
+        if verbose:
+            click.echo(f"  - Paths: {broken_paths}")
+
+    # 5. Orphan Text Extracts
+    orphan_txt = findings["orphan_extracts"]
+    if orphan_txt:
+        if execute:
+            click.secho(f"Cleaning {len(orphan_txt)} orphaned text extracts...", fg="red", bold=True)
+            lib.clean_text_extracts(execute=True)
+        else:
+            click.secho(f"!! Found {len(orphan_txt)} orphaned text extracts. Use -x to clean.", fg="yellow")
+            if verbose:
+                for f in orphan_txt: click.echo(f"  - {f}")
+    else:
+        click.echo("OK: No orphaned text extracts.")
+
+
 # ========================================================================================
 @entry.command()
 @click.option(
@@ -1770,7 +1848,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["query"] = query_completer
     completers["q"] = query_completer
     completers["import-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
-    completers["import-doc"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["stage-docs"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)
