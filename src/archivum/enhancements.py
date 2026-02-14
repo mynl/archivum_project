@@ -876,14 +876,13 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     3. Elects Best File (Physical).
 
     Args:
-        library_obj: The library instance containing .ref_df, ._doc_read_df, .ref_doc_df, .config
+        library_obj: The library instance containing .ref_df, ._doc_df, .ref_doc_df, .config
     """
     # Unpack library context
     ref_df = library_obj.ref_df
     ref_doc_df = library_obj.ref_doc_df
-    # need to trigger read of _doc_read_df
-    _ = library_obj.doc_df
-    doc_df = library_obj._doc_read_df
+    # ensure loaded
+    doc_df = library_obj.doc_df
     config = library_obj.config
     config_path = library_obj.config_path # Path to library root
 
@@ -914,7 +913,7 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     # Join with doc_df to get Hash and metadata
     # new_ref_doc columns: [tag, path]
     # doc_df columns: [path, hash, size, create, ...]
-    # Inner join: we only care about files that actually exist in the read index
+    # Inner join: we only care about files that actually exist in the index
     merged_docs = new_ref_doc.merge(doc_df, on='path', how='inner')
 
     # Dedupe: (Tag + Hash) should be unique.
@@ -1013,7 +1012,7 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
         hashes = hash_many3(paths, workers=config.hash_workers)
         doc_df.loc[missing_mask, 'hash'] = doc_df.loc[missing_mask, 'path'].map(lambda x: hashes.get(Path(x), ''))
         # If we found hashes, we should definitely update the library's internal state
-        library_obj._doc_read_df = doc_df
+        library_obj._doc_df = doc_df
 
     # 1. Capture ALL (Tag, Path) mappings (Rich links)
     # Join Ref -> RefDoc -> Doc (Inner join ensures we only process files we have)
@@ -1070,7 +1069,7 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
         
         # Commit to library object
         library_obj._ref_doc_df = new_ref_doc
-        library_obj._doc_read_df = final_doc_df
+        library_obj._doc_df = final_doc_df
         library_obj.save()
         library_obj.reset()
 

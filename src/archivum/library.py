@@ -44,7 +44,7 @@ class Library(LibraryBase):
     """Library specified by config yaml (archivum-config) file."""
 
     # base columns used by the app for quick output displays
-    base_cols = ["tag", "type", "author", "title", "year", "journal", "file"]
+    base_cols = ["tag", "type", "author", "title", "year", "journal"]
 
     def __init__(self, library_dir_name: str = "", **overrides):
         """
@@ -90,8 +90,6 @@ class Library(LibraryBase):
         self._last_query_expr = ""
         self._config_df = pd.DataFrame()
         self._doc_df = pd.DataFrame()
-        # paths in doc df get mangled - this is the original
-        self._doc_read_df = pd.DataFrame()
         self._ref_df = pd.DataFrame()
         self._ref_doc_df = pd.DataFrame()
         # fully blown up docs x refs x authors
@@ -120,25 +118,17 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._doc_df.empty:
             try:
-                self._doc_read_df = pd.read_feather(self.config_path / "doc.feather") #, dtype_backend="pyarrow")
+                self._doc_df = pd.read_feather(self.config_path / "doc.feather")
             except FileNotFoundError:
                 return self._doc_df
 
             doc_dir = self.doc_store_path
 
-            def get_rel_parent(p: Path) -> str:
-                if p.is_relative_to(doc_dir):
-                    return str(p.relative_to(doc_dir).parent)
-                return str(p.parent)  # Fallback: keep absolute parent
-
-            # truncate path names to make more readable
-            self._doc_df = self._doc_read_df.copy()
+            # resolve relative paths to absolute for in-memory work
             if not self._doc_df.empty and "path" in self._doc_df.columns:
-                self._doc_df["tpath"] = [
-                    get_rel_parent(p) for p in map(Path, self._doc_df.path)
-                ]
-            else:
-                self._doc_df["tpath"] = pd.Series(dtype=str)
+                self._doc_df['path'] = self._doc_df['path'].apply(
+                    lambda p: str((doc_dir / p).as_posix()) if not Path(p).is_absolute() else p
+                )
 
             # set up querexfuzz
             config_file = (
@@ -175,9 +165,16 @@ class Library(LibraryBase):
         """Return the document df, loading if needed."""
         if self._ref_doc_df.empty:
             try:
-                self._ref_doc_df = pd.read_feather(self.config_path / "ref-doc.feather") #, dtype_backend="pyarrow")
+                self._ref_doc_df = pd.read_feather(self.config_path / "ref-doc.feather")
             except FileNotFoundError:
                 return self._ref_doc_df
+
+            # resolve relative paths to absolute for in-memory work
+            doc_dir = self.doc_store_path
+            if not self._ref_doc_df.empty and "path" in self._ref_doc_df.columns:
+                self._ref_doc_df['path'] = self._ref_doc_df['path'].apply(
+                    lambda p: str((doc_dir / p).as_posix()) if not Path(p).is_absolute() else p
+                )
 
             config_file = (
                 files("archivum.configurations") / "querexfuzz-ref-doc-config.yaml"
@@ -195,9 +192,12 @@ class Library(LibraryBase):
         if self._database.empty:
             if self.ref_df.empty:
                 return self._database
-            exploded_authors = self.ref_df.assign(
-                author=self.ref_df.author.str.split(" and ")
-            ).explode("author", ignore_index=True)
+            # exploded authors
+            # exploded_authors = self.ref_df.assign(
+            #     author=self.ref_df.author.str.split(" and ")
+            # ).explode("author", ignore_index=True)
+            # non exploded
+            exploded_authors = self.ref_df 
             self._database = (
                 self.ref_doc_df.merge(exploded_authors, on="tag", how="right")
             ).merge(self.doc_df, on="path", how="left")
@@ -248,10 +248,15 @@ class Library(LibraryBase):
         pre_doc = len(self.doc_df)
         pre_ref_doc = len(self.ref_doc_df)
 
+        # ensure loaded
+        _ = self.doc_df
+        _ = self.ref_df
+        _ = self.ref_doc_df
+
         # Append to existing dataframes.
-        ref_out = pd.concat([self.ref_df, ref_add], ignore_index=True)
-        doc_out = pd.concat([self._doc_read_df, doc_add], ignore_index=True)
-        ref_doc_out = pd.concat([self.ref_doc_df, ref_doc_add], ignore_index=True)
+        ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True)
+        doc_out = pd.concat([self._doc_df, doc_add], ignore_index=True)
+        ref_doc_out = pd.concat([self._ref_doc_df, ref_doc_add], ignore_index=True)
 
         post_ref = len(ref_out)
         post_doc = len(doc_out)
@@ -269,7 +274,7 @@ class Library(LibraryBase):
 
         # make these the reference object
         self._ref_df = ref_out
-        self._doc_read_df = doc_out
+        self._doc_df = doc_out
         self._ref_doc_df = ref_doc_out
 
         # save
@@ -377,7 +382,7 @@ class Library(LibraryBase):
             # 1. Join everything to see what we SHOULD have (unexploded authors)
             # We use a normalized path for joining to handle lexical inconsistencies (e.g. C:\s vs \s)
             df_ref_doc = self.ref_doc_df.copy()
-            df_doc = self._doc_read_df.copy()
+            df_doc = self._doc_df.copy()
 
             df_ref_doc['norm_path'] = df_ref_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
             df_doc['norm_path'] = df_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
@@ -425,19 +430,19 @@ class Library(LibraryBase):
                         if status == "Aliased":
                             # Update metadata to canonical expected path
                             self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
-                            self._doc_read_df.loc[self._doc_read_df.path == row.path_doc, "path"] = expected
+                            self._doc_df.loc[self._doc_df.path == row.path_doc, "path"] = expected
                         elif status == "Misplaced":
                             # Perform the "move" (hardlink + update)
                             success = save_from_row(row, base_path)
                             if success == 'ok':
                                 self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
-                                self._doc_read_df.loc[self._doc_read_df.path == row.path_doc, "path"] = expected
+                                self._doc_df.loc[self._doc_df.path == row.path_doc, "path"] = expected
                             else:
                                 report[-1]["status"] = "Failed"
 
         elif task == "orphans":
-            orphan_paths = set(self._doc_read_df.path) - set(self.ref_doc_df.path)
-            orphans = self._doc_read_df[self._doc_read_df.path.isin(orphan_paths)].copy()
+            orphan_paths = set(self._doc_df.path) - set(self.ref_doc_df.path)
+            orphans = self._doc_df[self._doc_df.path.isin(orphan_paths)].copy()
             
             if orphans.empty:
                 return pd.DataFrame()
@@ -483,16 +488,16 @@ class Library(LibraryBase):
 
                     if execute:
                         if status == "Aliased":
-                            self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                            self._doc_df.loc[self._doc_df.path == actual, "path"] = expected
                         elif status == "Misplaced":
                             success = save_from_row(row, base_path)
                             if success == 'ok':
-                                self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                                self._doc_df.loc[self._doc_df.path == actual, "path"] = expected
                             else:
                                 report[-1]["status"] = "Failed"
 
         elif task == "missing":
-            for _, row in self._doc_read_df.iterrows():
+            for _, row in self._doc_df.iterrows():
                 if not os.path.exists(row.path):
                     report.append({
                         "tag": "N/A",
@@ -502,7 +507,7 @@ class Library(LibraryBase):
                     })
                     if execute:
                         # remove from indices
-                        self._doc_read_df = self._doc_read_df[self._doc_read_df.path != row.path]
+                        self._doc_df = self._doc_df[self._doc_df.path != row.path]
                         self._ref_doc_df = self._ref_doc_df[self._ref_doc_df.path != row.path]
 
         if execute and report:
@@ -515,10 +520,34 @@ class Library(LibraryBase):
         """Save config and all dataframes with aggressive safety checks."""
         # 1. ENSURE LOADED: Prevent lazy-load wiping by forcing properties to evaluate
         ref_to_save = self.ref_df
-        _ = self.ref_doc_df
-        _ = self.doc_df
-        doc_to_save = self._doc_read_df
-        ref_doc_to_save = self._ref_doc_df
+        ref_doc_df = self.ref_doc_df
+        doc_df = self.doc_df
+
+        # 1b. RELATIVIZE PATHS for portability
+        doc_dir = self.doc_store_path
+        
+        def relativize(p):
+            pp = Path(p)
+            try:
+                if pp.is_relative_to(doc_dir):
+                    return str(pp.relative_to(doc_dir).as_posix())
+            except ValueError:
+                pass
+            return p
+
+        doc_to_save = doc_df.copy()
+        if not doc_to_save.empty and "path" in doc_to_save.columns:
+            doc_to_save['path'] = doc_to_save['path'].apply(relativize)
+            # drop transient columns
+            for col in ['tpath', 'querex']:
+                if col in doc_to_save.columns:
+                    doc_to_save = doc_to_save.drop(columns=[col])
+
+        ref_doc_to_save = ref_doc_df.copy()
+        if not ref_doc_to_save.empty and "path" in ref_doc_to_save.columns:
+            ref_doc_to_save['path'] = ref_doc_to_save['path'].apply(relativize)
+            if 'querex' in ref_doc_to_save.columns:
+                ref_doc_to_save = ref_doc_to_save.drop(columns=['querex'])
 
         files_to_save = {
             "ref.feather": ref_to_save,
@@ -818,15 +847,17 @@ class Library(LibraryBase):
             p.symlink_to(bibtex_path)
 
     def update_hashes(self):
-        """Update _doc_read_df hashes, save and reset."""
-        if self._doc_read_df.empty:
+        """Update hashes, save and reset."""
+        # ensure loaded
+        doc_df = self.doc_df
+        if doc_df.empty:
             logger.info("Empty library! Cannot hash.")
             return
 
-        if "hash" not in self._doc_read_df:
-            self._doc_read_df["hash"] = ""
+        if "hash" not in self._doc_df:
+            self._doc_df["hash"] = ""
 
-        missing = self._doc_read_df.query("hash == '' or hash == 'TBD'")
+        missing = self._doc_df.query("hash == '' or hash == 'TBD'")
         if len(missing) == 0:
             logger.info("No missing caches, exiting.")
             return
@@ -835,7 +866,7 @@ class Library(LibraryBase):
         missing_docs = missing.path.values
         hashes = hash_many(missing_docs, workers=self.config.hash_workers)
         # hashes returns dict path->hash, so lookup on path
-        self._doc_read_df.hash = self._doc_read_df.path.map(lambda x: hashes.get(x, ""))
+        self._doc_df.hash = self._doc_df.path.map(lambda x: hashes.get(x, ""))
         # save everything
         self.save()
         # invalidate caches
