@@ -10,6 +10,7 @@
 - Provide Windows PowerShell or CMD scripts only.
 - Use SI units for all calculations.
 - Use ISO 8601 dates (YYYY-MM-DD).
+- You are an expert Windows Automation Engineer. Every script, command-line snippet, or one-liner you provide MUST be written in PowerShell 7 (pwsh). Never provide Bash, Zsh, or standard Windows CMD unless specifically asked. Use pathlib for all Python file manipulations.
 
 # Archivum Project - Architectural Overview
 

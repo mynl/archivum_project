@@ -101,9 +101,10 @@ def _load_global_config() -> dict:
 GLOBAL_CONFIG = _load_global_config()
 
 def resolve_path(p: str) -> Path:
-    """Resolves a path relative to BASE_DIR if it's not absolute."""
+    """Resolves a path relative to BASE_DIR if it's not absolute or root-relative."""
     path = Path(p)
-    if path.is_absolute():
+    # On Windows, paths starting with \ are root-relative and have an anchor but aren't 'absolute'
+    if path.is_absolute() or path.anchor in ('\\', '/'):
         return path
     return BASE_DIR / path
 

@@ -434,7 +434,7 @@ def audit(verbose, execute):
 @click.option(
     "-t",
     "--task",
-    type=click.Choice(["sharding", "rebase", "missing"]),
+    type=click.Choice(["sharding", "orphans", "missing"]),
     default="sharding",
     show_default=True,
     help="Validation task to perform.",
@@ -446,19 +446,14 @@ def audit(verbose, execute):
     show_default=True,
     help="Actually perform the fixes; otherwise, do a dry run and report.",
 )
-@click.option(
-    "--new-root",
-    type=click.Path(exists=True, file_okay=False, path_type=Path),
-    help="New root directory for the 'rebase' task.",
-)
-def validate(task, execute, new_root):
+def validate(task, execute):
     """
     Audit and fix library structure.
 
     \b
     Tasks:
     - sharding: verify files are in the correct hash-based folders.
-    - rebase: update paths if the root storage has moved.
+    - orphans: verify orphan docs are correctly sharded.
     - missing: find documents in the index that don't exist on disk.
     """
     lib = LibraryContext.get()
@@ -471,7 +466,7 @@ def validate(task, execute, new_root):
     else:
         click.secho(f"DRY RUN: {task} audit...", fg="cyan")
 
-    report = lib.validate(task=task, execute=execute, new_root=new_root)
+    report = lib.validate(task=task, execute=execute)
 
     if report.empty:
         click.echo("No issues found.")
@@ -1397,6 +1392,32 @@ def extract_text(missing, execute, clean, info, force, workers):
 
 
 # ========================================================================================
+@entry.command()
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+def find(path):
+    """Hash a document and find matching records in the library."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        # Fallback to just hashing if no library is open
+        from .hasher import blake3b_hash
+        h = blake3b_hash(path)
+        click.echo(f"Hash: {h}")
+        return
+
+    h, matches = lib.find(path)
+    click.echo(f"Hash: {h}")
+    
+    if matches.empty:
+        click.secho("No matching records found in library.", fg="yellow")
+    else:
+        click.secho(f"Found {len(matches)} matching records:", fg="green")
+        # Show tag and title for matches
+        # We need to join with ref_doc and ref to get tags and titles
+        res = matches.merge(lib.ref_doc_df, on='path', how='left')
+        res = res.merge(lib.ref_df, on='tag', how='left')
+        qd(res[['tag', 'author', 'title', 'year', 'path']])
+
+
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
 @click.option(

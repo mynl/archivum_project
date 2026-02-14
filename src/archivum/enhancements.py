@@ -797,8 +797,16 @@ def robust_str_convert(df, column, default="Unknown"):
 
 def title_from_path(path: str):
     """Guess a title from path string."""
-    title = ' '.join(i for i in re.split(r'[ \-_,]', Path(path).stem)
-                     if i.isalpha())
+    stem = Path(path).stem
+    
+    # Check if it looks like a sharded name: HASH_YEAR_AUTHOR_TITLE
+    parts = stem.split('_')
+    if len(parts) >= 4 and len(parts[0]) >= 8 and parts[1].isdigit():
+        return parts[-1]
+
+    # Fallback: keep only alpha words, excluding 'unknown'
+    title = ' '.join(i for i in re.split(r'[ \-_,]', stem)
+                     if i.isalpha() and i.lower() != 'unknown')
     return title or "Unknown"
 
 

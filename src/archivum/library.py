@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Union
 
 import pandas as pd
 from IPython.display import display
@@ -32,7 +33,8 @@ from .enhancements import (
     Ans,
     path_from_row,
     save_from_row,
-    canonical_name_from_row
+    canonical_name_from_row,
+    title_from_path
 )
 
 logger = logging.getLogger(__name__)
@@ -332,38 +334,67 @@ class Library(LibraryBase):
         self.save()
         self.reset()
 
-    def validate(self, task: str = "sharding", execute: bool = False, new_root: str = None):
+    def validate(self, task: str = "sharding", execute: bool = False):
         """
         Audit and fix library structure.
-        Tasks: 'sharding', 'rebase', 'missing'
+        Tasks: 'sharding', 'orphans', 'missing'
         """
+        # ensure data is loaded
+        _ = self.doc_df
+        _ = self.ref_df
+        _ = self.ref_doc_df
+
         base_path = self.doc_store_path
 
         report = []
 
         def path_compare(l_str, r_str):
-            """compare two strings as resolved paths."""
+            """Compare two strings as resolved paths, handling drive letters and normalization."""
             if not l_str or not r_str:
-                return False
-            if str(l_str).lower() == str(r_str).lower():
-                return True
-            # physical check
+                return "MISSING"
+
+            # Lexical check (normalized but not resolved)
+            # Standardize separators and case for lexical comparison
+            l_norm = str(Path(l_str)).lower().replace('\\', '/')
+            r_norm = str(Path(r_str)).lower().replace('\\', '/')
+
+            if l_norm == r_norm:
+                return "MATCH"
+
+            # Physical check for aliasing (same file, different path/drive mapping)
             try:
-                return os.path.samefile(l_str, r_str)
-            except (OSError, ValueError):
-                return False
+                if os.path.samefile(l_str, r_str):
+                    return "ALIASED"
+            except (OSError, ValueError, FileNotFoundError):
+                pass
+
+            if not os.path.exists(l_str):
+                return "MISSING"
+
+            return "MISPLACED"
 
         if task == "sharding":
             # 1. Join everything to see what we SHOULD have (unexploded authors)
-            # Use ref_df directly to avoid author explosion in self.database
+            # We use a normalized path for joining to handle lexical inconsistencies (e.g. C:\s vs \s)
+            df_ref_doc = self.ref_doc_df.copy()
+            df_doc = self._doc_read_df.copy()
+
+            df_ref_doc['norm_path'] = df_ref_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
+            df_doc['norm_path'] = df_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
+
+            # Merge on normalized path to catch files that are "the same" lexically but for drive/slashes
             db = (
-                self.ref_doc_df.merge(self.ref_df, on="tag", how="inner")
-            ).merge(self.doc_df, on="path", how="inner")
+                df_ref_doc.merge(self.ref_df, on="tag", how="inner")
+            ).merge(df_doc, on="norm_path", how="inner", suffixes=('', '_doc'))
 
             if db.empty:
+                # If merge failed, maybe paths are totally different?
+                # Let's try joining on tag and then finding the physical file if it's missing in doc_df
                 return pd.DataFrame()
 
             for _, row in db.iterrows():
+                # row.path is from ref_doc_df
+                # row.path_doc is from doc_df
                 if pd.isna(row.path) or not row.path:
                     continue
 
@@ -371,10 +402,17 @@ class Library(LibraryBase):
                 expected = path_from_row(row, base_path)
                 actual = row.path
 
-                if not path_compare(actual, expected):
+                compare_status = path_compare(actual, expected)
+
+                # If actual matches expected, we are good.
+                # If not, we check if it's aliased or misplaced.
+
+                if compare_status != "MATCH":
                     status = "Misplaced"
-                    if not os.path.exists(actual):
+                    if compare_status == "MISSING":
                         status = "Missing"
+                    elif compare_status == "ALIASED":
+                        status = "Aliased"
 
                     report.append({
                         "tag": row.tag,
@@ -383,43 +421,78 @@ class Library(LibraryBase):
                         "status": status
                     })
 
-                    if execute and status == "Misplaced":
-                        # Perform the "move" (hardlink + update)
-                        success = save_from_row(row, base_path)
-                        if success == 'ok':
-                            # Update metadata
+                    if execute:
+                        if status == "Aliased":
+                            # Update metadata to canonical expected path
                             self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
-                            self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
-                        else:
-                            report[-1]["status"] = "Failed"
+                            self._doc_read_df.loc[self._doc_read_df.path == row.path_doc, "path"] = expected
+                        elif status == "Misplaced":
+                            # Perform the "move" (hardlink + update)
+                            success = save_from_row(row, base_path)
+                            if success == 'ok':
+                                self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
+                                self._doc_read_df.loc[self._doc_read_df.path == row.path_doc, "path"] = expected
+                            else:
+                                report[-1]["status"] = "Failed"
 
-        elif task == "rebase":
-            print('WARNING: not tested, setting execute to False')
-            execute = False
-            if not new_root:
-                raise ValueError("rebase task requires new_root")
+        elif task == "orphans":
+            orphan_paths = set(self._doc_read_df.path) - set(self.ref_doc_df.path)
+            orphans = self._doc_read_df[self._doc_read_df.path.isin(orphan_paths)].copy()
+            
+            if orphans.empty:
+                return pd.DataFrame()
 
-            new_root_path = Path(new_root)
-            old_root_path = base_path
+            # Prepare orphan metadata for naming. 
+            # We try to extract info from the existing filename if it looks sharded.
+            def get_orphan_meta(row):
+                stem = Path(row.path).stem
+                parts = stem.split('_')
+                if len(parts) >= 4 and len(parts[0]) >= 8 and parts[1].isdigit():
+                    return pd.Series({
+                        'author': parts[2],
+                        'year': parts[1],
+                        'title': parts[3]
+                    })
+                return pd.Series({
+                    'author': 'Unknown',
+                    'year': '9999',
+                    'title': title_from_path(row.path)
+                })
 
-            for _, row in self.doc_df.iterrows():
+            orphans[['author', 'year', 'title']] = orphans.apply(get_orphan_meta, axis=1)
+            orphans['tag'] = 'ORPHAN'
+
+            for _, row in orphans.iterrows():
+                expected = path_from_row(row, base_path)
                 actual = row.path
-                actual_p = Path(actual)
-                if actual_p.is_relative_to(old_root_path):
-                    rel = actual_p.relative_to(old_root_path)
-                    expected = str((new_root_path / rel).as_posix())
+                compare_status = path_compare(actual, expected)
+
+                if compare_status != "MATCH":
+                    status = "Misplaced"
+                    if compare_status == "MISSING":
+                        status = "Missing"
+                    elif compare_status == "ALIASED":
+                        status = "Aliased"
+
                     report.append({
+                        "tag": "ORPHAN",
                         "current": actual,
                         "expected": expected,
-                        "status": "Rebase"
+                        "status": status
                     })
 
                     if execute:
-                        self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
-                        self._ref_doc_df.loc[self._ref_doc_df.path == actual, "path"] = expected
+                        if status == "Aliased":
+                            self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                        elif status == "Misplaced":
+                            success = save_from_row(row, base_path)
+                            if success == 'ok':
+                                self._doc_read_df.loc[self._doc_read_df.path == actual, "path"] = expected
+                            else:
+                                report[-1]["status"] = "Failed"
 
         elif task == "missing":
-            for _, row in self.doc_df.iterrows():
+            for _, row in self._doc_read_df.iterrows():
                 if not os.path.exists(row.path):
                     report.append({
                         "tag": "N/A",
@@ -1050,6 +1123,20 @@ class Library(LibraryBase):
         df = pd.concat(ans, axis=1, keys=[d.name for d in libs], names=['library', 'metric']).fillna(0)
         df = df.astype(int)
         return df
+
+    def find(self, path: Union[str, Path]):
+        """Hash a file and return the hash and any matching records."""
+        from .hasher import blake3b_hash
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"File not found: {p}")
+        
+        h = blake3b_hash(p)
+        
+        # Look for matches in the current library
+        matches = self.doc_df[self.doc_df.hash == h]
+        
+        return h, matches
 
     def find_docs(self, dir_path=None):
         """Find all document files in provided dir_path."""
