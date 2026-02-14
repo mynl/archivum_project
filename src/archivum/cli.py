@@ -186,12 +186,16 @@ def get_prompt(cmd):
 
 
 # Helper
-def _open_document(d):
+def _open_document(d, lib=None):
     """Try to open document at path d."""
-    # assume windows knows what to do
-    p = Path(d)
+    # Resolve to absolute path if library provided
+    if lib and not Path(d).is_absolute():
+        p = lib.abspath(d)
+    else:
+        p = Path(d)
+
     if not p.exists():
-        logger.info("file %s not found", p.name)
+        logger.info("file %s not found (at %s)", p.name, p)
         return
     try:
         # windows only
@@ -963,7 +967,7 @@ def query(start: str, database: str):
                     print(f"Trying to open {docs=}")
                     logger.info(f"Trying to open {docs=}")
                     for d in docs:
-                        _open_document(d)
+                        lib.open_document(d)
                 except Exception:
                     raise
                 continue
@@ -1393,30 +1397,94 @@ def extract_text(missing, execute, clean, info, force, workers):
 
 # ========================================================================================
 @entry.command()
-@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
-def find(path):
-    """Hash a document and find matching records in the library."""
+@click.argument("path", type=click.Path(exists=True, dir_okay=True, path_type=Path))
+def find_doc(path):
+    """Hash a document (or directory) and find matching records in the library."""
     lib = LibraryContext.get()
+
+    # 1. Collect files
+    if path.is_dir():
+        if lib.is_empty:
+            click.echo("No library open. Cannot scan directory for matches.")
+            return
+        files = lib.find_docs(path)
+        if not files:
+            click.echo(f"No documents found in {path}")
+            return
+        click.echo(f"Scanning {len(files)} files in {path}...")
+    else:
+        files = [path]
+
     if lib.is_empty:
-        # Fallback to just hashing if no library is open
+        # Fallback to just hashing if no library is open (only for single file)
         from .hasher import blake3b_hash
         h = blake3b_hash(path)
         click.echo(f"Hash: {h}")
         return
 
-    h, matches = lib.find(path)
-    click.echo(f"Hash: {h}")
-    
-    if matches.empty:
-        click.secho("No matching records found in library.", fg="yellow")
-    else:
-        click.secho(f"Found {len(matches)} matching records:", fg="green")
-        # Show tag and title for matches
-        # We need to join with ref_doc and ref to get tags and titles
-        res = matches.merge(lib.ref_doc_df, on='path', how='left')
-        res = res.merge(lib.ref_df, on='tag', how='left')
-        qd(res[['tag', 'author', 'title', 'year', 'path']])
+    all_results = []
+    for p in files:
+        try:
+            h, matches = lib.find(p)
+            if not matches.empty:
+                # We need to join with ref_doc and ref to get tags and titles
+                res = matches.merge(lib.ref_doc_df, on=['hash', 'version'], how='left')
+                res = res.merge(lib.ref_df, on='tag', how='left')
+                res.insert(0, 'filename', p.name)
+                all_results.append(res)
+            elif not path.is_dir():
+                click.echo(f"Hash: {h}")
+                click.secho("No matching records found in library.", fg="yellow")
+        except Exception as e:
+            click.echo(f"Error processing {p.name}: {e}")
 
+    if all_results:
+        final_df = pd.concat(all_results, ignore_index=True)
+        if path.is_dir():
+            click.secho(f"\nFound matches for {final_df.filename.nunique()} files:", fg="green")
+            # user asked for filename as first column
+            cols = ['filename', 'tag', 'author', 'title', 'year']
+            # only keep columns that exist
+            cols = [c for c in cols if c in final_df.columns]
+            qd(final_df[cols])
+        else:
+            # behave as before for single file
+            click.echo(f"Hash: {all_results[0].hash.iloc[0]}")
+            click.secho(f"Found {len(all_results[0])} matching records:", fg="green")
+            qd(all_results[0][['tag', 'author', 'title', 'year', 'path']])
+    elif path.is_dir():
+        click.echo("No matching records found for any files in directory.")
+
+
+@entry.command()
+@click.argument("tag", type=str)
+@click.argument("file_hash", type=str)
+@click.option("-v", "--version", type=int, default=0, help="Version number of the hash (default 0).")
+def link(tag, file_hash, version):
+    """Manually link a tag to a document by hash and version."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open.")
+        return
+
+    try:
+        # Support partial hash if unique
+        if len(file_hash) < 64:
+            matches = lib.doc_df[lib.doc_df.hash.str.startswith(file_hash.upper())]
+            if len(matches) == 0:
+                click.echo(f"No document found starting with hash {file_hash}")
+                return
+            elif len(matches.hash.unique()) > 1:
+                click.echo(f"Ambiguous hash {file_hash}, multiple matches found.")
+                return
+            file_hash = matches.hash.iloc[0]
+
+        if lib.link_document(tag, file_hash, version):
+            click.secho(f"Successfully linked {tag} to {file_hash[:12]} (v{version})", fg="green")
+        else:
+            click.echo("Link operation skipped (already exists).")
+    except Exception as e:
+        click.echo(f"Error: {e}")
 
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
@@ -1520,6 +1588,7 @@ def rg(args, n):
     "-a",
     "--all-docs",
     is_flag=True,
+    default=False,
     help="Open all documents associated with the matched tags.",
 )
 @click.option(
@@ -1570,7 +1639,7 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
 
     # 2. Find Associated Documents
     doc_links = lib.ref_doc_df[lib.ref_doc_df.tag.isin(matched_tags)]
-    doc_details = doc_links.merge(lib.doc_df, on='path', how='inner')
+    doc_details = doc_links.merge(lib.doc_df, on=['hash', 'version'], how='inner')
 
     # 3. Show Information
     if information:
@@ -1624,13 +1693,31 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
         if all_docs:
             to_open = doc_details.path.unique().tolist()
         else:
-            # open_doc: prefer the 'preferred' one for each tag
-            if 'preferred' in doc_details.columns:
-                to_open = doc_details[doc_details.preferred == 1].path.unique().tolist()
-                if not to_open:
-                    to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+            # Smart Open Logic:
+            # 1. Try exact tag match first (case-insensitive)
+            exact_match = ref_matches[ref_matches.tag.str.lower() == tag_regex.lower()]
+
+            if not exact_match.empty:
+                # Open only the exact match
+                target_tag = exact_match.tag.iloc[0]
+                to_open = doc_details[doc_details.tag == target_tag].path.unique().tolist()
             else:
-                to_open = doc_details.groupby('tag')['path'].first().unique().tolist()
+                # 2. No exact match, handle regex results
+                all_matched_tags = doc_details.tag.unique().tolist()
+                target_tag = all_matched_tags[0]
+                to_open = doc_details[doc_details.tag == target_tag].path.unique().tolist()
+
+                if len(all_matched_tags) > 1:
+                    # Warn about other matches
+                    others = all_matched_tags[1:]
+                    click.secho(f"Warning: Multiple matches found for '{tag_regex}'.", fg="yellow")
+                    click.secho(f"Opening first match: {target_tag}", fg="green")
+
+                    # Group by tag to get the first filename for each other tag
+                    other_files = doc_details[doc_details.tag.isin(others)].groupby('tag')['name'].first().to_dict()
+                    click.echo("Other matching documents:")
+                    for other_tag, other_file in other_files.items():
+                        click.echo(f"  - {other_tag}: {other_file}")
 
         # Apply Limit
         if len(to_open) > limit:
@@ -1639,7 +1726,7 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
 
         for d in to_open:
             click.echo(f"Opening: {Path(d).name}")
-            _open_document(d)
+            lib.open_document(d)
 
 @entry.command()
 @click.argument("hash_str", type=str)
@@ -1692,7 +1779,7 @@ def hash(hash_str, open_doc, verbose):
         refs = lib.ref_df[lib.ref_df.tag.isin(tags)].copy()
 
         # We need a mapping of tag -> short_hash
-        tag_hash_map = links.merge(doc_matches[['path', 'hash']], on='path')
+        tag_hash_map = links.merge(doc_matches[['hash', 'version']], on=['hash', 'version'])
         tag_hash_map = tag_hash_map.groupby('tag')['hash'].first().str[:12].to_dict()
 
         refs['hash_12'] = refs['tag'].map(tag_hash_map)
@@ -1712,7 +1799,7 @@ def hash(hash_str, open_doc, verbose):
     if open_doc:
         for p in paths:
             click.echo(f"Opening: {Path(p).name}")
-            _open_document(p)
+            lib.open_document(p)
 
 
 # doc title opening ======experimental-----------------
@@ -1765,7 +1852,7 @@ def title(title, all_docs):
     doc_tags = df.tag.to_list()  # noqa
     df2 = lib.ref_doc_df.query("tag in @doc_tags")
     for d in df2.path:
-        _open_document(d)
+        lib.open_document(d)
 
 
 @entry.command()
@@ -1799,7 +1886,7 @@ def tt(title, all_docs):
     doc_tags = df.tag.to_list()  # noqa
     df2 = lib.ref_doc_df.query("tag in @doc_tags")
     for d in df2.path:
-        _open_document(d)
+        lib.open_document(d)
 
 
 # =================================================

@@ -5,6 +5,7 @@ Equivalent to and based on manager module in file_database.
 
 Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
+from functools import cache
 import datetime as dt
 from importlib.resources import files
 import json
@@ -82,6 +83,66 @@ class Library(LibraryBase):
         """Create simple string representation."""
         return f"Library({self.config.name})"
 
+    def abspath(self, p: Union[str, Path]) -> Path:
+        """Resolve a library-relative path to an absolute path with caching."""
+        if not p or pd.isna(p):
+            return Path()
+
+        # Use a helper to make it cacheable (Path objects are hashable)
+        return self._resolve_cached(str(p))
+
+    @cache
+    def _resolve_cached(self, p_str: str) -> Path:
+        p = Path(p_str)
+        if p.is_absolute() or p.anchor in ('\\', '/'):
+            return p
+        return self.doc_store_path / p
+
+    def open_document(self, path: Union[str, Path]):
+        """Try to open document at path (rel or abs)."""
+        p = self.abspath(path)
+
+        if not p.exists():
+            logger.info("file %s not found (at %s)", p.name, p)
+            return
+        try:
+            # windows only
+            os.startfile(p)
+        except FileNotFoundError:
+            logger.error("File not found %s", p)
+        except PermissionError:
+            logger.error("Permission denied %s", p)
+        except OSError as e:
+            logger.error("OS error while opening %s: %s", p, e)
+        except Exception as e:
+            logger.error("Unexpected error: %s", e)
+
+    def link_document(self, tag: str, file_hash: str, version: int = 0):
+        """Manually link a tag to a specific (hash, version)."""
+        # 1. Validation
+        if tag not in self.ref_df.tag.values:
+            raise ValueError(f"Tag '{tag}' not found in references.")
+
+        doc_match = self._doc_df[(self._doc_df.hash == file_hash) & (self._doc_df.version == version)]
+        if doc_match.empty:
+            raise ValueError(f"Document with hash {file_hash[:12]} and version {version} not found.")
+
+        # 2. Check for existing link
+        existing = self.ref_doc_df[(self.ref_doc_df.tag == tag) &
+                                   (self.ref_doc_df.hash == file_hash) &
+                                   (self.ref_doc_df.version == version)]
+        if not existing.empty:
+            logger.info("Link already exists.")
+            return False
+
+        # 3. Create link
+        new_link = pd.DataFrame([{"tag": tag, "hash": file_hash, "version": version}])
+        self._ref_doc_df = pd.concat([self.ref_doc_df, new_link], ignore_index=True)
+
+        self.save()
+        self.reset()
+        return True
+
     def reset(self):
         """Reset all cache variables."""
         self._last_query = None
@@ -122,14 +183,6 @@ class Library(LibraryBase):
             except FileNotFoundError:
                 return self._doc_df
 
-            doc_dir = self.doc_store_path
-
-            # resolve relative paths to absolute for in-memory work
-            if not self._doc_df.empty and "path" in self._doc_df.columns:
-                self._doc_df['path'] = self._doc_df['path'].apply(
-                    lambda p: str((doc_dir / p).as_posix()) if not Path(p).is_absolute() else p
-                )
-
             # set up querexfuzz
             config_file = (
                 files("archivum.configurations") / "querexfuzz-doc-config.yaml"
@@ -169,13 +222,6 @@ class Library(LibraryBase):
             except FileNotFoundError:
                 return self._ref_doc_df
 
-            # resolve relative paths to absolute for in-memory work
-            doc_dir = self.doc_store_path
-            if not self._ref_doc_df.empty and "path" in self._ref_doc_df.columns:
-                self._ref_doc_df['path'] = self._ref_doc_df['path'].apply(
-                    lambda p: str((doc_dir / p).as_posix()) if not Path(p).is_absolute() else p
-                )
-
             config_file = (
                 files("archivum.configurations") / "querexfuzz-ref-doc-config.yaml"
             )
@@ -192,18 +238,15 @@ class Library(LibraryBase):
         if self._database.empty:
             if self.ref_df.empty:
                 return self._database
-            # exploded authors
-            # exploded_authors = self.ref_df.assign(
-            #     author=self.ref_df.author.str.split(" and ")
-            # ).explode("author", ignore_index=True)
-            # non exploded
-            exploded_authors = self.ref_df 
+
+            # Use hash and version for joining
             self._database = (
-                self.ref_doc_df.merge(exploded_authors, on="tag", how="right")
-            ).merge(self.doc_df, on="path", how="left")
+                self.ref_doc_df.merge(self.ref_df, on="tag", how="right")
+            ).merge(self.doc_df, on=["hash", "version"], how="left")
+
             for c in ["node", "links", "size"]:
-                self._database[c] = self._database[c].fillna(0)
-            # self._database.fillna("")
+                if c in self._database.columns:
+                    self._database[c] = self._database[c].fillna(0)
 
             config_file = (
                 files("archivum.configurations") / "querexfuzz-database-config.yaml"
@@ -358,48 +401,40 @@ class Library(LibraryBase):
             if not l_str or not r_str:
                 return "MISSING"
 
-            # Lexical check (normalized but not resolved)
-            # Standardize separators and case for lexical comparison
-            l_norm = str(Path(l_str)).lower().replace('\\', '/')
-            r_norm = str(Path(r_str)).lower().replace('\\', '/')
+            # Resolve both to absolute paths for robust comparison
+            abs_l = self.abspath(l_str)
+            abs_r = self.abspath(r_str)
+
+            # Lexical check on absolute paths
+            l_norm = str(abs_l).lower().replace('\\', '/')
+            r_norm = str(abs_r).lower().replace('\\', '/')
 
             if l_norm == r_norm:
                 return "MATCH"
 
             # Physical check for aliasing (same file, different path/drive mapping)
             try:
-                if os.path.samefile(l_str, r_str):
+                if os.path.samefile(abs_l, abs_r):
                     return "ALIASED"
             except (OSError, ValueError, FileNotFoundError):
                 pass
 
-            if not os.path.exists(l_str):
+            if not abs_l.exists():
                 return "MISSING"
 
             return "MISPLACED"
 
         if task == "sharding":
             # 1. Join everything to see what we SHOULD have (unexploded authors)
-            # We use a normalized path for joining to handle lexical inconsistencies (e.g. C:\s vs \s)
-            df_ref_doc = self.ref_doc_df.copy()
-            df_doc = self._doc_df.copy()
-
-            df_ref_doc['norm_path'] = df_ref_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
-            df_doc['norm_path'] = df_doc.path.map(lambda x: str(Path(x)).lower().replace('\\', '/'))
-
-            # Merge on normalized path to catch files that are "the same" lexically but for drive/slashes
+            # Use hash and version for joining
             db = (
-                df_ref_doc.merge(self.ref_df, on="tag", how="inner")
-            ).merge(df_doc, on="norm_path", how="inner", suffixes=('', '_doc'))
+                self.ref_doc_df.merge(self.ref_df, on="tag", how="inner")
+            ).merge(self.doc_df, on=["hash", "version"], how="inner")
 
             if db.empty:
-                # If merge failed, maybe paths are totally different?
-                # Let's try joining on tag and then finding the physical file if it's missing in doc_df
                 return pd.DataFrame()
 
             for _, row in db.iterrows():
-                # row.path is from ref_doc_df
-                # row.path_doc is from doc_df
                 if pd.isna(row.path) or not row.path:
                     continue
 
@@ -427,22 +462,30 @@ class Library(LibraryBase):
                     })
 
                     if execute:
+                        # Ensure we store the relative path in the DB
+                        rel_expected = str(Path(expected).relative_to(base_path).as_posix())
                         if status == "Aliased":
-                            # Update metadata to canonical expected path
-                            self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
-                            self._doc_df.loc[self._doc_df.path == row.path_doc, "path"] = expected
+                            # Update path in doc_df
+                            self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
                         elif status == "Misplaced":
                             # Perform the "move" (hardlink + update)
                             success = save_from_row(row, base_path)
                             if success == 'ok':
-                                self._ref_doc_df.loc[self._ref_doc_df.tag == row.tag, "path"] = expected
-                                self._doc_df.loc[self._doc_df.path == row.path_doc, "path"] = expected
+                                self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
                             else:
                                 report[-1]["status"] = "Failed"
 
         elif task == "orphans":
-            orphan_paths = set(self._doc_df.path) - set(self.ref_doc_df.path)
-            orphans = self._doc_df[self._doc_df.path.isin(orphan_paths)].copy()
+            id_cols = ['hash', 'version']
+            doc_ids = self._doc_df[id_cols].drop_duplicates()
+            ref_doc_ids = self.ref_doc_df[id_cols].drop_duplicates()
+
+            # Find (hash, version) pairs in doc_df that are NOT in ref_doc_df
+            orphan_ids = doc_ids.merge(ref_doc_ids, on=id_cols, how='left', indicator=True)
+            orphan_ids = orphan_ids[orphan_ids._merge == 'left_only'].drop(columns=['_merge'])
+
+            # Get the full orphan records
+            orphans = orphan_ids.merge(self._doc_df, on=id_cols, how='inner').copy()
             
             if orphans.empty:
                 return pd.DataFrame()
@@ -487,18 +530,19 @@ class Library(LibraryBase):
                     })
 
                     if execute:
+                        rel_expected = str(Path(expected).relative_to(base_path).as_posix())
                         if status == "Aliased":
-                            self._doc_df.loc[self._doc_df.path == actual, "path"] = expected
+                            self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
                         elif status == "Misplaced":
                             success = save_from_row(row, base_path)
                             if success == 'ok':
-                                self._doc_df.loc[self._doc_df.path == actual, "path"] = expected
+                                self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
                             else:
                                 report[-1]["status"] = "Failed"
 
         elif task == "missing":
             for _, row in self._doc_df.iterrows():
-                if not os.path.exists(row.path):
+                if not self.abspath(row.path).exists():
                     report.append({
                         "tag": "N/A",
                         "current": row.path,
@@ -889,7 +933,7 @@ class Library(LibraryBase):
 
         to_extract = []
         for _, row in self.doc_df.iterrows():
-            p = Path(row.path)
+            p = self.abspath(row.path)
             doc = Document(p)
             doc.hash = row.hash
             if force or not doc.text_exists(self.text_dir_path, self.config.extractor):
@@ -907,7 +951,7 @@ class Library(LibraryBase):
         logger.info(f"Extracting text for {len(to_extract)} files...")
         
         # Pass hashes for correct naming
-        path_to_hash = {Path(row.path): row.hash for _, row in self.doc_df.iterrows()}
+        path_to_hash = {self.abspath(row.path): row.hash for _, row in self.doc_df.iterrows()}
         
         results = extract_text_for_paths(
             to_extract,
@@ -943,7 +987,7 @@ class Library(LibraryBase):
 
         results = []
         for _, row in self.doc_df.iterrows():
-            p = Path(row.path)
+            p = self.abspath(row.path)
             doc = Document(p)
             doc.hash = row.hash
             exists = doc.text_exists(self.text_dir_path, self.config.extractor)
@@ -972,7 +1016,7 @@ class Library(LibraryBase):
         # 1. Get all expected text paths
         expected_paths = set()
         for _, row in self.doc_df.iterrows():
-            doc = Document(Path(row.path))
+            doc = Document(self.abspath(row.path))
             doc.hash = row.hash
             expected_paths.add(str(doc.text_path(self.text_dir_path, self.config.extractor).absolute()))
 
@@ -1005,24 +1049,39 @@ class Library(LibraryBase):
             "orphan_docs": [],
             "missing_docs": [],
             "broken_tag_links": [],
-            "broken_path_links": [],
+            "broken_id_links": [],
             "orphan_extracts": []
         }
 
         # 1. Missing Physical Files
         for _, row in self.doc_df.iterrows():
-            if not os.path.exists(row.path):
+            if not self.abspath(row.path).exists():
                 findings["missing_physical_files"].append(row.path)
 
         # 2. Orphan Docs (in doc.feather but not in ref-doc.feather)
-        findings["orphan_docs"] = self.doc_df[~self.doc_df.path.isin(self.ref_doc_df.path)].path.tolist()
+        # Identify by (hash, version)
+        id_cols = ['hash', 'version']
+        doc_ids = self.doc_df[id_cols].drop_duplicates()
+        ref_doc_ids = self.ref_doc_df[id_cols].drop_duplicates()
+
+        # Merge to find orphans
+        orphans = doc_ids.merge(ref_doc_ids, on=id_cols, how='left', indicator=True)
+        orphans = orphans[orphans._merge == 'left_only'].drop(columns=['_merge'])
+
+        # Map back to paths for reporting
+        orphan_paths = orphans.merge(self.doc_df, on=id_cols, how='inner').path.tolist()
+        findings["orphan_docs"] = orphan_paths
 
         # 3. Missing Docs (Tags with no linked documents)
         findings["missing_docs"] = self.ref_df[~self.ref_df.tag.isin(self.ref_doc_df.tag)].tag.tolist()
 
         # 4. Broken Links
+        # Broken Tags (Tag in ref-doc not in ref)
         findings["broken_tag_links"] = self.ref_doc_df[~self.ref_doc_df.tag.isin(self.ref_df.tag)].tag.tolist()
-        findings["broken_path_links"] = self.ref_doc_df[~self.ref_doc_df.path.isin(self.doc_df.path)].path.tolist()
+
+        # Broken IDs (Identity in ref-doc not in doc)
+        broken_ids = self.ref_doc_df.merge(self.doc_df[id_cols], on=id_cols, how='left', indicator=True)
+        findings["broken_id_links"] = broken_ids[broken_ids._merge == 'left_only'].tag.tolist()
 
         # 5. Orphan Text Extracts
         findings["orphan_extracts"] = self.clean_text_extracts(execute=False)
@@ -1300,13 +1359,13 @@ class Library(LibraryBase):
         # 2. Files
         links = self.ref_doc_df[self.ref_doc_df.tag == tag]
         if not links.empty:
-            docs = links.merge(self.doc_df, on="path", how="left")
+            # Join on hash and version
+            docs = links.merge(self.doc_df, on=["hash", "version"], how="left")
             for i, (_, doc) in enumerate(docs.iterrows(), 1):
-                pref = " [PREFERRED]" if doc.get("preferred") == 1 else ""
                 h = f" (hash: {doc.hash[:12]})" if pd.notna(doc.get("hash")) else ""
                 info.append(
                     {
-                        "Field": f"Document {i}{pref}",
+                        "Field": f"Document {i}",
                         "Value": f"{doc.path}{h}",
                     }
                 )

@@ -909,27 +909,22 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     valid_tags = set(ans.ans_df['tag'])
     assert len(new_ref_doc[~new_ref_doc['tag'].isin(valid_tags)]) == 0, "Should be impossible"
 
-    # --- Phase 3: Logical Hash Deduplication ---
-    # Join with doc_df to get Hash and metadata
-    # new_ref_doc columns: [tag, path]
-    # doc_df columns: [path, hash, size, create, ...]
+    # --- Phase 3: Logical Identity Deduplication ---
+    # Join with doc_df to get metadata for the election
+    # new_ref_doc columns: [tag, hash, version]
+    # doc_df columns: [path, hash, version, size, create, ...]
     # Inner join: we only care about files that actually exist in the index
-    merged_docs = new_ref_doc.merge(doc_df, on='path', how='inner')
+    merged_docs = new_ref_doc.merge(doc_df, on=['hash', 'version'], how='inner')
 
-    # Dedupe: (Tag + Hash) should be unique.
-    # If Tag A points to Path 1 (Hash X) and Path 2 (Hash X), we only need one link.
-    # We prefer the one with the 'better' path (e.g., shortest length or alphabetic)
-    merged_docs['path_len'] = merged_docs['path'].astype(str).str.len()
-    merged_docs = merged_docs.sort_values(['tag', 'hash', 'path_len'])
-
-    # weirdly, there are several instances where the Mendeley bibtex file has
-    # the exact same doc in twice!
-    unique_links = merged_docs.drop_duplicates(subset=['tag', 'hash'], keep='first')
+    # Dedupe: (Tag + Hash + Version) should be unique (it is by construction, 
+    # but we might have redundant links from previous metadata)
+    unique_links = merged_docs.drop_duplicates(subset=['tag', 'hash', 'version'], keep='first')
 
     # --- Phase 4: Feature Scan & Caching ---
     feature_cache = FileFeatureCache(config_path)
 
-    # We only scan distinct hashes found in our unique links
+    # We only scan distinct (hash, version) found in our unique links
+    # Actually, features are intrinsic to the hash, so we can just scan the hash.
     unique_hashes = unique_links['hash'].unique()
 
     # Bulk update cache
@@ -940,7 +935,8 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
             # We need a path to scan. Find one from doc_df associated with this hash.
             # (merged_docs guarantees we have at least one path)
             sample_path = unique_links[unique_links['hash'] == h]['path'].iloc[0]
-            feats = scan_doc_features(sample_path)
+            # Resolve relative path for scanning
+            feats = scan_doc_features(library_obj.abspath(sample_path))
             feature_cache.set_features(h, feats)
 
         # Flatten for dataframe
@@ -954,32 +950,21 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     # Join features back to unique_links
     candidates = unique_links.merge(feat_df, on='hash', how='left')
 
-    # --- Phase 5: The Election (Scoring) ---
-    # We define the sort order for "Best File":
-    # 1. is_valid_pdf (True > False)
-    # 2. has_bookmarks (True > False)
-    # 3. size (Ascending - prefer compact/latex over bloated)
-    # 4. create (Descending - tie-breaker: newest file)
-
+    # --- Phase 5: Result Assembly ---
+    # Merge candidates to get the best title etc.
+    # candidates: [tag, hash, version, is_valid_pdf, has_bookmarks, size, create]
+    
+    # Sort order for "Best File" (used if we needed to elect, but here we keep all links)
     candidates = candidates.sort_values(
         by=['tag', 'is_valid_pdf', 'has_bookmarks', 'size', 'create'],
         ascending=[True, False, False, True, False]
     )
 
-    # Create the 'preferred' flag
-    # The first row in each tag group is the winner
-    candidates['preferred'] = 0
-    # Mark the first entry of each tag group as preferred
-    # Using head(1) index matching
-    best_indices = candidates.groupby('tag').head(1).index
-    candidates.loc[best_indices, 'preferred'] = 1
-
     # --- Phase 6: Finalize ---
-    # Reconstruct clean ref_doc_df with just [tag, path, preferred]
-    final_ref_doc = candidates[['tag', 'path', 'preferred']].copy()
+    # Reconstruct clean ref_doc_df with just [tag, hash, version]
+    final_ref_doc = candidates[['tag', 'hash', 'version']].copy()
 
-    logger.info(f"File Election: Mapped {len(final_ref_doc)} file links. "
-                f"Selected {final_ref_doc['preferred'].sum()} preferred files.")
+    logger.info(f"Identity Mapping: Mapped {len(final_ref_doc)} file links.")
 
     # Return new Ans tuple with the updated ref_doc_df
     return ans._replace(ref_doc_df=final_ref_doc)
@@ -1014,16 +999,17 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
         # If we found hashes, we should definitely update the library's internal state
         library_obj._doc_df = doc_df
 
-    # 1. Capture ALL (Tag, Path) mappings (Rich links)
+    # 1. Capture ALL (Tag, Hash, Version) mappings (Rich links)
     # Join Ref -> RefDoc -> Doc (Inner join ensures we only process files we have)
     tagged_links = (
         ref_doc_df.merge(ref_df, on='tag', how='inner')
-                  .merge(doc_df[['path', 'hash']], on='path', how='inner')
+                  .merge(doc_df, on=['hash', 'version'], how='inner')
     )
     
-    # 2. Capture ALL Orphans (Files in doc_df with no Tag in ref_doc_df)
-    orphan_paths = set(doc_df.path) - set(ref_doc_df.path)
-    orphans = doc_df[doc_df.path.isin(orphan_paths)].copy()
+    # 2. Capture ALL Orphans (Files in doc_df with no link in ref_doc_df)
+    id_cols = ['hash', 'version']
+    orphan_ids = set(map(tuple, doc_df[id_cols].values)) - set(map(tuple, ref_doc_df[id_cols].values))
+    orphans = doc_df[doc_df[id_cols].apply(tuple, axis=1).isin(orphan_ids)].copy()
     orphans['tag'] = 'ORPHAN'
     orphans['author'] = 'Unknown'
     orphans['year'] = '9999'
@@ -1031,7 +1017,7 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
     orphans['title'] = orphans.apply(lambda r: r.get('title') or title_from_path(r.path), axis=1)
 
     # 3. Combine for processing
-    cols = ['tag', 'hash', 'author', 'year', 'title', 'path']
+    cols = ['tag', 'hash', 'version', 'author', 'year', 'title', 'path']
     to_process = pd.concat([tagged_links[cols], orphans[cols]], ignore_index=True)
     # Ensure no nans in naming ingredients
     for c in ['hash', 'author', 'year', 'title']:
@@ -1044,28 +1030,46 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
     to_process['new_path'] = to_process.apply(lambda r: path_from_row(r, base), axis=1)
     
     hardlink_maker = partial(save_from_row, base_path=base)
-    results = to_process.apply(hardlink_maker, axis=1)
+    # save_from_row uses absolute paths for os.path.samefile etc.
+    # to_process.path might be relative if it came from doc_df
+    # We should ensure it's absolute for the hardlink maker
+    to_process['abs_path'] = to_process.path.apply(library_obj.abspath)
+    
+    # We need to tweak save_from_row slightly to accept the absolute path if we have it
+    # or we just pass the row with absolute path
+    def save_wrapper(row):
+        from .enhancements import canonical_name_from_row
+        original = Path(row.abs_path)
+        fn = canonical_name_from_row(row)
+        path = (base / fn[:2] / fn).with_suffix(original.suffix)
+        if path.exists():
+            if path.samefile(original):
+                return 'ok'
+            path.unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.hardlink_to(original)
+        except OSError:
+            return 'error'
+        return 'ok'
+
+    results = to_process.apply(save_wrapper, axis=1)
     
     # 5. Optional DB Update (Point library to the sharded files)
     if update:
         print("Doc Organizer: Updating library database with sharded paths...")
         
         # Build new ref_doc_df (Rich links only)
-        # We need to keep 'preferred' if it exists
-        new_ref_doc = to_process[to_process.tag != 'ORPHAN'].merge(
-            ref_doc_df[['tag', 'path', 'preferred']], on=['tag', 'path'], how='left'
-        )
-        new_ref_doc = new_ref_doc[['tag', 'new_path', 'preferred']].rename(columns={'new_path': 'path'})
+        new_ref_doc = to_process[to_process.tag != 'ORPHAN'][['tag', 'hash', 'version']]
         
         # Build new doc_df
         # We merge the original doc stats with the new paths
-        new_doc_df = to_process.merge(doc_df, on=['path', 'hash'], how='inner')
-        new_doc_df['old_path'] = new_doc_df['path']
+        new_doc_df = to_process.merge(doc_df, on=['hash', 'version'], how='inner', suffixes=('', '_old'))
         new_doc_df['path'] = new_doc_df['new_path']
         new_doc_df['name'] = new_doc_df['path'].apply(lambda x: Path(x).name)
         
         # Keep original columns of doc_df
-        final_doc_df = new_doc_df[doc_df.columns].drop_duplicates(subset=['path'])
+        final_doc_df = new_doc_df[doc_df.columns].drop_duplicates(subset=['hash', 'version'])
         
         # Commit to library object
         library_obj._ref_doc_df = new_ref_doc

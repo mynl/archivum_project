@@ -388,7 +388,7 @@ class Bib2df_Incremental(LibraryBase):
                     .dt.tz_convert(tz)
                 )
                 if self._add_hashes:
-                    logger.info("Adding hashes")
+                    logger.info("Adding hashes and versions")
                     missing_docs = df.path.values
                     hashes = hash_many(
                         [Path(p) for p in missing_docs], 
@@ -396,6 +396,45 @@ class Bib2df_Incremental(LibraryBase):
                     )
                     # hashes returns dict Path->hash, so lookup on Path(x)
                     df.hash = df.path.map(lambda x: hashes.get(Path(x), ""))
+                    
+                    # Assign versions based on existing library docs
+                    # We need to be careful not to duplicate (hash, path) pairs if they already exist
+                    lib_docs = self.reference_library.doc_df
+                    
+                    def assign_version(row):
+                        h = row.hash
+                        p = row.path
+                        if h == "": return -1
+                        
+                        # 1. Check if this exact (hash, path) already exists in lib
+                        if not lib_docs.empty:
+                            match = lib_docs[(lib_docs.hash == h) & (lib_docs.path == p)]
+                            if not match.empty:
+                                return match.version.iloc[0]
+                            
+                            # 2. If not, get next available version for this hash
+                            existing_versions = lib_docs[lib_docs.hash == h].version
+                            if not existing_versions.empty:
+                                return existing_versions.max() + 1
+                        
+                        return 0 # Default for new hash
+
+                    # This is a bit slow for large imports, but safe.
+                    # We also need to account for duplicates WITHIN the import itself.
+                    df = df.sort_values(['hash', 'path'])
+                    df['version'] = 0 # Placeholder
+                    
+                    # Group by hash and assign incremental versions, 
+                    # but offset by whatever is in the library
+                    for h, group in df.groupby('hash'):
+                        offset = 0
+                        if not lib_docs.empty:
+                            existing = lib_docs[lib_docs.hash == h]
+                            if not existing.empty:
+                                offset = existing.version.max() + 1
+                        
+                        df.loc[group.index, 'version'] = range(offset, offset + len(group))
+
                 # set variable
                 self._doc_df = df
                 logger.info(
@@ -531,13 +570,33 @@ class Bib2df_Incremental(LibraryBase):
                             ["missing_vfile", "match_afile"]
                         ].values
                     }
+                # identity model: ref_doc_df uses hash and version
+                # join with this import's doc_df to get the hash and assigned version
+                merged = self.vfile_df.merge(
+                    self.doc_df[['path', 'hash', 'version']], 
+                    left_on='vfile', right_on='path', how='left'
+                )
+                
+                # Apply matcher if needed
+                if matcher:
+                    # For files that were matched by Levenshtein, we need to lookup their hash/version
+                    # in doc_df using the matched afile path
+                    for i, r in merged[merged.hash.isna()].iterrows():
+                        match_path = matcher.get(r.vfile)
+                        if match_path:
+                            doc_match = self.doc_df[self.doc_df.path == match_path]
+                            if not doc_match.empty:
+                                merged.loc[i, 'hash'] = doc_match.hash.iloc[0]
+                                merged.loc[i, 'version'] = doc_match.version.iloc[0]
+
                 self._ref_doc_df = pd.DataFrame(
                     {
-                        "tag": self.vfile_df.tag,
-                        # replace defaults to no change if not in the matcher dictionary
-                        "path": self.vfile_df["vfile"].replace(matcher).values,
+                        "tag": merged.tag,
+                        "hash": merged.hash,
+                        "version": merged.version,
                     }
-                )
+                ).dropna(subset=['hash'])
+                self._ref_doc_df['version'] = self._ref_doc_df['version'].astype(int)
                 # for ref.
                 self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
@@ -624,9 +683,10 @@ class Bib2df_Incremental(LibraryBase):
             ).explode("author", ignore_index=True)
             self._database = (
                 self.ref_doc_df.merge(exploded_authors, on="tag", how="right")
-            ).merge(self.doc_df, on="path", how="left")
+            ).merge(self.doc_df, on=["hash", "version"], how="left")
             for c in ["node", "links", "size"]:
-                self._database[c] = self._database[c].fillna(0)
+                if c in self._database.columns:
+                    self._database[c] = self._database[c].fillna(0)
             self._database.fillna("")
         return self._database
 
@@ -1254,7 +1314,7 @@ class Bib2df_Incremental(LibraryBase):
             # We use the newly created ref_df, ref_doc_df, and doc_df from THIS import
             to_shard = (
                 self.ref_doc_df.merge(self.ref_df, on='tag', how='inner')
-                               .merge(self.doc_df[['path', 'hash']], on='path', how='inner')
+                               .merge(self.doc_df, on=['hash', 'version'], how='inner')
             )
             
             if not to_shard.empty:
@@ -1268,15 +1328,13 @@ class Bib2df_Incremental(LibraryBase):
                 # Update paths in the importer so the library update uses the sharded paths
                 to_shard['new_path'] = to_shard.apply(lambda r: path_from_row(r, base_path), axis=1)
                 
-                # 1. Update ref_doc_df
-                new_ref_doc = to_shard[['tag', 'new_path']].rename(columns={'new_path': 'path'})
-                self._ref_doc_df = new_ref_doc
-                
-                # 2. Update doc_df
-                new_doc_df = to_shard.merge(self.doc_df, on=['path', 'hash'], how='inner')
+                # Update doc_df with new paths
+                new_doc_df = to_shard.merge(self.doc_df, on=['hash', 'version'], how='inner', suffixes=('', '_old'))
                 new_doc_df['path'] = new_doc_df['new_path']
                 new_doc_df['name'] = new_doc_df['path'].apply(lambda x: Path(x).name)
-                self._doc_df = new_doc_df[self.doc_df.columns].drop_duplicates(subset=['path'])
+                
+                # Keep original columns of doc_df
+                self._doc_df = new_doc_df[self.doc_df.columns].drop_duplicates(subset=['hash', 'version'])
             else:
                 logger.info("Nothing to shard.")
 
@@ -1421,9 +1479,8 @@ class Bib2df_Incremental(LibraryBase):
                         lib_docs = self.reference_library.doc_df
                         if current_hash in lib_docs.hash.values:
                             # Find which tags in the library use this hash
-                            match_paths = lib_docs[lib_docs.hash == current_hash].path
                             match_tags = self.reference_library.ref_doc_df[
-                                self.reference_library.ref_doc_df.path.isin(match_paths)
+                                self.reference_library.ref_doc_df.hash == current_hash
                             ].tag.tolist()
                             if match_tags:
                                 return "HASH", 100, 100, title, match_tags[0]

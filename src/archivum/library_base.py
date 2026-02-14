@@ -14,12 +14,22 @@ class LibraryBase:
     def docs_no_refs(self):
         """Return docs with no associated refs."""
         if self.doc_df.empty: return pd.DataFrame()
-        paths = set(self.doc_df.path) - set(self.ref_doc_df.path)
-        df = self.doc_df.loc[self.doc_df.path.isin(paths)].copy()
+        
+        id_cols = ['hash', 'version']
+        doc_ids = self.doc_df[id_cols].drop_duplicates()
+        ref_doc_ids = self.ref_doc_df[id_cols].drop_duplicates()
+        
+        # Merge to find orphans
+        orphans = doc_ids.merge(ref_doc_ids, on=id_cols, how='left', indicator=True)
+        orphans = orphans[orphans._merge == 'left_only'].drop(columns=['_merge'])
+        
+        # Map back to full doc records
+        df = orphans.merge(self.doc_df, on=id_cols, how='inner').copy()
+        
         df['filename'] = df.path.map(lambda x: Path(x).name)
         df['parent'] = df.path.map(lambda x: Path(x).parent.name)
         df = df[['name', 'filename', 'parent', 'path', 'mod', 'create', 'access', 'node', 'links', 'size',
-                       'suffix', 'hash']]
+                       'suffix', 'hash', 'version']]
         return df
 
     def stats(self):
@@ -35,7 +45,7 @@ class LibraryBase:
         # Configuration for the two rows
         views = [
             ('references', len(self.ref_df), 'tag'),
-            ('documents', len(self.doc_df), 'path')
+            ('documents', len(self.doc_df), 'hash')
         ]
 
         for name, total, group_col in views:
