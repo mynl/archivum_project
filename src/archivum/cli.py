@@ -540,7 +540,7 @@ def edit(tag, info):
 @click.argument("tag", type=str)
 @click.option("-x", "--execute",
     is_flag=True,
-    default="sharding",
+    default=False,
     show_default=True,
     help="Actually execute.")
 def delete(tag, execute):

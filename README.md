@@ -2,18 +2,26 @@
 
 Latin for "archive".
 
-PDF reference manager.
+Reference manager for content-addressable document libraries.
 
+## Core Features
+
+- **Identity-Based Linking**: References are linked to documents by content hash and version, not by volatile file paths.
+- **Library Portability**: All internal paths are stored relative to the library root. Move your library anywhere, and it just works.
+- **Smart Sharding**: Automatically organizes documents into a hash-based directory structure with rich, informative names.
+- **Powerful Search**: Multi-modal search using `querexfuzz` (regex + SQL-like) and full-text search via `ripgrep`.
+
+---
 
 ## 2026 Workflow: Adding New Documents
 
-The current robust workflow for adding new batches of documents consists of two phases: staging/review and final import.
+The current robust workflow for adding new batches of documents consists of staging, review, and final import.
 
 ### 1. Staging and Metadata Extraction
-Gather your new PDF/DJVU files into a staging directory (e.g., `C:/S/PDFs/Batch6`). Run the following command to identify duplicates, extract metadata, and prepare a BibTeX file for review:
+Gather your new PDF/DJVU files into a staging directory (e.g., `C:/S/PDFs/Batch6`). Run the following command to identify duplicates already in your library and prepare a BibTeX file for review:
 
 ```bash
-archivum import-doc C:/S/PDFs/Batch6 --execute
+archivum stage-docs C:/S/PDFs/Batch6
 ```
 
 *   **`--flag-duplicates` (default True)**: Automatically hashes all files and checks them against your library.
@@ -21,43 +29,46 @@ archivum import-doc C:/S/PDFs/Batch6 --execute
 *   **Result**: It generates `bibtex-import.bib` in the staging folder and opens it in **Sublime Text**. You can review and edit the tags, titles, and authors here.
 
 ### 2. Final Import and Organization
-Once you are happy with the `.bib` file, perform the final import. This step handles deduplication, re-mapping tags to standard `AuthorYYYY[a-z]` format, and **sharding** the physical files into the library's document store using hardlinks.
+Once you are happy with the `.bib` file, perform the final import. This step handles deduplication, re-mapping tags to standard `AuthorYYYY[a-z]` format, and **sharding** the physical files into the library's document store.
 
 ```bash
 archivum import-bibtex C:/S/PDFs/Batch6 --execute
 ```
 
-*   **Guardian Mode (default True)**: In this incremental mode, it performs a final hash check.
-*   **SKIP**: If both the file hash and metadata match an existing entry, it is kicked out.
-*   **Link Existing**: If only the hash matches, it creates a new reference but links it to the existing physical file (one file, many names).
-*   **Automatic Sharding**: Files are automatically hardlinked into the library's sharded directory structure (`/00/` to `/FF/`) with rich canonical names.
+*   **Guardian Mode (default True)**: Performs a final hash check. If both the file hash and metadata match an existing entry, the import is skipped.
+*   **Identity Linking**: Creates links based on the file's hash and version.
+*   **Automatic Sharding**: Files are automatically hardlinked into the library's sharded directory structure (`/00/` to `/FF/`) with rich canonical names (`Hash_Year_Author_Title.pdf`).
 
-### 3. Verification
-Use the `tag` and `hash` commands to verify your imports:
+### 3. Maintenance and Cleanup
+Use these tools to keep your library in perfect shape:
 
 ```bash
-tag NAIC2023 -vv    # Show full metadata and linked document details
-hash 100F150A6 -o   # Find references matching a hash and open the doc
-```
+# Verify sharding and fix metadata inconsistencies
+archivum validate --task sharding --execute
 
-### Known Issues / TODO
-*   **Logging**: The logging output for `import-doc` and `import-bibtex` still needs to be refined and standardized.
+# Find and fix orphaned documents added recently
+archivum reconnect --max-age 28 --execute
+
+# Manually link a tag to a document hash
+archivum link NAIC2023 100F150A6 --version 0
+
+# Check if a local file exists in the library
+archivum find-doc "\path\to\paper.pdf"
+```
 
 ---
 
+## Architecture & Data Model
 
-## File Structure
+Archivum is built on a content-addressable model where file identity is king.
 
-Each user machine creates a directory link `~/AppData/Local/archivum` to `/S/AppData/archivum`, ensuring cloud sync between devices.
+### Data Storage
+- **`ref.feather`**: Bibliographic metadata (tags, authors, titles, etc.).
+- **`doc.feather`**: Document index mapping `(hash, version)` to a `relative_path`.
+- **`ref-doc.feather`**: Junction table linking `tag` to `(hash, version)`.
 
-Within `archivum` you have
-
-* `imports`: details of imports, time stamped.
-* `pdf-full-text`: full text of all pdfs
-* `LATER`: the actual pdfs ...
-* library files
-    * `library-name.archivum-config`
-    * various feather files - these are the underlying pd DataFrames.
+### Path Resolution
+The system uses a lazy de-relativization strategy. Paths are stored as clean relative strings (e.g., `0a/Hash...pdf`). The `Library` class resolves these to absolute paths (using your configured `doc_store_path`) only when touching the disk, caching the results for performance. This allows libraries to be shared across devices with different drive mappings (e.g., `S:\` vs `C:\Users\steve\...`) seamlessly.
 
 ## Lark
 

@@ -513,92 +513,131 @@ class Bib2df_Incremental(LibraryBase):
         # columns are ref_id=tag and afile name
         if self._ref_doc_df.empty and len(self._ref_doc_df.columns) == 0:
             logger.info("===>> creating ref_doc_df property <<====")
+            
+            # Identify which vfiles aren't in our doc_df scan
             actual_files = set(self.doc_df.path)
-            # two modes - there are or aren't actual files
-            if len(actual_files) == 0:
-                # branch 1: no actual files
-                column_dtypes = {
-                    "tag": "object",
-                    "path": "object",
-                }
-                # Create an empty DataFrame using the defined dtypes
-                self._ref_doc_df = pd.DataFrame(columns=column_dtypes.keys()).astype(
-                    column_dtypes
-                )
-                logger.info(
-                    "pdf folder is None or does not exist; and created empty doc_df with %s columns",
-                    len(self._doc_df.columns),
-                )
-
-            else:
-                # branch 2: actual files - try to match up
-                logger.info(f"\tFound {len(actual_files)} actual files; matching")
-                missing_vfiles = []
-                for i, r in self.vfile_df.iterrows():
-                    if r.vfile not in actual_files:
-                        missing_vfiles.append([i, r.vfile])
-                if len(missing_vfiles) == 0:
-                    logger.info('GOOD NEWS: No missing vfiles!!')
-                    matcher = {}
-                else:
-                    logger.info("\tFound %s missing vfiles (%s of actual files)", len(missing_vfiles),
-                        f'{len(missing_vfiles) / len(actual_files):.1%}')
-                    logger.info("\tLevenshtein (rapidfuzz) matching in ref_doc...")
-                    ans = []
-                    for tag, m_vfile in missing_vfiles:
-                        best_match = min(
-                            actual_files,
-                            key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
-                        )
-                        ans.append(
-                            [
-                                tag,
-                                m_vfile,
-                                best_match,
-                                distance.Levenshtein.distance(m_vfile, best_match),
-                            ]
-                        )
-                        logger.debug('\tmatching for %s -> %s', m_vfile, best_match)
-                    # for reference
-                    self._best_match_df = pd.DataFrame(
-                        ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
-                    )
-                    logger.info("\t...Levenshtein matching completed")
-                    matcher = {
-                        vfile: afile
-                        for vfile, afile in self._best_match_df[
-                            ["missing_vfile", "match_afile"]
-                        ].values
-                    }
-                # identity model: ref_doc_df uses hash and version
-                # join with this import's doc_df to get the hash and assigned version
-                merged = self.vfile_df.merge(
-                    self.doc_df[['path', 'hash', 'version']], 
-                    left_on='vfile', right_on='path', how='left'
-                )
+            missing_vfiles_initial = [r.vfile for _, r in self.vfile_df.iterrows() if r.vfile not in actual_files]
+            
+            # Check if any of these "missing" vfiles actually exist on disk
+            found_externally = []
+            for vfile in missing_vfiles_initial:
+                p = Path(vfile)
+                if p.exists() and p.is_file():
+                    found_externally.append(p)
+            
+            if found_externally:
+                logger.info(f"Found {len(found_externally)} files at absolute paths outside scan directory.")
+                # We need to add these to doc_df so they get hashed and versioned
+                new_rows = []
+                for p in found_externally:
+                    p = p.absolute()
+                    stat = p.stat(follow_symlinks=True)
+                    new_rows.append({
+                        "name": p.name,
+                        "path": str(p.as_posix()),
+                        "mod": stat.st_mtime_ns,
+                        "create": stat.st_ctime_ns,
+                        "access": stat.st_atime_ns,
+                        "node": stat.st_ino,
+                        "links": stat.st_nlink,
+                        "size": stat.st_size,
+                        "suffix": p.suffix,
+                        "hash": "",
+                    })
                 
-                # Apply matcher if needed
-                if matcher:
-                    # For files that were matched by Levenshtein, we need to lookup their hash/version
-                    # in doc_df using the matched afile path
-                    for i, r in merged[merged.hash.isna()].iterrows():
-                        match_path = matcher.get(r.vfile)
-                        if match_path:
-                            doc_match = self.doc_df[self.doc_df.path == match_path]
-                            if not doc_match.empty:
-                                merged.loc[i, 'hash'] = doc_match.hash.iloc[0]
-                                merged.loc[i, 'version'] = doc_match.version.iloc[0]
+                df_ext = pd.DataFrame(new_rows)
+                tz = self.reference_library.config.timezone
+                for col in ["create", "mod", "access"]:
+                    df_ext[col] = (
+                        pd.to_datetime(df_ext[col], unit="ns")
+                        .dt.tz_localize("UTC")
+                        .dt.tz_convert(tz)
+                    )
+                
+                # Hash them immediately
+                logger.info(f"Hashing {len(df_ext)} external files...")
+                ext_hashes = hash_many(
+                    [Path(p) for p in df_ext.path], 
+                    workers=self.reference_library.config.hash_workers
+                )
+                df_ext.hash = df_ext.path.map(lambda x: ext_hashes.get(Path(x), ""))
+                
+                # Assign versions (0 for these new external files)
+                df_ext['version'] = 0
+                
+                # Append to our doc_df
+                self._doc_df = pd.concat([self._doc_df, df_ext], ignore_index=True)
+                # Refresh actual_files set
+                actual_files = set(self.doc_df.path)
 
-                self._ref_doc_df = pd.DataFrame(
-                    {
-                        "tag": merged.tag,
-                        "hash": merged.hash,
-                        "version": merged.version,
-                    }
-                ).dropna(subset=['hash'])
-                self._ref_doc_df['version'] = self._ref_doc_df['version'].astype(int)
-                # for ref.
-                self._last_missing_vfiles = missing_vfiles
+            # Now proceed with matching, much fewer should be "missing" now
+            missing_vfiles = []
+            for i, r in self.vfile_df.iterrows():
+                if r.vfile not in actual_files:
+                    missing_vfiles.append([i, r.vfile])
+
+            if len(missing_vfiles) == 0:
+                logger.info('GOOD NEWS: No missing vfiles!!')
+                matcher = {}
+            else:
+                # Proceed with Levenshtein for truly missing files
+                logger.info("\tFound %s missing vfiles (%s of actual files)", len(missing_vfiles),
+                    f'{len(missing_vfiles) / len(actual_files):.1%}')
+                logger.info("\tLevenshtein (rapidfuzz) matching in ref_doc...")
+                ans = []
+                for tag, m_vfile in missing_vfiles:
+                    best_match = min(
+                        actual_files,
+                        key=lambda alt: distance.Levenshtein.distance(m_vfile, alt),
+                    )
+                    ans.append(
+                        [
+                            tag,
+                            m_vfile,
+                            best_match,
+                            distance.Levenshtein.distance(m_vfile, best_match),
+                        ]
+                    )
+                    logger.debug('\tmatching for %s -> %s', m_vfile, best_match)
+                # for reference
+                self._best_match_df = pd.DataFrame(
+                    ans, columns=["tag", "missing_vfile", "match_afile", "distance"]
+                )
+                logger.info("\t...Levenshtein matching completed")
+                matcher = {
+                    vfile: afile
+                    for vfile, afile in self._best_match_df[
+                        ["missing_vfile", "match_afile"]
+                    ].values
+                }
+            # identity model: ref_doc_df uses hash and version
+            # join with this import's doc_df to get the hash and assigned version
+            merged = self.vfile_df.merge(
+                self.doc_df[['path', 'hash', 'version']], 
+                left_on='vfile', right_on='path', how='left'
+            )
+            # Apply matcher if needed
+            if matcher:
+                # For files that were matched by Levenshtein, we need to lookup their hash/version
+                # in doc_df using the matched afile path
+                for i, r in merged[merged.hash.isna()].iterrows():
+                    match_path = matcher.get(r.vfile)
+                    if match_path:
+                        doc_match = self.doc_df[self.doc_df.path == match_path]
+                        if not doc_match.empty:
+                            merged.loc[i, 'hash'] = doc_match.hash.iloc[0]
+                            merged.loc[i, 'version'] = doc_match.version.iloc[0]
+
+            self._ref_doc_df = pd.DataFrame(
+                {
+                    "tag": merged.tag,
+                    "hash": merged.hash,
+                    "version": merged.version,
+                }
+            ).dropna(subset=['hash'])
+            self._ref_doc_df['version'] = self._ref_doc_df['version'].astype(int)
+            # for ref.
+            self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
 
     @property
@@ -741,8 +780,9 @@ class Bib2df_Incremental(LibraryBase):
 
         # 2. Extract Header
         # Matches type{tag,
-        # We allow leading whitespace just in case split left artifacts
-        header_match = re.match(r"\s*@?([a-zA-Z]+)\s*\{\s*([^,]+),", entry)
+        # We allow leading whitespace and a broader range of characters for the entry type
+        # to handle artifacts like @temp\.ipynb...
+        header_match = re.match(r"\s*@?([a-zA-Z0-9\.\\\-_]+)\s*\{\s*([^,]+),", entry)
 
         if not header_match:
             logger.debug("Skipping header")
