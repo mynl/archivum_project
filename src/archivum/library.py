@@ -1034,8 +1034,9 @@ class Library(LibraryBase):
         dfa = dfa.set_index(['audit', 'key'], append=True).unstack(level='key').droplevel(0, 1)
         dfa = dfa.fillna(0)
         dfa.raw_entries = dfa.raw_entries.astype(int)
-        dfa.ported_entries = dfa.ported_entries.astype(int)
-        dfa['cum_entries'] = dfa.ported_entries.cumsum()
+        dfa['new_entries'] = dfa.ported_entries.astype(int) + dfa.net_entries.astype(int)
+        dfa['cum_entries'] = dfa.new_entries.cumsum()
+        dfa = dfa.drop(columns=['net_entries', 'ported_entries'])
         return dfa
 
     @classmethod
