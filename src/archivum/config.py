@@ -75,6 +75,8 @@ class Configurator(BaseModel):
     timezone: str = Field("Europe/London", description="Timezone to use for timestamp parsing and display")
     tablefmt: str = Field("mixed_grid", description="Table format for display (see tabulate).")
     max_table_inch_width: int = Field(12, gt=0, description="Maximum width for table display in inches.")
+    editor_command: str = Field("subl", description="Command to open the text editor (e.g., 'subl' or path to exe).")
+    pdf_viewer_command: Optional[str] = Field(None, description="Command to open PDFs (e.g., 'SumatraPDF'). None uses system default.")
     tag_name_mapper: dict[str, str] = Field(default_factory=dict,
         description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
 

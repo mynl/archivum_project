@@ -924,7 +924,13 @@ def query(start: str, database: str):
     # Inject dynamic fuzzy completer into 'open' and 'o'
     base_completer.options["open"] = DynamicCompleter(tag_branch)
     base_completer.options["o"] = DynamicCompleter(tag_branch)
-    session = PromptSession(completer=base_completer)
+
+    from prompt_toolkit.history import FileHistory
+    history_file = BASE_DIR / "query_history.txt"
+    session = PromptSession(
+        completer=base_completer,
+        history=FileHistory(str(history_file))
+    )
 
     # sort out start = initial query
     start = ' '.join(start)
@@ -1076,13 +1082,22 @@ def crossref(
     help="Guardian mode: Hash, check for duplicates in library, and shard/organize immediately (Default: True).",
 )
 @click.option(
+    "-t/-nt",
+    "--extract-text/--no-extract-text",
+    "extract_text_flag",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Auto-run text extraction on imported files (Default: True).",
+)
+@click.option(
     "-x",
     "--execute",
     is_flag=True,
     show_default=True,
     help="Actually perform the import; otherwise, do a dry run and report stats.",
 )
-def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incremental: bool, verbose: int, execute: bool):
+def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incremental: bool, verbose: int, execute: bool, extract_text_flag: bool):
     """
     Import new references from a BibTeX file into the current library.
 
@@ -1143,6 +1158,24 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incrementa
     if execute:
         click.echo(f"Updating with {len(b.ported_df)} entries.")
         b.update_library(save=True)
+        if extract_text_flag:
+            # Only extract text for the NEWLY imported documents
+            # b.doc_df contains the document records for this import
+            new_paths = [lib.abspath(p) for p in b.doc_df.path.values if p.lower().endswith(".pdf")]
+            if new_paths:
+                click.echo(f"Running text extraction for {len(new_paths)} new PDF(s)...")
+                # We can use the hashes from the importer to avoid re-hashing
+                path_to_hash = {lib.abspath(row.path): row.hash for _, row in b.doc_df.iterrows()}
+                from .document import extract_text_for_paths
+                extract_text_for_paths(
+                    new_paths,
+                    lib.text_dir_path,
+                    extractor=lib.config.extractor,
+                    workers=lib.config.hash_workers,
+                    hashes=path_to_hash
+                )
+            else:
+                click.echo("No new PDF documents to extract text from.")
 
 
 # ========================================================================================
@@ -1292,10 +1325,12 @@ def stage_docs(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
     click.secho(f"\nMetadata extracted. Review file created at: {p_review.name}", fg="green")
 
     try:
-        # Windows specific call to Sublime
-        subprocess.run(f'"c:\\program files\\sublime text\\subl.exe" "{p_review}"', shell=False)
-    except Exception:
-        click.echo("Could not open Sublime Text automatically. Please review the .bib file manually.")
+        editor = lib.config.editor_command
+        # Note: we assume the editor supports -w for waiting if it's a CLI wrapper like subl or code
+        subprocess.run([editor, "-w", str(p_review)], check=False)
+    except Exception as e:
+        logger.debug(f"Editor launch error: {e}")
+        click.echo(f"Could not open editor ({editor}) automatically. Please review the .bib file manually.")
 
     click.echo("\nRun the following command to complete the import after review:")
     click.secho(f"archivum import-bibtex {p_review.name} -x", fg="cyan", bold=True)
@@ -1360,10 +1395,15 @@ def extract_text(missing, execute, clean, info, force, workers):
         lib.update_hashes()
         missing_docs = []
         for _, row in lib.doc_df.iterrows():
-            doc = Document(Path(row.path))
+            p = Path(row.path)
+            doc = Document(p)
             doc.hash = row.hash
             if not doc.text_exists(lib.text_dir_path, lib.config.extractor):
-                missing_docs.append({"tag": row.get('tag', 'N/A'), "name": Path(row.path).name})
+                missing_docs.append({
+                    "tag": row.get('tag', 'N/A'),
+                    "name": p.name,
+                    "suffix": p.suffix.lower()
+                })
 
         if not missing_docs:
             click.echo("No missing text extracts.")
@@ -1455,36 +1495,6 @@ def find_doc(path):
     elif path.is_dir():
         click.echo("No matching records found for any files in directory.")
 
-
-@entry.command()
-@click.argument("tag", type=str)
-@click.argument("file_hash", type=str)
-@click.option("-v", "--version", type=int, default=0, help="Version number of the hash (default 0).")
-def link(tag, file_hash, version):
-    """Manually link a tag to a document by hash and version."""
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo("No library open.")
-        return
-
-    try:
-        # Support partial hash if unique
-        if len(file_hash) < 64:
-            matches = lib.doc_df[lib.doc_df.hash.str.startswith(file_hash.upper())]
-            if len(matches) == 0:
-                click.echo(f"No document found starting with hash {file_hash}")
-                return
-            elif len(matches.hash.unique()) > 1:
-                click.echo(f"Ambiguous hash {file_hash}, multiple matches found.")
-                return
-            file_hash = matches.hash.iloc[0]
-
-        if lib.link_document(tag, file_hash, version):
-            click.secho(f"Successfully linked {tag} to {file_hash[:12]} (v{version})", fg="green")
-        else:
-            click.echo("Link operation skipped (already exists).")
-    except Exception as e:
-        click.echo(f"Error: {e}")
 
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
@@ -1752,9 +1762,9 @@ def hash(hash_str, open_doc, verbose):
         click.echo("No library open. Returning")
         return
 
-    # 1. Find Documents with this hash
+    # 1. Find Documents with this hash (anchored to start)
     try:
-        mask = lib.doc_df.hash.str.contains(hash_str, regex=True, na=False, case=False)
+        mask = lib.doc_df.hash.str.match(hash_str, na=False, case=False)
         doc_matches = lib.doc_df[mask]
     except Exception as e:
         click.echo(f"Regex error: {e}")
@@ -1765,14 +1775,14 @@ def hash(hash_str, open_doc, verbose):
         return
 
     # 2. Find Linked Tags
-    paths = doc_matches.path.tolist()
-    links = lib.ref_doc_df[lib.ref_doc_df.path.isin(paths)]
+    hashes = doc_matches.hash.tolist()
+    links = lib.ref_doc_df[lib.ref_doc_df.hash.isin(hashes)]
     tags = links.tag.unique().tolist()
 
     if not tags:
-        click.echo(f"Found {len(doc_matches)} files but no references are linked to them.")
-        if verbose > 0:
-            qd(doc_matches[['name', 'hash', 'size']])
+        click.secho(f"\nFound {len(doc_matches)} files but NO references are linked to them (Orphans).", fg="yellow", bold=True)
+        # Always show detailed info if no ref is found
+        qd(doc_matches[['name', 'hash', 'size', 'suffix', 'mod']])
     else:
         # 3. Show Reference Info
         # Join doc_df hash back to refs for display
@@ -1797,12 +1807,155 @@ def hash(hash_str, open_doc, verbose):
 
     # 4. Open
     if open_doc:
-        for p in paths:
+        for n, row in doc_matches.iterrows():
+            p = Path(row.path)
             click.echo(f"Opening: {Path(p).name}")
             lib.open_document(p)
 
 
-# doc title opening ======experimental-----------------
+@entry.command(name="link-tag")
+@click.argument("tag", type=str)
+@click.argument("file_hash", type=str)
+@click.option("-v", "--version", type=int, default=0, help="Version number of the hash (default 0).")
+def link_tag(tag, file_hash, version):
+    """Manually link an existing tag reference to an existing document by hash and version."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open.")
+        return
+
+    try:
+        # Support partial hash if unique
+        if len(file_hash) < 64:
+            matches = lib.doc_df[lib.doc_df.hash.str.startswith(file_hash.upper())]
+            if len(matches) == 0:
+                click.echo(f"No document found starting with hash {file_hash}")
+                return
+            elif len(matches.hash.unique()) > 1:
+                click.echo(f"Ambiguous hash {file_hash}, multiple matches found.")
+                return
+            file_hash = matches.hash.iloc[0]
+
+        if lib.link_document(tag, file_hash, version):
+            click.secho(f"Successfully linked {tag} to {file_hash[:12]} (v{version})", fg="green")
+        else:
+            click.echo("Link operation skipped (already exists).")
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+
+@entry.command(name="link-doc")
+@click.argument("hash_str", type=str)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    show_default=True,
+    help="Actually perform the import after editing.",
+)
+def link_doc(hash_str, execute):
+    """
+    \b
+    Create a new reference for a document orphan.
+
+    1. Finds unique document by hash.
+    2. Runs discovery to extract metadata.
+    3. Opens generated BibTeX in Sublime Text for editing.
+    4. Imports the edited reference back into the library.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    # 1. Find the Document
+    mask = lib.doc_df.hash.str.match(hash_str, na=False, case=False)
+    matches = lib.doc_df[mask]
+
+    if matches.empty:
+        click.echo(f"No document found with hash starting with: {hash_str}")
+        return
+
+    if len(matches) > 1:
+        click.secho(f"Ambiguous hash! Found {len(matches)} matches:", fg="red")
+        qd(matches[['name', 'hash', 'size']])
+        return
+
+    row = matches.iloc[0]
+    doc_path = lib.abspath(row.path)
+    click.secho(f"Found document: {doc_path.name}", fg="cyan")
+
+    # Check if already linked
+    existing_links = lib.ref_doc_df[
+        (lib.ref_doc_df.hash == row.hash) & (lib.ref_doc_df.version == row.version)
+    ]
+    if not existing_links.empty:
+        tags = existing_links.tag.unique()
+        click.secho(f"Warning: This document is already linked to: {', '.join(tags)}", fg="yellow")
+        if not click.confirm("Do you want to create another reference for it?", default=False):
+            return
+
+    # 2. Run Discovery
+    from .document import Document
+    doc = Document(doc_path)
+    doc.hash = row.hash
+
+    click.echo("Running metadata discovery...")
+    doc.process()
+
+    bib_text = doc.bibtex()
+    if not bib_text:
+        # Fallback if discovery failed completely
+        from .utilities import generate_tag
+        tag = generate_tag(doc.bib.get('author', 'Unknown'), doc.bib.get('year', '2099'))
+        bib_text = f"@article{{{tag},\n  title = {{{doc_path.stem}}},\n  author = {{Unknown}},\n  year = {{2099}},\n  file = {{{doc.bibtex().split('file = {')[-1].split('}')[0] if 'file = {' in doc.bibtex() else ''}}}\n}}"
+
+    # 3. Open in Editor
+    temp_bib = lib.debug_dir_path / f"link-doc-{row.hash[:8]}.bib"
+    temp_bib.parent.mkdir(parents=True, exist_ok=True)
+    temp_bib.write_text(bib_text, encoding="utf-8")
+
+    click.echo(f"Opening BibTeX in editor: {temp_bib.name}")
+    try:
+        # Using configured editor command
+        editor = lib.config.editor_command
+        subprocess.run([editor, "-w", str(temp_bib)], check=True)
+    except Exception as e:
+        click.echo(f"Error opening editor ({lib.config.editor_command}): {e}")
+        return
+
+    # 4. Import
+    if click.confirm("\nImport the edited BibTeX entry?", default=True):
+        from .import_bibtex import Bib2df_Incremental
+
+        # We initialize with doc_dir=None to prevent a directory scan.
+        # Instead, we manually provide the doc_df for ONLY the file we are linking.
+        importer = Bib2df_Incremental(
+            bibtex_file_path=temp_bib,
+            doc_dir=None,
+            reference_library=lib,
+            add_hashes=True, # Verify hash matches
+            incremental=True
+        )
+        # Pre-populate with ONLY the document record we found
+        importer._doc_df = pd.DataFrame([row])
+
+        import_df = importer.import_bibtex_file()
+        qd(import_df)
+
+        if execute:
+            click.echo(f"Updating library with new reference.")
+            importer.update_library(save=True)
+            # No need to extract text as it's already an orphan in the library
+        else:
+            click.secho("Dry run complete. Use -x to apply changes.", fg="yellow")
+
+    # Clean up temp file
+    if temp_bib.exists():
+        temp_bib.unlink()
+
+
+# ========================================================================================
 
 # from prompt_toolkit.completion import Completer, Completion, FuzzyCompleter, WordCompleter, DynamicCompleter
 
@@ -1933,6 +2086,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
     completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
     completers["hash"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
+    completers["link-doc"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
 
     query_completer = WordCompleter(
         ["-d", "--database", "doc", "ref", "ref-doc", "database"],

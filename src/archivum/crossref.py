@@ -27,7 +27,7 @@ def lookup_doi(doi: str) -> Union[Dict[str, Any], None]:
     logger.info("crossref doi %s", doi)
     url = f"{BASE_URL}/{doi}"
     try:
-        resp = requests.get(url, headers=HEADERS)
+        resp = requests.get(url, headers=HEADERS, timeout=10)
         resp.raise_for_status()
         return resp.json()["message"]
     except RequestException as e:
@@ -41,7 +41,7 @@ def search_by_title(title: str, rows: int = 1) -> Union[Dict[str, Any], None]:
     logger.info("crossref title %s", title)
     params = {"query.title": title, "rows": rows}
     try:
-        resp = requests.get(BASE_URL, params=params, headers=HEADERS)
+        resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=10)
         resp.raise_for_status()
         data = resp.json()
         items = data.get("message", {}).get("items", [])
@@ -73,7 +73,7 @@ def search(
         params["filter"] = ("type:book",)  # Filters specifically for books
 
     try:
-        resp = requests.get(BASE_URL, params=params, headers=HEADERS)
+        resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=10)
         resp.raise_for_status()
         return resp.json().get("message", {}).get("items", [])
     except RequestException as e:

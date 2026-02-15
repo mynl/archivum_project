@@ -671,7 +671,9 @@ class Document:
                 return self._text
 
         suffix = self.doc_path.suffix.lower()
-        
+        if suffix != ".pdf":
+            raise ValueError(f"Text extraction is only supported for PDF files. Found: {suffix}")
+
         try:
             logger.info("extract text: %s", self.doc_path)
             

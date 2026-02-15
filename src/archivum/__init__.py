@@ -68,6 +68,8 @@ DEFAULT_GLOBAL_CONFIG = {
     "debug_dir": "debug",
     "doc_store_lib": "docs",
     "full_text_lib": "full-text",
+    "editor_command": "subl",
+    "pdf_viewer_command": None,  # None means use system default (os.startfile)
 }
 
 

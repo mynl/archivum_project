@@ -105,17 +105,17 @@ class Library(LibraryBase):
         if not p.exists():
             logger.info("file %s not found (at %s)", p.name, p)
             return
+        
         try:
-            # windows only
-            os.startfile(p)
-        except FileNotFoundError:
-            logger.error("File not found %s", p)
-        except PermissionError:
-            logger.error("Permission denied %s", p)
-        except OSError as e:
-            logger.error("OS error while opening %s: %s", p, e)
+            viewer = self.config.pdf_viewer_command
+            if viewer:
+                # Use specified viewer
+                subprocess.run([viewer, str(p)], check=False)
+            else:
+                # Fallback to system default (Windows focus)
+                os.startfile(p)
         except Exception as e:
-            logger.error("Unexpected error: %s", e)
+            logger.error("Error while opening %s: %s", p, e)
 
     def link_document(self, tag: str, file_hash: str, version: int = 0):
         """Manually link a tag to a specific (hash, version)."""
@@ -296,10 +296,10 @@ class Library(LibraryBase):
         _ = self.ref_df
         _ = self.ref_doc_df
 
-        # Append to existing dataframes.
-        ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True)
-        doc_out = pd.concat([self._doc_df, doc_add], ignore_index=True)
-        ref_doc_out = pd.concat([self._ref_doc_df, ref_doc_add], ignore_index=True)
+        # Append and Deduplicate
+        ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True).drop_duplicates(subset=['tag'], keep='last')
+        doc_out = pd.concat([self._doc_df, doc_add], ignore_index=True).drop_duplicates(subset=['hash', 'version'], keep='last')
+        ref_doc_out = pd.concat([self._ref_doc_df, ref_doc_add], ignore_index=True).drop_duplicates(subset=['tag', 'hash', 'version'], keep='last')
 
         post_ref = len(ref_out)
         post_doc = len(doc_out)
@@ -932,12 +932,19 @@ class Library(LibraryBase):
         self.update_hashes()
 
         to_extract = []
+        skipped_non_pdf = 0
         for _, row in self.doc_df.iterrows():
             p = self.abspath(row.path)
+            if p.suffix.lower() != ".pdf":
+                skipped_non_pdf += 1
+                continue
             doc = Document(p)
             doc.hash = row.hash
             if force or not doc.text_exists(self.text_dir_path, self.config.extractor):
                 to_extract.append(p)
+
+        if skipped_non_pdf > 0:
+            logger.info(f"Skipped {skipped_non_pdf} non-PDF files (only PDFs are supported).")
 
         if not to_extract:
             logger.info("No text extracts to process.")
