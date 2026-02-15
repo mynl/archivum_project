@@ -358,7 +358,7 @@ def entry():
 @entry.command()
 @click.option("-v", "--verbose", is_flag=True, help="Show full lists of problematic items.")
 @click.option("-x", "--execute", is_flag=True, help="Actually perform fixes (e.g., cleaning orphans).")
-def audit(verbose, execute):
+def library_audit(verbose, execute):
     """
     \b
     Perform a comprehensive structural audit of the library:
@@ -450,7 +450,7 @@ def audit(verbose, execute):
     show_default=True,
     help="Actually perform the fixes; otherwise, do a dry run and report.",
 )
-def validate(task, execute):
+def library_validate(task, execute):
     """
     Audit and fix library structure.
 
@@ -491,7 +491,7 @@ def validate(task, execute):
     is_flag=True,
     help="Show all information about the tag before editing.",
 )
-def edit(tag, info):
+def edit_tag(tag, info):
     """Edit a reference entry interactively."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -543,7 +543,7 @@ def edit(tag, info):
     default=False,
     show_default=True,
     help="Actually execute.")
-def delete(tag, execute):
+def delete_tag(tag, execute):
     """Delete a reference from the library."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -568,7 +568,7 @@ def delete(tag, execute):
 @entry.command()
 @click.argument("old_name", type=str)
 @click.argument("new_name", type=str)
-def rename_library(old_name, new_name):
+def library_rename(old_name, new_name):
     """Rename a library folder and update its internal name."""
     click.echo('UNTESTED - sorry, not doing that...')
     return
@@ -583,7 +583,7 @@ def rename_library(old_name, new_name):
 @entry.command()
 @click.argument("old_name", type=str)
 @click.argument("new_name", type=str)
-def copy_library(old_name, new_name):
+def library_copy(old_name, new_name):
     """Copy a library folder and update its internal name."""
     click.echo('UNTESTED - sorry, not doing that...')
     return
@@ -597,7 +597,7 @@ def copy_library(old_name, new_name):
 # ========================================================================================
 @entry.command()
 @click.argument("lib_name", type=str)
-def open(lib_name):
+def library_open(lib_name):
     """Open a library by name and set it as current."""
     try:
         lib = Library(lib_name)
@@ -611,7 +611,7 @@ def open(lib_name):
 
 # ========================================================================================
 @entry.command()
-def explorer():
+def library_locate():
     """Open explorer to see files at the location of the open library, if any."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -622,7 +622,7 @@ def explorer():
 
 # ========================================================================================
 @entry.command()
-def save():
+def library_save():
     """Save the current library to disk."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -634,7 +634,7 @@ def save():
 
 # ========================================================================================
 @entry.command()
-def close():
+def library_close():
     """
     Close the currently open library.
 
@@ -655,7 +655,7 @@ def close():
 # ========================================================================================
 @entry.command()
 @click.argument("lib_name", nargs=-1)
-def create(lib_name):
+def library_create(lib_name):
     """
     Create and open a new library. SEE ALSO THE CONFIG VERSION
 
@@ -800,7 +800,7 @@ def list_stats():
 
 # ========================================================================================
 @entry.command()
-def history():
+def library_history():
     """Display library history based on imports."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -1180,7 +1180,7 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incrementa
 
 # ========================================================================================
 @entry.command()
-def config():
+def library_config():
     """
     Dump the current library config file.
     """
@@ -1813,11 +1813,11 @@ def hash(hash_str, open_doc, verbose):
             lib.open_document(p)
 
 
-@entry.command(name="link-tag")
+@entry.command(name="link-tag-hash")
 @click.argument("tag", type=str)
 @click.argument("file_hash", type=str)
 @click.option("-v", "--version", type=int, default=0, help="Version number of the hash (default 0).")
-def link_tag(tag, file_hash, version):
+def link_tag_hash(tag, file_hash, version):
     """Manually link an existing tag reference to an existing document by hash and version."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -1853,7 +1853,7 @@ def link_tag(tag, file_hash, version):
     show_default=True,
     help="Actually perform the import after editing.",
 )
-def link_doc(hash_str, execute):
+def link_hash(hash_str, execute):
     """
     \b
     Create a new reference for a document orphan.
@@ -2081,8 +2081,8 @@ def uber(lib_name="", auto_open=True, debug=False):
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
     completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["edit"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["delete"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["edit-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["delete-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
     completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
     completers["hash"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
