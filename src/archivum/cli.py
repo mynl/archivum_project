@@ -1336,6 +1336,143 @@ def stage_docs(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbos
     click.secho(f"archivum import-bibtex {p_review.name} -x", fg="cyan", bold=True)
 
 
+# ========================================================================================
+@entry.command(name="stage-enhance")
+@click.argument(
+    "bibtex_file",
+    type=click.Path(exists=True, path_type=Path),
+    required=False,
+)
+@click.option(
+    "-a",
+    "--arxiv",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Perform arXiv-to-Crossref enhancement for preprints.",
+)
+def stage_enhance(bibtex_file: Path, arxiv: bool):
+    """
+    Enhance a staged BibTeX file with metadata from Crossref.
+
+    \b
+    1. Identifies entries with 'archivePrefix = {arXiv}' but no 'journal'.
+    2. Searches Crossref by title to find published versions.
+    3. Updates journal, volume, year, and DOI while keeping arXiv info.
+    4. Backs up the original file as .bak.
+    """
+    if bibtex_file is None:
+        bibtex_file = Path(".")
+
+    if bibtex_file.is_dir():
+        bib_files = list(bibtex_file.glob("*.bib"))
+        if len(bib_files) == 1:
+            bibtex_file = bib_files[0]
+        elif not bib_files:
+            click.echo(f"No .bib files found in {bibtex_file}")
+            return
+        else:
+            click.echo(f"Multiple .bib files found in {bibtex_file}. Please specify one.")
+            for f in bib_files:
+                click.echo(f"  - {f.name}")
+            return
+
+    if not bibtex_file.suffix.lower() == ".bib":
+        click.echo(f"File {bibtex_file} is not a BibTeX file.")
+        return
+
+    import shutil
+
+    backup_path = bibtex_file.with_suffix(bibtex_file.suffix + ".bak")
+    shutil.copy2(bibtex_file, backup_path)
+    click.echo(f"Backup created at {backup_path.name}")
+
+    # We use Bib2df_Incremental just for its parsing logic
+    importer = Bib2df_Incremental(
+        bibtex_file_path=bibtex_file, doc_dir=None, reference_library=None
+    )
+
+    # Read the file and split into chunks
+    txt = bibtex_file.read_text(encoding="utf-8")
+    chunks = re.split(r"(?m)^\s*@", txt)
+
+    new_entries = []
+    if chunks[0].strip():
+        new_entries.append(chunks[0].strip())
+
+    enhanced_count = 0
+    for chunk in chunks[1:]:
+        if not chunk.strip():
+            continue
+
+        # parse_line handles the @ optionally
+        data = importer.parse_line("@" + chunk)
+        if not data:
+            new_entries.append("@" + chunk)
+            continue
+
+        if arxiv and data.get("archivePrefix") == "arXiv" and not data.get("journal"):
+            title = data.get("title", "").strip("{} ")
+            if title:
+                click.echo(f"Searching Crossref for: {title[:60]}... ", nl=False)
+                res = search_by_title(title)
+                if res:
+
+                    def get_list_safe(key: str) -> str:
+                        val = res.get(key)
+                        if isinstance(val, list) and val:
+                            return str(val[0])
+                        return str(val) if val else ""
+
+                    journal = get_list_safe("container-title")
+                    if journal:
+                        data["journal"] = journal
+                        if volume := res.get("volume"):
+                            data["volume"] = volume
+                        if issue := res.get("issue"):
+                            data["number"] = issue
+                        if page := res.get("page"):
+                            data["pages"] = page
+                        if doi := res.get("DOI"):
+                            data["doi"] = doi
+                        if publisher := res.get("publisher"):
+                            data["publisher"] = publisher
+
+                        # Date extraction
+                        date_parts = (
+                            res.get("published-print", {}).get("date-parts")
+                            or res.get("published-online", {}).get("date-parts")
+                            or res.get("created", {}).get("date-parts")
+                        )
+                        if date_parts and date_parts[0]:
+                            data["year"] = str(date_parts[0][0])
+
+                        click.secho("Found", fg="green")
+                        enhanced_count += 1
+                    else:
+                        click.echo("Found but no journal")
+                else:
+                    click.echo("Not found")
+
+        new_entries.append(dict_to_bibtex(data))
+
+    # Write back
+    new_txt = "\n\n".join(new_entries)
+    bibtex_file.write_text(new_txt, encoding="utf-8")
+    click.secho(
+        f"\nDone! Enhanced {enhanced_count} entries.", fg="green", bold=True
+    )
+
+    lib = LibraryContext.get()
+    try:
+        editor = lib.config.editor_command if not lib.is_empty else "subl"
+        # Open both files for comparison
+        subprocess.run([editor, str(backup_path), str(bibtex_file)], check=False)
+    except Exception as e:
+        logger.debug(f"Editor launch error: {e}")
+        click.echo(f"Could not open editor automatically. Files for review: {bibtex_file.name}, {backup_path.name}")
+
+
 @entry.command(name="extract-text")
 @click.option(
     "-m",
@@ -2115,6 +2252,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["q"] = query_completer
     completers["import-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
     completers["stage-docs"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["stage-enhance"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)
