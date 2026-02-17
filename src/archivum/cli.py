@@ -413,11 +413,11 @@ def library_audit(verbose, execute):
         if verbose:
             click.echo(f"  - Tags: {broken_tags}")
 
-    broken_paths = findings["broken_path_links"]
-    if broken_paths:
-        click.secho(f"!! Found {len(broken_paths)} broken path links in ref-doc.", fg="red")
+    broken_ids = findings["broken_id_links"]
+    if broken_ids:
+        click.secho(f"!! Found {len(broken_ids)} broken ID links in ref-doc (no matching document).", fg="red")
         if verbose:
-            click.echo(f"  - Paths: {broken_paths}")
+            click.echo(f"  - Tags with broken links: {broken_ids}")
 
     # 5. Orphan Text Extracts
     orphan_txt = findings["orphan_extracts"]
@@ -1459,7 +1459,7 @@ def find_doc(path):
         # Fallback to just hashing if no library is open (only for single file)
         from .hasher import blake3b_hash
         h = blake3b_hash(path)
-        click.echo(f"Hash: {h}")
+        click.echo(f"Hash: {h[:12]}")
         return
 
     all_results = []
@@ -1473,7 +1473,7 @@ def find_doc(path):
                 res.insert(0, 'filename', p.name)
                 all_results.append(res)
             elif not path.is_dir():
-                click.echo(f"Hash: {h}")
+                click.echo(f"Hash: {h[:12]}")
                 click.secho("No matching records found in library.", fg="yellow")
         except Exception as e:
             click.echo(f"Error processing {p.name}: {e}")
@@ -1489,7 +1489,7 @@ def find_doc(path):
             qd(final_df[cols])
         else:
             # behave as before for single file
-            click.echo(f"Hash: {all_results[0].hash.iloc[0]}")
+            click.echo(f"Hash: {all_results[0].hash.iloc[0][:12]}")
             click.secho(f"Found {len(all_results[0])} matching records:", fg="green")
             qd(all_results[0][['tag', 'author', 'title', 'year', 'path']])
     elif path.is_dir():
@@ -1782,7 +1782,9 @@ def hash(hash_str, open_doc, verbose):
     if not tags:
         click.secho(f"\nFound {len(doc_matches)} files but NO references are linked to them (Orphans).", fg="yellow", bold=True)
         # Always show detailed info if no ref is found
-        qd(doc_matches[['name', 'hash', 'size', 'suffix', 'mod']])
+        doc_matches_view = doc_matches.copy()
+        doc_matches_view['hash'] = doc_matches_view['hash'].str[:12]
+        qd(doc_matches_view[['name', 'hash', 'size', 'suffix', 'mod']])
     else:
         # 3. Show Reference Info
         # Join doc_df hash back to refs for display
@@ -1878,7 +1880,9 @@ def link_hash(hash_str, execute):
 
     if len(matches) > 1:
         click.secho(f"Ambiguous hash! Found {len(matches)} matches:", fg="red")
-        qd(matches[['name', 'hash', 'size']])
+        matches_view = matches.copy()
+        matches_view['hash'] = matches_view['hash'].str[:12]
+        qd(matches_view[['name', 'hash', 'size']])
         return
 
     row = matches.iloc[0]

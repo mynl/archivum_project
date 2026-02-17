@@ -105,7 +105,7 @@ class Library(LibraryBase):
         if not p.exists():
             logger.info("file %s not found (at %s)", p.name, p)
             return
-        
+
         try:
             viewer = self.config.pdf_viewer_command
             if viewer:
