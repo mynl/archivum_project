@@ -1120,7 +1120,7 @@ def import_bibtex(bibtex_path: Path, doc_dir: Path, add_hashes: bool, incrementa
             bibtex_path = bibtex_file
             logger.info(f"Found unique BibTeX file: {bibtex_path.name}")
         else:
-            click.echo(f"Error: Directory must contain exactly one .bib file. Found {len(bibs)} in {search_dir}")
+            click.echo(f"Error: If bibtex_path not specified, directory must contain exactly one .bib file. Found {len(bibs)} in {search_dir}")
             return
 
     # File mode or resolved directory mode
@@ -1193,200 +1193,8 @@ def library_config():
 
 
 # ========================================================================================
-@entry.command(name="stage-docs")
-@click.argument(
-    "doc_path",
-    type=click.Path(exists=True, dir_okay=True, path_type=Path),
-)
-@click.option(
-    "-f/-nf",
-    "--flag-duplicates/--no-duplicates",
-    "flag_duplicates",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help="Check for hash duplicates in library before processing.",
-)
-@click.option(
-    "-d",
-    "--delete",
-    "delete_dupes",
-    is_flag=True,
-    default=False,
-    show_default=True,
-    help="Delete duplicates from source folder if found.",
-)
-@click.option(
-    "-v",
-    "--verbose",
-    count=True,
-    default=0,
-    show_default=True,
-    help="Increase verbosity.",
-)
-def stage_docs(doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbose: int):
-    """
-    Prepare new documents for import by staging metadata in a BibTeX file.
-
-    \b
-    1. Checks for hash duplicates in the library.
-    2. Extracts metadata from new files.
-    3. Generates a .bib file for review in Sublime Text.
-    """
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo("No library open -- cannot stage documents.")
-        return
-
-    # 1. Find the files
-    if doc_path.is_dir():
-        doc_paths = lib.find_docs(doc_path)
-    else:
-        doc_paths = [doc_path]
-
-    if not doc_paths:
-        click.echo(f"No documents found in {doc_path}")
-        return
-
-    # 2. Pre-check for Duplicates
-    survivors = doc_paths
-    if flag_duplicates:
-        click.echo(f"Checking {len(doc_paths)} files for duplicates...")
-        from .hasher import hash_many3
-        hashes = hash_many3(doc_paths, workers=lib.config.hash_workers)
-
-        dupe_rows = []
-        new_paths = []
-
-        lib_docs = lib.doc_df
-        lib_ref_docs = lib.ref_doc_df
-        lib_refs = lib.ref_df
-
-        for p in doc_paths:
-            h = hashes.get(p)
-            if h and h in lib_docs.hash.values:
-                # Find matching info
-                match_paths = lib_docs[lib_docs.hash == h].path.tolist()
-                match_tags = lib_ref_docs[lib_ref_docs.path.isin(match_paths)].tag.tolist()
-                tag = match_tags[0] if match_tags else "Unknown"
-                title = lib_refs[lib_refs.tag == tag].title.iloc[0] if tag != "Unknown" else "N/A"
-
-                dupe_rows.append({
-                    "Staging File": p.name,
-                    "Hash": h[:12],
-                    "Match Tag": tag,
-                    "Match Title": title[:50]
-                })
-            else:
-                new_paths.append(p)
-
-        if dupe_rows:
-            click.secho(f"\nFound {len(dupe_rows)} duplicates already in library:", fg="yellow")
-            qd(pd.DataFrame(dupe_rows))
-
-            if delete_dupes:
-                if click.confirm(f"\nDelete these {len(dupe_rows)} duplicates from source?", default=False):
-                    for p in doc_paths:
-                        if p not in new_paths:
-                            p.unlink()
-                    click.echo("Duplicates deleted.")
-            else:
-                click.secho("\nRun again with -d to delete these duplicates from source.", fg="cyan")
-
-            survivors = new_paths
-        else:
-            click.echo("No duplicates found.")
-
-    if not survivors:
-        click.echo("No new documents to process.")
-        return
-
-    click.echo(f'Processing {len(survivors)} documents...')
-
-    # 3. Process the Survivors
-    bibs = [f"% import from {doc_path.absolute()}"]
-    for p in sorted(survivors):
-        if p.suffix.lower() not in {'.pdf', '.djvu', '.epub'}:
-            click.echo(f'WARNING: Non-standard format {p.suffix} for {p.name}')
-        try:
-            logger.info('gathering import info for %s', p)
-            doc = Document(p)
-            doc.process()
-            bibs.append(doc.bibtex())
-        except Exception as e:
-            click.echo(f"Error extracting metadata for {p.name}: {e}")
-
-    # 4. Generate Review File
-    bib_str = "\n".join(bibs)
-    p_review = doc_path if doc_path.is_dir() else doc_path.parent
-    p_review = p_review / "bibtex-import.bib"
-    p_review.write_text(bib_str, encoding='utf-8')
-
-    click.secho(f"\nMetadata extracted. Review file created at: {p_review.name}", fg="green")
-
-    try:
-        editor = lib.config.editor_command
-        # Note: we assume the editor supports -w for waiting if it's a CLI wrapper like subl or code
-        subprocess.run([editor, "-w", str(p_review)], check=False)
-    except Exception as e:
-        logger.debug(f"Editor launch error: {e}")
-        click.echo(f"Could not open editor ({editor}) automatically. Please review the .bib file manually.")
-
-    click.echo("\nRun the following command to complete the import after review:")
-    click.secho(f"archivum import-bibtex {p_review.name} -x", fg="cyan", bold=True)
-
-
-# ========================================================================================
-@entry.command(name="stage-enhance")
-@click.argument(
-    "bibtex_file",
-    type=click.Path(exists=True, path_type=Path),
-    required=False,
-)
-@click.option(
-    "-a",
-    "--arxiv",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help="Perform arXiv-to-Crossref enhancement for preprints.",
-)
-def stage_enhance(bibtex_file: Path, arxiv: bool):
-    """
-    Enhance a staged BibTeX file with metadata from Crossref.
-
-    \b
-    1. Identifies entries with 'archivePrefix = {arXiv}' but no 'journal'.
-    2. Searches Crossref by title to find published versions.
-    3. Updates journal, volume, year, and DOI while keeping arXiv info.
-    4. Backs up the original file as .bak.
-    """
-    if bibtex_file is None:
-        bibtex_file = Path(".")
-
-    if bibtex_file.is_dir():
-        bib_files = list(bibtex_file.glob("*.bib"))
-        if len(bib_files) == 1:
-            bibtex_file = bib_files[0]
-        elif not bib_files:
-            click.echo(f"No .bib files found in {bibtex_file}")
-            return
-        else:
-            click.echo(f"Multiple .bib files found in {bibtex_file}. Please specify one.")
-            for f in bib_files:
-                click.echo(f"  - {f.name}")
-            return
-
-    if not bibtex_file.suffix.lower() == ".bib":
-        click.echo(f"File {bibtex_file} is not a BibTeX file.")
-        return
-
-    import shutil
-
-    backup_path = bibtex_file.with_suffix(bibtex_file.suffix + ".bak")
-    shutil.copy2(bibtex_file, backup_path)
-    click.echo(f"Backup created at {backup_path.name}")
-
+def _enhance_bibtex_file(bibtex_file: Path, arxiv: bool = True):
+    """Refactored core logic of stage-enhance for use in stage-docs."""
     # We use Bib2df_Incremental just for its parsing logic
     importer = Bib2df_Incremental(
         bibtex_file_path=bibtex_file, doc_dir=None, reference_library=None
@@ -1459,6 +1267,260 @@ def stage_enhance(bibtex_file: Path, arxiv: bool):
     # Write back
     new_txt = "\n\n".join(new_entries)
     bibtex_file.write_text(new_txt, encoding="utf-8")
+    return enhanced_count
+
+
+@entry.command(name="stage-docs")
+@click.argument(
+    "doc_path",
+    type=click.Path(exists=True, dir_okay=True, path_type=Path),
+)
+@click.option(
+    "-f/-nf",
+    "--flag-duplicates/--no-duplicates",
+    "flag_duplicates",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Check for hash duplicates in library before processing.",
+)
+@click.option(
+    "-d",
+    "--delete",
+    "delete_dupes",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Delete duplicates from source folder if found.",
+)
+@click.option(
+    "-v",
+    "--verbose",
+    count=True,
+    default=0,
+    show_default=True,
+    help="Increase verbosity.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Actually perform the import after review.",
+)
+@click.option(
+    "-h",
+    "--enhance",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Automatically enhance arXiv entries via Crossref.",
+)
+@click.pass_context
+def stage_docs(ctx, doc_path: Path, flag_duplicates: bool, delete_dupes: bool, verbose: int, execute: bool, enhance: bool):
+    """
+    Prepare new documents for import by staging metadata in a BibTeX file.
+
+    \b
+    1. Checks for hash duplicates in the library.
+    2. Extracts metadata from new files.
+    3. Generates a .bib file for review in Sublime Text.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open -- cannot stage documents.")
+        return
+
+    # 1. Find the files
+    if doc_path.is_dir():
+        doc_paths = lib.find_docs(doc_path)
+    else:
+        doc_paths = [doc_path]
+
+    if not doc_paths:
+        click.echo(f"No documents found in {doc_path}")
+        return
+
+    # 2. Pre-check for Duplicates
+    click.echo(f"Hashing {len(doc_paths)} files...")
+    from .hasher import hash_many3
+    hashes = hash_many3(doc_paths, workers=lib.config.hash_workers)
+
+    survivors = doc_paths
+    if flag_duplicates:
+        click.echo(f"Checking for duplicates in library...")
+        dupe_rows = []
+        new_paths = []
+
+        lib_docs = lib.doc_df
+        lib_ref_docs = lib.ref_doc_df
+        lib_refs = lib.ref_df
+
+        for p in doc_paths:
+            h = hashes.get(p)
+            if h and h in lib_docs.hash.values:
+                # Find matching info - use hash directly in ref_doc_df
+                match_tags = lib_ref_docs[lib_ref_docs.hash == h].tag.tolist()
+                tag = match_tags[0] if match_tags else "Unknown"
+                title = lib_refs[lib_refs.tag == tag].title.iloc[0] if tag != "Unknown" else "N/A"
+
+                dupe_rows.append({
+                    "Staging File": p.name,
+                    "Hash": h[:12],
+                    "Match Tag": tag,
+                    "Match Title": title[:50]
+                })
+            else:
+                new_paths.append(p)
+
+        if dupe_rows:
+            click.secho(f"\nFound {len(dupe_rows)} duplicates already in library:", fg="yellow")
+            qd(pd.DataFrame(dupe_rows))
+
+            if delete_dupes:
+                if click.confirm(f"\nDelete these {len(dupe_rows)} duplicates from source?", default=False):
+                    for p in doc_paths:
+                        if p not in new_paths:
+                            p.unlink()
+                    click.echo("Duplicates deleted.")
+            else:
+                click.secho("\nRun again with -d to delete these duplicates from source.", fg="cyan")
+
+            survivors = new_paths
+        else:
+            click.echo("No duplicates found.")
+
+    if not survivors:
+        click.echo("No new documents to process.")
+        return
+
+    click.echo(f'Processing {len(survivors)} documents...')
+
+    # 3. Process the Survivors
+    sorted_survivors = sorted(survivors)
+    first_hash = hashes[sorted_survivors[0]]
+    n_survivors = len(survivors)
+
+    bibs = [f"% import from {doc_path.absolute()}"]
+    actual_survivors = []
+    for p in sorted_survivors:
+        h = hashes[p]
+        # Rename! prepend 6 chars of hash
+        if not p.name.startswith(h[:6]):
+            new_name = f"{h[:6]}-{p.name}"
+            new_p = p.parent / new_name
+            if not new_p.exists():
+                p.rename(new_p)
+                p = new_p
+            else:
+                p = new_p
+
+        if p.suffix.lower() not in {'.pdf', '.djvu', '.epub'}:
+            click.echo(f'WARNING: Non-standard format {p.suffix} for {p.name}')
+        try:
+            logger.info('gathering import info for %s', p)
+            doc = Document(p)
+            doc.process()
+            bibs.append(doc.bibtex())
+            actual_survivors.append(p)
+        except Exception as e:
+            click.echo(f"Error extracting metadata for {p.name}: {e}")
+
+    # 4. Generate Review File
+    bib_str = "\n".join(bibs)
+    p_review_dir = doc_path if doc_path.is_dir() else doc_path.parent
+    bib_name = f"{first_hash[:6]}-{n_survivors:02d}-import.bib"
+    p_review = p_review_dir / bib_name
+    p_review.write_text(bib_str, encoding='utf-8')
+
+    click.secho(f"\nMetadata extracted. Review file created at: {p_review.name}", fg="green")
+
+    # 5. Enhance if requested
+    if enhance:
+        click.echo("Running automatic enhancement...")
+        _enhance_bibtex_file(p_review, arxiv=True)
+
+    # 6. Open Editor for review (always)
+    try:
+        editor = lib.config.editor_command
+        # Note: we assume the editor supports -w for waiting if it's a CLI wrapper like subl or code
+        subprocess.run([editor, "-w", str(p_review)], check=False)
+    except Exception as e:
+        logger.debug(f"Editor launch error: {e}")
+        click.echo(f"Could not open editor ({editor}) automatically. Please review the .bib file manually.")
+
+    if execute:
+        if click.confirm(f"Continue to import {p_review.name} with {len(actual_survivors)} entries?", default=False):
+            ctx.invoke(
+                import_bibtex,
+                bibtex_path=p_review,
+                doc_dir=p_review.parent,
+                execute=True,
+                add_hashes=True,
+                incremental=True,
+                verbose=0,
+                extract_text_flag=True
+            )
+    else:
+        click.echo("\nRun the following command to complete the import after review:")
+        click.secho(f"archivum import-bibtex {p_review.name} -x", fg="cyan", bold=True)
+
+
+# ========================================================================================
+@entry.command(name="stage-enhance")
+@click.argument(
+    "bibtex_file",
+    type=click.Path(exists=True, path_type=Path),
+    required=False,
+)
+@click.option(
+    "-a",
+    "--arxiv",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Perform arXiv-to-Crossref enhancement for preprints.",
+)
+def stage_enhance(bibtex_file: Path, arxiv: bool):
+    """
+    Enhance a staged BibTeX file with metadata from Crossref.
+
+    \b
+    1. Identifies entries with 'archivePrefix = {arXiv}' but no 'journal'.
+    2. Searches Crossref by title to find published versions.
+    3. Updates journal, volume, year, and DOI while keeping arXiv info.
+    4. Backs up the original file as .bak.
+    """
+    if bibtex_file is None:
+        bibtex_file = Path(".")
+
+    if bibtex_file.is_dir():
+        bib_files = list(bibtex_file.glob("*.bib"))
+        if len(bib_files) == 1:
+            bibtex_file = bib_files[0]
+        elif not bib_files:
+            click.echo(f"No .bib files found in {bibtex_file}")
+            return
+        else:
+            click.echo(f"Multiple .bib files found in {bibtex_file}. Please specify one.")
+            for f in bib_files:
+                click.echo(f"  - {f.name}")
+            return
+
+    if not bibtex_file.suffix.lower() == ".bib":
+        click.echo(f"File {bibtex_file} is not a BibTeX file.")
+        return
+
+    import shutil
+
+    backup_path = bibtex_file.with_suffix(bibtex_file.suffix + ".bak")
+    shutil.copy2(bibtex_file, backup_path)
+    click.echo(f"Backup created at {backup_path.name}")
+
+    # We use _enhance_bibtex_file helper
+    enhanced_count = _enhance_bibtex_file(bibtex_file, arxiv=arxiv)
+
     click.secho(
         f"\nDone! Enhanced {enhanced_count} entries.", fg="green", bold=True
     )
