@@ -846,8 +846,9 @@ def path_from_row(row, base_dir):
 
 
 def save_from_row(row, base_path):
-    """Do the "renaming" work: create new hardlink to the original file."""
-    original = Path(row.path)
+    """Do the "renaming" work: create new hardlink to the original file. Does not alter original file."""
+    # original = Path(row.path)
+    original = base_path / row.path
     fn = canonical_name_from_row(row)
     path = (base_path / fn[:2] / fn).with_suffix(original.suffix)
     if path.exists():

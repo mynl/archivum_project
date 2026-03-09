@@ -1,12 +1,15 @@
 base_cols:
   - tag
-  - path
+  - hash
+  - version
 
-bang_field: path
+bang_field: tag
+
 recent_field: tag
 
 fuzzy:
   fields:
-    - path
-  limit: 50
+    - hash
+    - tag
+  limit: 10
   score_col_name: score

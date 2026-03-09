@@ -49,7 +49,7 @@ from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
 from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
 from .import_bibtex import Bib2df_Incremental
-
+from .quarto import QmdParser
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / "Downloads")
@@ -387,20 +387,20 @@ def library_audit(verbose, execute):
         click.echo("OK: All documented files exist.")
 
     # 2. Orphan Docs
-    orphans = findings["orphan_docs"]
+    orphans = findings["docs_missing_ref"]
     if orphans:
-        click.secho(f"!! Found {len(orphans)} orphan document records (no reference linked).", fg="yellow")
+        click.secho(f"!! Found {len(orphans)} document records with no reference linked.", fg="yellow")
         if verbose:
             for p in orphans: click.echo(f"  - {p}")
     else:
         click.echo("OK: All document records are linked to references.")
 
     # 3. Missing Docs
-    missing_docs = findings["missing_docs"]
-    if missing_docs:
-        click.secho(f"?? Found {len(missing_docs)} references without documents.", fg="blue")
+    refs_missing_doc = findings["refs_missing_doc"]
+    if refs_missing_doc:
+        click.secho(f"Found {len(refs_missing_doc)} references without a document.", fg="blue")
         if verbose:
-            for t in missing_docs:
+            for t in refs_missing_doc:
                 title = lib.ref_df[lib.ref_df.tag == t].title.iloc[0]
                 click.echo(f"  - {t}: {title[:60]}...")
     else:
@@ -872,6 +872,9 @@ def q(expr: tuple, database: str):
     expr_str = " ".join(expr)
     try:
         result = df.querex(expr_str)
+        if 'hash' in result:
+            # truncate hash to 10 chars
+            result['hash'] = result['hash'].str[:10]
         qd(result)
     except Exception as e:
         click.echo(f"[Error] {e}")
@@ -1875,7 +1878,7 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
                 click.secho(f"\n--- Reference Metadata [{t}] ---", fg="cyan")
                 metadata = ref.iloc[0].dropna()
                 metadata = metadata[metadata != ""]
-                qd(metadata.to_frame(name="value"))
+                qd(metadata.to_frame(name="value"), show_index=True)
 
                 # Docs for this specific tag
                 this_docs = doc_details[doc_details.tag == t]
@@ -1884,7 +1887,7 @@ def tag(tag_regex, information, open_doc, all_docs, limit, verbose, show_file):
                     cols = ['name', 'create', 'hash', 'size']
                     this_docs_view = this_docs.copy()
                     this_docs_view['hash'] = this_docs_view['hash'].str[:12]
-                    qd(this_docs_view[cols], show_index=True)
+                    qd(this_docs_view[cols])
 
         # -vv: Full Stats
         else:
@@ -2243,6 +2246,38 @@ def tt(title, all_docs):
     df2 = lib.ref_doc_df.query("tag in @doc_tags")
     for d in df2.path:
         lib.open_document(d)
+
+
+@entry.command()
+@click.argument(
+    "qmd_file",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
+@click.argument(
+    "out_path",
+    type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
+)
+@click.option(
+    "-a", "--abstract", is_flag=True, default=False, show_default=True,
+    help="Include abstract from text extract."
+)
+@click.option("-x", "--execute", is_flag=True, default=False, show_default=True,
+    help="Actually execute."
+)
+def qmd_ref_summary(qmd_file, out_path, abstract,execute):
+    """
+    Produce qmd summary of qmd_file in directory out_path.
+
+    Makes links to all pdf files.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
+        return
+    qmd = QmdParser(qmd_file)
+    ans = qmd.ref_summary(out_path, lib, abstract=abstract, execute=exectute)
 
 
 # =================================================

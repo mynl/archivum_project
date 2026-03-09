@@ -4,6 +4,7 @@ base_cols:
   - title
   - journal
   - create
+  - hash
 
 date_fields:
   - create
@@ -13,11 +14,11 @@ date_fields:
 default_date_field: mod
 
 bang_field: author
-recent_field: mod
+recent_field: create
 
 fuzzy:
   fields:
     - author
     - title
-  limit: 50
+  limit: 10
   score_col_name: score

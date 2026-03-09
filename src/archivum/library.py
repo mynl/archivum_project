@@ -98,6 +98,10 @@ class Library(LibraryBase):
             return p
         return self.doc_store_path / p
 
+    def textpath(self, p: str) -> Path:
+        """Return full text path from doc_df path. Does not check existence."""
+        return (self.text_dir_path / p).resolve().with_suffix(f".{self.config.extractor}.md")
+
     def open_document(self, path: Union[str, Path]):
         """Try to open document at path (rel or abs)."""
         p = self.abspath(path)
@@ -247,7 +251,7 @@ class Library(LibraryBase):
             for c in ["node", "links", "size"]:
                 if c in self._database.columns:
                     self._database[c] = self._database[c].fillna(0)
-
+            self._database['hash'] = self._database['hash'].str[:8]
             config_file = (
                 files("archivum.configurations") / "querexfuzz-database-config.yaml"
             )
@@ -822,6 +826,7 @@ class Library(LibraryBase):
             "*.md",
             "--encoding",
             "utf-8",
+            "--pcre2",  # perl compliant regex
             pattern,
             *args,
             self.text_dir_full_name,
@@ -1050,11 +1055,22 @@ class Library(LibraryBase):
         """
         Perform a comprehensive structural audit of the library.
         Returns a dictionary of findings.
+
+        These three should all be empty::
+          missing_physical_files: check all files in doc_df actually exist.
+          broken_tag_links: tag in ref_doc but no actual ref.
+          broken_id_links: (hash, version) in ref_doc but no actual doc.
+
+        These may be longer:
+          refs_missing_doc: a ref withand no doc. Can't locate an doc (afile). Expected.
+          docs_missing_ref: docs in doc_df with no reference; eg old versions of papers
+
+        orphan_extracts: an actual extract exists that is not expected based on doc_df.
         """
         findings = {
             "missing_physical_files": [],
-            "orphan_docs": [],
-            "missing_docs": [],
+            "docs_missing_ref": [],
+            "refs_missing_doc": [],
             "broken_tag_links": [],
             "broken_id_links": [],
             "orphan_extracts": []
@@ -1077,10 +1093,10 @@ class Library(LibraryBase):
 
         # Map back to paths for reporting
         orphan_paths = orphans.merge(self.doc_df, on=id_cols, how='inner').path.tolist()
-        findings["orphan_docs"] = orphan_paths
+        findings["docs_missing_ref"] = orphan_paths
 
         # 3. Missing Docs (Tags with no linked documents)
-        findings["missing_docs"] = self.ref_df[~self.ref_df.tag.isin(self.ref_doc_df.tag)].tag.tolist()
+        findings["refs_missing_doc"] = self.ref_df[~self.ref_df.tag.isin(self.ref_doc_df.tag)].tag.tolist()
 
         # 4. Broken Links
         # Broken Tags (Tag in ref-doc not in ref)
@@ -1298,18 +1314,19 @@ class Library(LibraryBase):
                     logger.warning('Object of type %s cannot be saved to json', type(obj))
         logger.info(f"Audit: {type(obj).__name__} saved to {path.name}.")
 
-    def audit_summary(self):
-        """Create a dataframe summarizing the imports used to create the library."""
-        lib_path = self.config_path
-        # 1. Map: Old BibTeX Tag -> Normalized Tag
-        audit_files = {}
-        # rglob finds all tag-mapping files across all import batches
-        for p in (lib_path / "import-audit").rglob("*audit-info.csv"):
-            df = pd.read_csv(p, index_col='key', usecols=[1, 2])
-            audit_files[p.name] = df
-        return pd.concat(audit_files.values(),
-                    keys=audit_files.keys()
-                    ).unstack(1).droplevel(0, axis=1)
+    # replaced with history
+    # def audit_summary(self):
+    #     """Create a dataframe summarizing the imports used to create the library."""
+    #     lib_path = self.config_path
+    #     # 1. Map: Old BibTeX Tag -> Normalized Tag
+    #     audit_files = {}
+    #     # rglob finds all tag-mapping files across all import batches
+    #     for p in (lib_path / "import-audit").rglob("*audit-info.csv"):
+    #         df = pd.read_csv(p, index_col='key', usecols=[1, 2])
+    #         audit_files[p.name] = df
+    #     return pd.concat(audit_files.values(),
+    #                 keys=audit_files.keys()
+    #                 ).unstack(1).droplevel(0, axis=1)
 
     def make_tag_mapper(self):
         """Make a tag mapping dictionary for library"""

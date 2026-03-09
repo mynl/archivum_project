@@ -590,63 +590,21 @@ class Document:
         """
         Return Path to where text is or will be stored.
         Mirrors the sharded structure: text_dir / first_2_of_fn / fn.md
-        where fn starts with first 12 chars of hash.
+        where fn starts with first 10 chars of hash.
         """
-        from .enhancements import canonical_name_from_row
-
-        # We need the hash and other info for canonical_name.
-        # If hash is missing, this will be 'Unknown'.
-        # Assuming Document object might have been populated with hash.
-        # If not, it uses whatever is available.
-        
-        # To strictly follow "names start with 12 chars of the hash", 
-        # and "mirroring the files", we use the sharded filename.
-        
-        # If we are in the library context, we can use canonical_name_from_row.
-        # But Document is standalone.
-        
-        # Heuristic: if we don't have bib info, use stem.
-        # But the requirement says "names start with 12 chars of the hash".
-        
-        # Let's check if Document has a helper to get its "sharded" name.
         if hasattr(self, 'hash') and self.hash:
-            h12 = self.hash[:12]
+            h10 = self.hash[:10]
         else:
             # Try to extract hash from current path if it looks sharded
-            match = re.search(r'([A-F0-9]{12,})', self.doc_path.name)
-            h12 = match.group(1)[:12] if match else "Unknown"
+            match = re.search(r'([A-F0-9]{10,})', self.doc_path.name)
+            h10 = match.group(1)[:10] if match else "Unknown"
 
-        # Sharded structure: h12[:2] / h12 - ... .md
-        # To mirror the files exactly: if the file is at /SHARD/DIR/FILE.pdf
-        # text is at /TEXT_DIR/DIR/FILE_WITHOUT_EXT.md?
-        # User said: "mirroring the files (under docs, sharded, names start with 12 chars of the hash."
-        
-        # In Archivum, sharded files are at: base_path / fn[:2] / fn
-        # where fn = hash[:10] + ...
-        
-        # If the file is already sharded, we can mirror its parent.
-        parent_shard = self.doc_path.parent.name # e.g. "A1"
-        
-        # Filename starts with 12 chars of hash
-        # If the current filename already starts with a hash, we just change extension.
-        # If it doesn't, we should ideally use the hash.
-        
-        # Let's use a simpler "mirroring" logic: 
-        # text_path = text_dir_path / parent_shard / (h12 + "_" + doc_path.stem + ".md")
-        # No, "names start with 12 chars of the hash" and "mirroring the files".
-        
-        # If self.doc_path is already sharded (e.g. .../A1/HASH-Title.pdf)
-        # then we want .../full-text/A1/HASH-Title.extractor.md
-        
-        # If it's NOT sharded, we still put it in a shard-like structure.
-        shard = h12[:2]
-        
-        # The filename should start with h12.
-        # If the doc_path.stem already starts with h12, use it.
-        # Otherwise, prepend it.
+        # Sharded structure: h10[:2] / h10 - ... .md
+        parent_shard = self.doc_path.parent.name
+        shard = h10[:2]
         stem = self.doc_path.stem
-        if not stem.startswith(h12):
-            stem = f"{h12}_{stem}"
+        if not stem.startswith(h10):
+            stem = f"{h10}_{stem}"
             
         return text_dir_path / shard / f"{stem}.{extractor}.md"
 
