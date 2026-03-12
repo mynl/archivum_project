@@ -2264,7 +2264,7 @@ def tt(title, all_docs):
 @click.option("-x", "--execute", is_flag=True, default=False, show_default=True,
     help="Actually execute."
 )
-def qmd_ref_summary(qmd_file, out_path, abstract,execute):
+def qmd_ref_summary(qmd_file, out_path, abstract, execute):
     """
     Produce qmd summary of qmd_file in directory out_path.
 
@@ -2277,7 +2277,7 @@ def qmd_ref_summary(qmd_file, out_path, abstract,execute):
         )
         return
     qmd = QmdParser(qmd_file)
-    ans = qmd.ref_summary(out_path, lib, abstract=abstract, execute=exectute)
+    ans = qmd.ref_summary(out_path, lib, abstract=abstract, execute=execute)
 
 
 # =================================================
