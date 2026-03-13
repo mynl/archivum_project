@@ -6,9 +6,10 @@ v1  Gemini.
 """
 import logging
 import re
+from pathlib import Path
 from typing import Any, List
 import pandas as pd
-
+from rich.text import Text
 
 logger = logging.getLogger(__name__)
 
@@ -208,3 +209,46 @@ def dict_to_bibtex_crossref(data: Any) -> str:
     lines.append("}")
 
     return "\n".join(lines)
+
+
+def format_biblio(df: pd.DataFrame) -> str:
+    """Print out a df, one entry per line, MLA/AP style."""
+    df_sorted = df.sort_values("tag")
+
+    lines = []
+    for _, row in df_sorted.iterrows():
+        # Clean fields
+        fields = {
+            col: str(row.get(col, "")).strip("{}") if pd.notna(row.get(col)) else ""
+            for col in ["author", "title", "journal", "publisher"]
+        }
+
+        source = fields["journal"] or fields["publisher"]
+        # only three words of journal title
+        source = ' '.join([i for i in source.split( )[:4]])
+
+        # Use [i] for italics in Rich
+        source_str = f"[i]{source}[/i]" if source else ""
+        # Build the clickable link using Rich markup
+        # Syntax: [link=file:///path/to/file]hash[:6][/link]
+        short_hash = str(row["hash"])[:6]
+
+        if pd.notna(row.get("path")) and row["path"]:
+            path_uri = Path(row["path"]).resolve().as_uri()
+            clickable_hash = f"[link={path_uri}][blue]{short_hash}[/blue][/link]"
+        else:
+            clickable_hash = f'HH{short_hash}'
+
+        bits = []
+        bits.append(clickable_hash)
+        if (fa := fields['author']) != '':
+            bits.append(fa)
+        bits.append(f"\"{fields['title']}\"")
+        if source_str:
+            bits.append(source_str)
+        spcer = '' if row['tag'][-1] in list('abcdefgh') else ' '
+        line = f"[{row['tag']}{spcer}] " + ', '.join(bits)
+        lines.append(line)
+
+    return "\n".join(lines)
+

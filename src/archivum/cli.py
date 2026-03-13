@@ -1,4 +1,5 @@
 """Implement command line interface for archivum."""
+from collections import deque
 import html
 from importlib.resources import files
 import json
@@ -47,7 +48,7 @@ from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
 from .utilities import make_qd
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
-from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
+from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref, format_biblio
 from .import_bibtex import Bib2df_Incremental
 from .quarto import QmdParser
 
@@ -880,6 +881,97 @@ def q(expr: tuple, database: str):
         click.echo(f"[Error] {e}")
 
 
+@entry.command()
+@click.option(
+    "--top",
+    type=int,
+    default=-1,
+    help="Number of results to return, -1 for all (default)."
+)
+@click.option(
+    "-r", "--recent/--no-recent",
+    is_flag=True,
+    default=True,
+    show_default=True,
+    help="Recent order"
+)
+@click.option(
+    "-t", "--table",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Output in table format"
+)
+@click.argument(
+    "expr",
+    type=str,
+    nargs=-1
+)
+def f(top, recent, table, expr):
+    """
+    Find expr by tag or query if expr is a full query statement.
+
+    if expr starts ! or contains ~ it is interpreted as a full query statement,
+    otherwise tag ~ is prepended.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open...don't know what to query. Returning")
+        return
+
+    df = lib.database
+    if getattr(df, 'querex', None) is None:
+        click.echo('querex not attached to database, exiting.')
+        return
+
+    builder = deque()
+    expr = ' '.join(expr)
+    if expr[0] == "!" or expr.find('~') > 0:
+        builder.append(expr)
+    else:
+        builder.append("tag ~ ")
+        builder.append(expr)
+    builder.appendleft('select path, hash, *')
+    if top > 0:
+        builder.appendleft(f'top {top}')
+    if recent:
+        builder.appendleft('recent')
+    expr_str = ' '.join(builder)
+
+    # execute query
+    try:
+        result = df.querex(expr_str)
+        result['hash'] = result['hash'].str[:6]
+    except Exception as e:
+        click.echo(f"[Query Error] {e}")
+
+    # resolve paths
+    try:
+        result['path'] = result['path'].apply(
+            lambda x: lib.abspath(x) if pd.notna(x) else "")
+    except Exception as e:
+        click.echo(f"[Abs Path Error] {e}")
+
+    # sort out author
+    def trim_author(s):
+        *first, last = [i.split(',')[0].strip("{}") for i in s.split(' and ')]
+        if first:
+            return ', '.join(first) + f', and {last}'
+        else:
+            # if there is only one author it will duplicate the tag
+            return ""
+    result['author'] = result['author'].map(trim_author)
+
+    # output
+    if table:
+        # path way too wide for this to make sense
+        qd(result.drop(columns=['path']))
+    else:
+        console = Console()
+        formatted_output = format_biblio(result)
+        console.print(formatted_output)
+
+
 # ========================================================================================
 @entry.command()
 @click.argument(
@@ -1702,10 +1794,10 @@ def find_doc(path):
 # @click.argument("pattern", type=str, required=True)
 @click.option(
     "-n",
-    default=10,
+    default=-1,
     type=int,
     show_default=True,
-    help="Number of results to return, default=10, n=-1 returns all.",
+    help="Number of results to return, n=-1 (default) returns all.",
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def rg(args, n):
@@ -1777,8 +1869,6 @@ def rg(args, n):
 
 
 # tags opening docs ------------------------
-
-
 @entry.command()
 @click.argument("tag_regex", type=str)
 @click.option(

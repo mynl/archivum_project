@@ -112,7 +112,7 @@ class Library(LibraryBase):
 
         try:
             viewer = self.config.pdf_viewer_command
-            if viewer:
+            if viewer and Path(viewer).exists():
                 # Use specified viewer
                 subprocess.run([viewer, str(p)], check=False)
             else:
@@ -342,8 +342,6 @@ class Library(LibraryBase):
 
     def update_reference(self, old_tag: str, new_data: dict):
         """Update or add a reference. Handles tag changes."""
-        print('Warning: UNTESTED')
-
         new_tag = new_data.get("tag")
         if not new_tag:
             raise ValueError("New data must contain a 'tag'")
