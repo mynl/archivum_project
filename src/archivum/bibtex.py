@@ -220,7 +220,7 @@ def format_biblio(df: pd.DataFrame) -> str:
         # Clean fields
         fields = {
             col: str(row.get(col, "")).strip("{}") if pd.notna(row.get(col)) else ""
-            for col in ["author", "title", "journal", "publisher"]
+            for col in ["author", "title", "journal", "publisher", "type"]
         }
 
         source = fields["journal"] or fields["publisher"]
@@ -239,11 +239,18 @@ def format_biblio(df: pd.DataFrame) -> str:
         else:
             clickable_hash = f'HH{short_hash}'
 
+        if fields['type'] == 'book':
+            type = '[red]book[/red]'
+        else:
+            type = None
+
         bits = []
         bits.append(clickable_hash)
-        if (fa := fields['author']) != '':
-            bits.append(fa)
+        if type:
+            bits.append(type)
         bits.append(f"\"{fields['title']}\"")
+        if (fa := fields['author']) != '':
+            bits.append(f'[yellow]{fa}[/yellow]')
         if source_str:
             bits.append(source_str)
         spcer = '' if row['tag'][-1] in list('abcdefgh') else ' '

@@ -51,6 +51,7 @@ from .crossref import lookup_doi, search_by_title, search
 from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref, format_biblio
 from .import_bibtex import Bib2df_Incremental
 from .quarto import QmdParser
+from .rg_tools import RipgrepTools
 
 # local constants
 DEFAULT_NEW_DIR = str(Path.home() / "Downloads")
@@ -641,7 +642,9 @@ def library_close():
 
     This is a command line concept; the Library class has no close
     method. You just delete it. It does NOT track if it is dirty and
-    needs to change.
+    needs to change. You do not want misc. save on close behavior
+    because it could be open on multiple machines. Collisions are
+    not tracked.
     """
     lib = LibraryContext.get()
     nm = lib.name
@@ -931,7 +934,7 @@ def f(top, recent, table, expr):
     else:
         builder.append("tag ~ ")
         builder.append(expr)
-    builder.appendleft('select path, hash, *')
+    builder.appendleft('select path, hash, type, *')
     if top > 0:
         builder.appendleft(f'top {top}')
     if recent:
@@ -970,6 +973,7 @@ def f(top, recent, table, expr):
         console = Console()
         formatted_output = format_biblio(result)
         console.print(formatted_output)
+        console.print('\n')
 
 
 # ========================================================================================
@@ -1790,6 +1794,35 @@ def find_doc(path):
         click.echo("No matching records found for any files in directory.")
 
 
+@entry.command(
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+    }
+)
+@click.pass_context
+def rg(ctx):
+    """Run ripgrep with all arguments passed through unchanged."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo(
+            "No library open...don't know where to look for text files. Returning"
+        )
+        return
+
+    raw_args = list(ctx.args)
+    if not raw_args:
+        click.echo("Missing ripgrep arguments!", err=True)
+        return
+
+    tools = RipgrepTools(
+        console=console,
+        text_dir=Path(lib.text_dir_full_name),
+        extractor=getattr(lib.config, "extractor", None),
+    )
+    tools.run_and_present(raw_args)
+
+
 @entry.command(context_settings={"ignore_unknown_options": True})
 # @click.argument("pattern", type=str, required=True)
 @click.option(
@@ -1800,7 +1833,7 @@ def find_doc(path):
     help="Number of results to return, n=-1 (default) returns all.",
 )
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
-def rg(args, n):
+def rg_old(args, n):
     """Run ripgrep (rg) with given pattern and args against text extracts from pdfs."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -2409,6 +2442,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
     completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
+    completers["f"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["edit-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["delete-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
     completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
