@@ -11,13 +11,16 @@ from importlib.resources import files
 import json
 import logging
 import os
+import time
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Union
+from typing import Union, List, Dict, Optional
 
 import pandas as pd
 from IPython.display import display
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
 
 from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
@@ -77,7 +80,73 @@ class Library(LibraryBase):
         self.debug_dir_path = resolve_path(str(self.config.debug_dir))
         self.debug_dir_path.mkdir(parents=True, exist_ok=True)
 
+        # State for auto-reload
+        self.needs_reload = False
+        self._ignore_until = 0.0
+        self._last_mtimes: Dict[str, float] = {}
+        self._observer: Optional[Observer] = None
+
+        # Initialize mtimes for core files
+        for f in ["ref.feather", "doc.feather", "ref-doc.feather"]:
+            p = self.config_path / f
+            if p.exists():
+                self._last_mtimes[f] = p.stat().st_mtime
+            else:
+                self._last_mtimes[f] = 0.0
+
         self.reset()
+
+    class LibraryChangeHandler(FileSystemEventHandler):
+        def __init__(self, library):
+            self.library = library
+            self.core_files = {"ref.feather", "doc.feather", "ref-doc.feather"}
+
+        def on_modified(self, event):
+            if event.is_directory:
+                return
+
+            filename = os.path.basename(event.src_path)
+            if filename not in self.core_files:
+                return
+
+            # Loop prevention
+            if time.time() < self.library._ignore_until:
+                return
+
+            # State validation
+            try:
+                current_mtime = os.path.getmtime(event.src_path)
+                last_mtime = self.library._last_mtimes.get(filename, 0.0)
+
+                # Dropbox/Sync Settling: mtime might change slightly without data change,
+                # but usually we look for a significant forward move.
+                if current_mtime > last_mtime + 0.1: # 100ms tolerance
+                    logger.info(f"External change detected in {filename}")
+                    self.library.needs_reload = True
+                    # We don't update last_mtimes here; reset() will do that.
+            except OSError:
+                pass
+
+    def start_watcher(self):
+        """Start the background filesystem watcher."""
+        if self._observer:
+            return
+
+        self._observer = Observer()
+        handler = self.LibraryChangeHandler(self)
+        self._observer.schedule(handler, str(self.config_path), recursive=False)
+        self._observer.start()
+        logger.debug(f"Started watcher for {self.config_path}")
+
+    def stop_watcher(self):
+        """Stop the background filesystem watcher."""
+        if self._observer:
+            self._observer.stop()
+            # We don't necessarily want to join here if it's called during a fast swap,
+            # but for cleanup it's good.
+            # self._observer.join()
+            self._observer = None
+            logger.debug(f"Stopped watcher for {self.config_path}")
 
     def __repr__(self):
         """Create simple string representation."""
@@ -144,7 +213,6 @@ class Library(LibraryBase):
         self._ref_doc_df = pd.concat([self.ref_doc_df, new_link], ignore_index=True)
 
         self.save()
-        self.reset()
         return True
 
     def reset(self):
@@ -158,6 +226,15 @@ class Library(LibraryBase):
         self._ref_df = pd.DataFrame()
         self._ref_doc_df = pd.DataFrame()
         # fully blown up docs x refs x authors
+        self._full_df = pd.DataFrame()
+
+        # Update mtimes so we don't immediately trigger another reload
+        for f in ["ref.feather", "doc.feather", "ref-doc.feather"]:
+            p = self.config_path / f
+            if p.exists():
+                self._last_mtimes[f] = p.stat().st_mtime
+
+        self.needs_reload = False
         self._database = pd.DataFrame()
         self._trie = None
         self._tag_allocator = None
@@ -327,8 +404,6 @@ class Library(LibraryBase):
         # save
         self.save()
 
-        # invalidate to force cache refresh
-        self.reset()
         logger.info("saved library and invalidated cache")
 
     def remove_reference(self, tag: str):
@@ -338,7 +413,6 @@ class Library(LibraryBase):
         self._ref_df = self.ref_df[self.ref_df.tag != tag]
         self._ref_doc_df = self.ref_doc_df[self.ref_doc_df.tag != tag]
         self.save()
-        self.reset()
 
     def update_reference(self, old_tag: str, new_data: dict):
         """Update or add a reference. Handles tag changes."""
@@ -382,7 +456,6 @@ class Library(LibraryBase):
             [self.ref_df, row.to_frame().T], ignore_index=True
         )
         self.save()
-        self.reset()
 
     def validate(self, task: str = "sharding", execute: bool = False):
         """
@@ -558,7 +631,6 @@ class Library(LibraryBase):
 
         if execute and report:
             self.save()
-            self.reset()
 
         return pd.DataFrame(report)
 
@@ -633,11 +705,17 @@ class Library(LibraryBase):
                     logger.warning(f"Backup failed for {filename}: {e}")
 
         # 3. ACTUAL SAVE
+        # Loop prevention: set a small window where we ignore filesystem events
+        self._ignore_until = time.time() + 2.0
+
         # config.save handles its own backup
         self.config.save(self.config_path, backup=True)
 
         for filename, df in files_to_save.items():
             df.to_feather(self.config_path / filename)
+
+        # refresh everything (and update last_mtimes)
+        self.reset()
 
         # reproduce the bibtex file
         self.write_bibtex()
@@ -916,8 +994,6 @@ class Library(LibraryBase):
         self._doc_df.hash = self._doc_df.path.map(lambda x: hashes.get(x, ""))
         # save everything
         self.save()
-        # invalidate caches
-        self.reset()
 
     def extract_all_text(self, force: bool = False, workers: int = None, execute: bool = False):
         """
@@ -1284,7 +1360,6 @@ class Library(LibraryBase):
             self._ref_df = ans.ans_df
             self._ref_doc_df = ans.ref_doc_df
             self.save()
-            self.reset()
         return ans
 
     def save_enhance_audit(self, obj, base_path, name):

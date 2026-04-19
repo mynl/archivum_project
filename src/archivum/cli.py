@@ -104,6 +104,11 @@ class LibraryContext:
     def clear(cls):  # noqa
         logger.debug("Library %s closed.", cls.current)
         cls.current = None
+        cls.refresh()
+
+    @classmethod
+    def refresh(cls):
+        """Clear the cached completions so they are rebuilt on next access."""
         cls.candidates_tags = None
         cls.candidates_titles = None
         cls.candidates_tag_titles = None
@@ -127,7 +132,7 @@ class LibraryContext:
 
     @classmethod
     def get_library_titles(cls):
-        """Fetch unique tags from the current library context."""
+        """Fetch unique titles from the current library context."""
         if cls.candidates_titles is not None:
             return cls.candidates_titles, cls.matcher_titles
         if cls.current is None or cls.current == EMPTY_LIBRARY:
@@ -135,7 +140,7 @@ class LibraryContext:
         else:
             cls.candidates_titles = cls.current.all_titles
             cls.matcher_titles = FuzzyMatcherMultiHi(cls.candidates_titles)
-            return cls.candidates_tags, cls.matcher_titles
+            return cls.candidates_titles, cls.matcher_titles
 
     @classmethod
     def get_library_tag_titles(cls):
@@ -2481,6 +2486,16 @@ def uber(lib_name="", auto_open=True, debug=False):
     def prompt_function():
         """Prompt uses breadcrumb chain from UBERSHELL_CHAIN plus current library."""
         lib = LibraryContext.get()
+        
+        # Check for external changes before rendering the prompt
+        if not lib.is_empty and lib.needs_reload:
+            click.secho("\n[External changes detected. Reloading library...]", fg="yellow", bold=True)
+            lib.reset()
+            LibraryContext.refresh()
+            # Note: RustFuzzyCompleter uses get_candidates_func which calls 
+            # LibraryContext.get_library_tags etc. Since we just cleared the 
+            # candidates in refresh(), they will be rebuilt on next tab press.
+
         chain = os.environ.get("UBERSHELL_CHAIN", shell.prompt_label)
         return HTML(
             f"<ansired>{chain} <ansigreen>[{lib.name}]</ansigreen> > </ansired>"
@@ -2489,17 +2504,25 @@ def uber(lib_name="", auto_open=True, debug=False):
     if lib_name == "" and auto_open:
         lib_name = DEFAULT_LIBRARY
 
+    lib = None
     if lib_name != "":
         try:
             lib = Library(lib_name)
             LibraryContext.set(lib)
+            lib.start_watcher()
             logger.info(
                 f"Opened {lib.config.name}, loaded {len(lib.ref_df):,d} references."
             )
         except Exception as e:
             logger.error("Open library error: %s", e)
 
-    shell.start(prompt_function=prompt_function)
+    try:
+        shell.start(prompt_function=prompt_function)
+    finally:
+        # Ensure watcher is stopped on exit
+        current_lib = LibraryContext.get()
+        if not current_lib.is_empty:
+            current_lib.stop_watcher()
 
 
 if __name__ == "__main__":
