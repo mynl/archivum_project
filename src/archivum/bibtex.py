@@ -4,9 +4,11 @@ Functions for creating bibtex entries from various iterables.
 v2  Hack off gemini, which actually was very poor for task at hand.
 v1  Gemini.
 """
+from functools import partial
 import logging
 import re
 from pathlib import Path
+from textwrap import wrap
 from typing import Any, List
 import pandas as pd
 from rich.text import Text
@@ -214,8 +216,11 @@ def dict_to_bibtex_crossref(data: Any) -> str:
 def format_biblio(df: pd.DataFrame) -> str:
     """Print out a df, one entry per line, MLA/AP style."""
     df_sorted = df.sort_values("tag")
-
     lines = []
+    mx_tag = df_sorted.tag.str.len().max()
+    mx_tag = min(20, mx_tag + 1)
+    tag_str = f'{{x:<{mx_tag}s}}'
+    # wrapper = partial(wrap, width=80, subsequent_indent=' ' * (mx_tag + 11))
     for _, row in df_sorted.iterrows():
         # Clean fields
         fields = {
@@ -240,21 +245,26 @@ def format_biblio(df: pd.DataFrame) -> str:
             clickable_hash = f'HH{short_hash}'
 
         if fields['type'] == 'book':
-            type = '[red]book[/red]'
+            type = '[red]bk[/red]'
         else:
-            type = None
+            # keep spacing
+            type = '  '  # None
 
         bits = []
         bits.append(clickable_hash)
         if type:
             bits.append(type)
         bits.append(f"\"{fields['title']}\"")
+        # bits.append(f"{fields['title'][:50]:<50s}")
         if (fa := fields['author']) != '':
             bits.append(f'[yellow]{fa}[/yellow]')
         if source_str:
             bits.append(source_str)
-        spcer = '' if row['tag'][-1] in list('abcdefgh') else ' '
-        line = f"[{row['tag']}{spcer}] " + ', '.join(bits)
+        # better alignment of tags
+        # spcer = '' if row['tag'][-1] in list('abcdefgh') else ' '
+        # line = f"[{row['tag']}{spcer}] " + ', '.join(bits)
+        # line = '\n'.join(wrapper(tag_str.format(x=row['tag']) + ' '.join(bits)))
+        line = tag_str.format(x=row['tag']) + ' '.join(bits)
         lines.append(line)
 
     return "\n".join(lines)
