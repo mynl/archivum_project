@@ -988,12 +988,12 @@ def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bo
             return
 
         if output:
-            from .quarto import generate_query_summary
+            from .quarto import generate_qmd_report
             out_path = Path(output)
             if not out_path.suffix:
                 out_path = out_path.with_suffix(".qmd")
 
-            generate_query_summary(lib, result, out_path, include_abstract=abstract, query=expr_str)
+            generate_qmd_report(lib, result, out_path, include_abstract=abstract, query=expr_str)
             click.echo(f"Summary of {len(result)} results written to {out_path}")
         else:
             _display_results(lib, result, table=table)
