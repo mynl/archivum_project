@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import re
 
+from .bibtex import dict_to_bibtex
+
 DEFAULT_CSL = '/s/TELOS/Biblio/journal-of-risk-and-uncertainty.csl'
 
 @dataclass(slots=True)
@@ -517,4 +519,31 @@ class QmdParser:
                 break
         out =  ' '.join(ans)
         out = re.sub(r'Further reproduction prohibited without permission\. ?|Reproduced with permission of the copyright owner\. ?', '', out)
-        return
+        return out
+
+    def generate_bibtex(self, lib: object, out_file: Path) -> int:
+        """
+        Extract all @cite keys from the QMD, match them in lib.ref_df,
+        and write a new .bib file containing only those entries.
+        Returns the number of entries written.
+        """
+        tags = self.citations()
+        if not tags:
+            return 0
+
+        # Match tags in library
+        # lib.ref_df is expected to be a pandas DataFrame
+        df = lib.ref_df
+        matches = df[df['tag'].isin(tags)]
+
+        if matches.empty:
+            return 0
+
+        bib_entries = []
+        # Sort by tag to be nice
+        for _, row in matches.sort_values("tag").iterrows():
+            bib_entries.append(dict_to_bibtex(row))
+
+        bib_content = "\n\n".join(bib_entries)
+        out_file.write_text(bib_content, encoding="utf-8")
+        return len(matches)

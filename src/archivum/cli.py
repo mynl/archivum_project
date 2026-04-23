@@ -789,6 +789,35 @@ def list_libraries(details):
 
 
 # ========================================================================================
+@entry.command(name="status")
+def library_status():
+    """Display library auto-reload status and file modification times."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open.")
+        return
+    
+    info = lib.get_status_info()
+    
+    click.secho(f"Library: {info['name']}", fg="cyan", bold=True)
+    click.echo(f"Path:    {info['path']}")
+    
+    reload_status = "YES" if info['needs_reload'] else "NO"
+    reload_color = "yellow" if info['needs_reload'] else "green"
+    click.echo("Needs Reload: ", nl=False)
+    click.secho(reload_status, fg=reload_color, bold=True)
+    
+    watcher_status = "ACTIVE" if info['watcher_active'] else "INACTIVE"
+    watcher_color = "green" if info['watcher_active'] else "red"
+    click.echo("Watcher:      ", nl=False)
+    click.secho(watcher_status, fg=watcher_color)
+    
+    click.echo("\nFile Status:")
+    df = pd.DataFrame(info['files'])
+    qd(df)
+
+
+# ========================================================================================
 @entry.command()
 def stats():
     """Display library stats library."""
@@ -2381,6 +2410,38 @@ def tt(title, all_docs):
     "qmd_file",
     type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
 )
+@click.option(
+    "-o", "--output",
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
+    help="Alternative output BibTeX file name."
+)
+def qmd_bibtex(qmd_file, output):
+    """Extract citations from a QMD file and create a BibTeX file from library matches."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open... cannot match citations. Returning")
+        return
+
+    qmd_path = Path(qmd_file)
+    if output:
+        out_file = Path(output)
+    else:
+        out_file = qmd_path.with_suffix(".bib")
+
+    qmd = QmdParser(qmd_path)
+    count = qmd.generate_bibtex(lib, out_file)
+
+    if count > 0:
+        click.echo(f"Successfully wrote {count} references to {out_file}")
+    else:
+        click.echo("No matching citations found in the library.")
+
+
+@entry.command()
+@click.argument(
+    "qmd_file",
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+)
 @click.argument(
     "out_path",
     type=click.Path(exists=False, file_okay=False, dir_okay=True, path_type=Path),
@@ -2479,6 +2540,8 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["import-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
     completers["stage-docs"] = PathCompleter(only_directories=False, expanduser=True)
     completers["stage-enhance"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["qmd-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["qmd-ref-summary"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)

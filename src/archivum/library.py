@@ -244,6 +244,47 @@ class Library(LibraryBase):
         self._title_cache = None
         self._tag_title_cache = None
 
+    def get_status_info(self) -> Dict:
+        """Return a dictionary containing status information for the library."""
+        import datetime
+        
+        core_files = ["ref.feather", "doc.feather", "ref-doc.feather"]
+        file_status = []
+        
+        for f in core_files:
+            p = self.config_path / f
+            try:
+                disk_mtime = p.stat().st_mtime if p.exists() else 0.0
+            except OSError:
+                disk_mtime = 0.0
+            last_mtime = self._last_mtimes.get(f, 0.0)
+            
+            # Format to precision of 1 second for display
+            disk_dt = datetime.datetime.fromtimestamp(disk_mtime) if disk_mtime else None
+            last_dt = datetime.datetime.fromtimestamp(last_mtime) if last_mtime else None
+            
+            status = "MATCH"
+            if not disk_mtime or not last_mtime:
+                status = "MISSING"
+            elif abs(disk_mtime - last_mtime) > 0.1:
+                status = "OUT OF SYNC"
+
+            file_status.append({
+                "File": f,
+                "Disk MTime": disk_dt.strftime('%Y-%m-%d %H:%M:%S') if disk_dt else "N/A",
+                "Last Sync": last_dt.strftime('%Y-%m-%d %H:%M:%S') if last_dt else "N/A",
+                "Status": status
+            })
+            
+        return {
+            "name": self.name,
+            "path": str(self.config_path),
+            "needs_reload": self.needs_reload,
+            "watcher_active": self._observer is not None,
+            "is_empty": self.is_empty,
+            "files": file_status
+        }
+
     @property
     def name(self):
         return self.config.name if self.config else "~~no name~~"
