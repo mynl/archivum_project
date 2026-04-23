@@ -878,6 +878,58 @@ def get_distinct_values(field):
 
 
 # ========================================================================================
+def _display_results(lib, result, table=False):
+    """Internal helper to display query results in tabular or list format."""
+    if result.empty:
+        click.echo("No results found.")
+        return
+
+    from .bibtex import format_biblio
+    from rich.console import Console
+    import pandas as pd
+
+    # Copy to avoid modifying original
+    res_display = result.copy()
+
+    # Pre-process for compact display
+    if "hash" in res_display:
+        res_display["hash"] = res_display["hash"].str[:6]
+
+    if "path" in res_display:
+        try:
+            res_display["path"] = res_display["path"].apply(
+                lambda x: lib.abspath(x) if pd.notna(x) else ""
+            )
+        except Exception:
+            pass
+
+    if "author" in res_display:
+        def trim_author(s):
+            if not isinstance(s, str) or not s:
+                return ""
+            author_bits = [i.split(",")[0].strip("{}") for i in s.split(" and ")]
+            if len(author_bits) > 1:
+                *first, last = author_bits
+                return ", ".join(first) + f", and {last}"
+            else:
+                return author_bits[0] if author_bits else ""
+
+        res_display["author"] = res_display["author"].map(trim_author)
+
+    if table:
+        # Table output
+        if "path" in res_display:
+            res_display = res_display.drop(columns=["path"])
+        qd(res_display)
+    else:
+        # List output
+        console = Console()
+        formatted_output = format_biblio(res_display)
+        console.print(formatted_output)
+        console.print("\n")
+
+
+# ========================================================================================
 @entry.command()
 @click.argument("expr", nargs=-1)
 @click.option(
@@ -888,7 +940,26 @@ def get_distinct_values(field):
     show_default=True,
     help='Database (dataframe) to process. Must be "database" (default), "doc", "ref", or "ref-doc".',
 )
-def q(expr: tuple, database: str):
+@click.option(
+    "-t", "--table",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Output results in a tabular format (default is compact)."
+)
+@click.option(
+    "-o", "--output",
+    type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
+    help="Output results to a .qmd file."
+)
+@click.option(
+    "-a", "--abstract",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Include abstracts in the .qmd output."
+)
+def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bool):
     """Execute a single query and return immediately."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -903,17 +974,30 @@ def q(expr: tuple, database: str):
     else:
         df = lib.database
 
-    if getattr(df, 'querex', None) is None:
-        click.echo(f'querex not attached to {database}, exiting.')
+    if getattr(df, "querex", None) is None:
+        click.echo(f"querex not attached to {database}, exiting.")
         return
 
     expr_str = " ".join(expr)
     try:
         result = df.querex(expr_str)
-        if 'hash' in result:
-            # truncate hash to 10 chars
-            result['hash'] = result['hash'].str[:10]
-        qd(result)
+
+        # Defensive check: ensure we have a DataFrame
+        if not isinstance(result, pd.DataFrame):
+            click.echo(f"Query did not return a table (returned {type(result)}).")
+            return
+
+        if output:
+            from .quarto import generate_query_summary
+            out_path = Path(output)
+            if not out_path.suffix:
+                out_path = out_path.with_suffix(".qmd")
+
+            generate_query_summary(lib, result, out_path, include_abstract=abstract, query=expr_str)
+            click.echo(f"Summary of {len(result)} results written to {out_path}")
+        else:
+            _display_results(lib, result, table=table)
+
     except Exception as e:
         click.echo(f"[Error] {e}")
 
@@ -957,57 +1041,34 @@ def f(top, recent, table, expr):
         return
 
     df = lib.database
-    if getattr(df, 'querex', None) is None:
-        click.echo('querex not attached to database, exiting.')
+    if getattr(df, "querex", None) is None:
+        click.echo("querex not attached to database, exiting.")
         return
 
     builder = deque()
-    expr = ' '.join(expr)
-    if expr[0] == "!" or expr.find('~') > 0:
-        builder.append(expr)
+    expr_joined = " ".join(expr)
+    if not expr_joined:
+        click.echo("No expression provided.")
+        return
+
+    if expr_joined[0] == "!" or expr_joined.find("~") > 0:
+        builder.append(expr_joined)
     else:
         builder.append("tag ~ ")
-        builder.append(expr)
-    builder.appendleft('select path, hash, type, *')
+        builder.append(expr_joined)
+    builder.appendleft("select path, hash, type, *")
     if top > 0:
-        builder.appendleft(f'top {top}')
+        builder.appendleft(f"top {top}")
     if recent:
-        builder.appendleft('recent')
-    expr_str = ' '.join(builder)
+        builder.appendleft("recent")
+    expr_str = " ".join(builder)
 
     # execute query
     try:
         result = df.querex(expr_str)
-        result['hash'] = result['hash'].str[:6]
+        _display_results(lib, result, table=table)
     except Exception as e:
         click.echo(f"[Query Error] {e}")
-
-    # resolve paths
-    try:
-        result['path'] = result['path'].apply(
-            lambda x: lib.abspath(x) if pd.notna(x) else "")
-    except Exception as e:
-        click.echo(f"[Abs Path Error] {e}")
-
-    # sort out author
-    def trim_author(s):
-        *first, last = [i.split(',')[0].strip("{}") for i in s.split(' and ')]
-        if first:
-            return ', '.join(first) + f', and {last}'
-        else:
-            # if there is only one author it will duplicate the tag
-            return ""
-    result['author'] = result['author'].map(trim_author)
-
-    # output
-    if table:
-        # path way too wide for this to make sense
-        qd(result.drop(columns=['path']))
-    else:
-        console = Console()
-        formatted_output = format_biblio(result)
-        console.print(formatted_output)
-        console.print('\n')
 
 
 # ========================================================================================

@@ -3,10 +3,261 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
+import pandas as pd
+import logging
 
 from .bibtex import dict_to_bibtex
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_CSL = '/s/TELOS/Biblio/journal-of-risk-and-uncertainty.csl'
+
+
+def quick_abstract(text: str) -> str:
+    """
+    Try and find the abstract or summary in a text extract.
+    
+    Args:
+        text: The full text content of the document.
+        
+    Returns:
+        The extracted abstract text, or empty string if not found.
+    """
+    # Look for abstract case-insensitively
+    text_lower = text.lower()
+    st = text_lower.find('abstract')
+    if st == -1:
+        # Try some other common variations if 'abstract' isn't found
+        st = text_lower.find('summary')
+    
+    if st == -1:
+        return ""
+        
+    st += 8 # len('abstract') and len('summary') are similar
+    
+    ans = []
+    # 4000 chars is usually enough for an abstract
+    # Split text starting from found keyword
+    lines = text[st:(st+4000)].split('\n')
+    for i in lines:
+        line = i.strip()
+        if not line: 
+            if ans: # End of abstract block on empty line
+                break
+            continue
+        if len(line) > 30: # Minimum meaningful line length
+            ans.append(line)
+        else:
+            # subsequent short line usually means end of abstract block
+            if ans: 
+                break
+
+    out = ' '.join(ans)
+    # Clean up common artifacts
+    out = re.sub(r'Further reproduction prohibited without permission\. ?|Reproduced with permission of the copyright owner\. ?', '', out)
+    return out.strip()
+
+
+def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | None = None, abstract: bool = True) -> str:
+    """
+    Format a single reference line for QMD output, optionally including an abstract.
+    
+    Args:
+        lib: The Library object.
+        row: A Series containing bibliographic and document info.
+        paras: Optional list of paragraph indices where the tag is cited.
+        abstract: Whether to include an abstract if available.
+        
+    Returns:
+        A formatted Markdown string.
+    """
+    tag = row.get("tag", "Unknown")
+    title = str(row.get("title", ""))
+    author = str(row.get("author", ""))
+    year = str(row.get("year", ""))
+
+    paras_str = f" (paras: {', '.join(str(i) for i in paras)})" if paras else ""
+
+    if title:
+        if title.startswith("{"): title = title[1:]
+        if title.endswith("}"): title = title[:-1]
+        title_part = f"*{title}*"
+    else:
+        title_part = ""
+
+    meta_parts = []
+    if author: meta_parts.append(author)
+    if year: meta_parts.append(year)
+    meta = ", ".join(meta_parts).strip()
+    if meta: meta = f", {meta}"
+
+    # Document link
+    doc_path = None
+    if hasattr(row, "path") and pd.notna(row.path):
+        doc_path = lib.abspath(row.path)
+    
+    doc_link = f', <a target="_blank" href="{doc_path}">file</a>.' if doc_path and doc_path.exists() else "."
+
+    line = f"* {tag} [@{tag}], {title_part}{meta}{paras_str}{doc_link}"
+    
+    if abstract:
+        text_file = None
+        # Use full path if available to find text extract
+        p_str = str(row.get('path', ''))
+        
+        if p_str and p_str != 'nan':
+            # 1. Direct resolution
+            tf = lib.textpath(p_str)
+            if tf.exists():
+                text_file = tf
+            else:
+                # 2. Try removing leading slash
+                if p_str.startswith(('/', '\\')):
+                    tf = lib.textpath(p_str[1:])
+                    if tf.exists():
+                        text_file = tf
+
+                # 3. If hash is truncated in 'row', look up the full hash in lib.doc_df
+                if not text_file and 'hash' in row:
+                    h_small = str(row['hash'])
+                    if len(h_small) < 64:
+                        # Try to find full hash in doc_df
+                        matches = lib.doc_df[lib.doc_df.hash.str.startswith(h_small)]
+                        if not matches.empty:
+                            full_path = matches.iloc[0].path
+                            tf = lib.textpath(full_path)
+                            if tf.exists():
+                                text_file = tf
+
+                # 4. Fallback: search by filename in text dir
+                if not text_file:
+                    name = Path(p_str).name
+                    tf = lib.textpath(name)
+                    if tf.exists():
+                        text_file = tf
+
+        if text_file and row.get('type') != "book":
+            try:
+                txt = text_file.read_text(encoding='utf-8')
+                abs_txt = quick_abstract(txt)
+                if abs_txt:
+                    line += f"\n  > {abs_txt}"
+            except Exception as e:
+                logger.debug(f"Failed to read/extract abstract for {tag}: {e}")
+    
+    return line
+
+
+def build_qmd_header(title: str, bibtex_file: str, csl_file: str = "") -> str:
+    """
+    Build the YAML header for a QMD file.
+    
+    Args:
+        title: Document title.
+        bibtex_file: Path to the .bib file.
+        csl_file: Optional path to a CSL style file.
+        
+    Returns:
+        YAML header string.
+    """
+    lines = [
+        "---",
+        f"title: {title}",
+        "author: archivum.query-summary",
+        f"bibliography: {Path(bibtex_file).as_posix()}",
+    ]
+    if csl_file:
+        lines.append(f"csl: {csl_file}")
+    
+    lines.extend([
+        "date-modified: last-modified",
+        "format:",
+        "  html:",
+        "    theme: litera",
+        "    smooth-scroll: true",
+        "    citations-hover: true",
+        "    page-layout: article",
+        "    link-external-icon: true",
+        "    link-external-newwindow: true",
+        "  pdf:",
+        "    documentclass: article",
+        "    papersize: a4",
+        "    fontsize: 10pt",
+        "    keep-tex: true",
+        "    geometry: margin=1in",
+        "    reference-section-title: 'References'",
+        "    pdf-engine: tectonic",
+        "---",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def generate_query_summary(lib: object, df: pd.DataFrame, out_path: Path, include_abstract: bool = True, query: str = ""):
+    """
+    Generate a QMD summary from a query result DataFrame.
+    
+    Args:
+        lib: Library object.
+        df: DataFrame containing query results.
+        out_path: Path to write the .qmd file.
+        include_abstract: Whether to include abstracts.
+        query: Original query string.
+    """
+    if df.empty:
+        out_path.write_text("No results found for query.", encoding="utf-8")
+        return
+
+    # 1. Ensure we have necessary columns for abstract retrieval and formatting
+    pdf = df.copy()
+    
+    if 'tag' not in pdf.columns:
+        pdf['tag'] = "Unknown"
+
+    # If missing path or hash, try to merge from doc_df
+    if ('path' not in pdf.columns or 'hash' not in pdf.columns) and 'tag' in pdf.columns:
+        # Join with ref_doc and doc_df to get file info
+        try:
+            extra_info = lib.ref_doc_df.merge(lib.doc_df, on=["hash", "version"], how="inner")
+            pdf = pdf.merge(extra_info[['tag', 'path', 'hash']], on="tag", how="left")
+        except Exception as e:
+            logger.warning(f"Failed to merge additional file info for summary: {e}")
+
+    # Sorting
+    sort_cols = []
+    if 'author' in pdf.columns:
+        def get_sort_author(s):
+            if not isinstance(s, str) or not s: return ""
+            return s.split(' and ')[0].split(',')[0].strip("{}")
+        pdf['_sort_author'] = pdf['author'].apply(get_sort_author)
+        sort_cols.append('_sort_author')
+    
+    if 'year' in pdf.columns:
+        sort_cols.append('year')
+    
+    if 'tag' in pdf.columns:
+        sort_cols.append('tag')
+
+    if sort_cols:
+        pdf = pdf.sort_values(sort_cols)
+
+    # 2. Build content
+    bibtex_file = lib.config.bibtex_file
+    header = build_qmd_header("Archivum Query Extract", bibtex_file, DEFAULT_CSL)
+    
+    lines = [header]
+    lines.append("## References")
+    lines.append("")
+    if query:
+        lines.append(f"Query: `{query}`")
+        lines.append("")
+
+    for _, row in pdf.iterrows():
+        lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract))
+        lines.append("")
+        
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
 
 @dataclass(slots=True)
 class QmdParser:
