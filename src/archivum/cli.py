@@ -36,6 +36,7 @@ from pydantic import ValidationError
 from rich.console import Console
 from rich.text import Text
 from rich import print as rich_print
+from rich.table import Table
 
 # for uber loop
 from uber_shell import UberShell  # type: ignore[import-untyped]
@@ -48,7 +49,7 @@ from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
 from .utilities import make_qd
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
-from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref, format_biblio
+from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
 from .import_bibtex import Bib2df_Incremental
 from .quarto import QmdParser
 from .rg_tools import RipgrepTools
@@ -878,55 +879,118 @@ def get_distinct_values(field):
 
 
 # ========================================================================================
-def _display_results(lib, result, table=False):
-    """Internal helper to display query results in tabular or list format."""
-    if result.empty:
-        click.echo("No results found.")
-        return
+def decorate_results(lib, df):
+    """Add rich formatting to a dataframe for display."""
+    res = df.copy()
 
-    from .bibtex import format_biblio
-    from rich.console import Console
-    import pandas as pd
+    # Ensure it's sorted by tag if present
+    if "tag" in res.columns:
+        res = res.sort_values("tag")
 
-    # Copy to avoid modifying original
-    res_display = result.copy()
+    # Clickable hash
+    if "hash" in res.columns:
 
-    # Pre-process for compact display
-    if "hash" in res_display:
-        res_display["hash"] = res_display["hash"].str[:6]
+        def make_link(row):
+            h = str(row["hash"])[:6]
+            if "path" in res.columns and pd.notna(row["path"]) and row["path"]:
+                try:
+                    path_uri = Path(lib.abspath(row["path"])).as_uri()
+                    return f"[link={path_uri}][blue]{h}[/blue][/link]"
+                except Exception:
+                    return f"[blue]{h}[/blue]"
+            return f"HH{h}"
 
-    if "path" in res_display:
-        try:
-            res_display["path"] = res_display["path"].apply(
-                lambda x: lib.abspath(x) if pd.notna(x) else ""
-            )
-        except Exception:
-            pass
+        res["hash"] = res.apply(make_link, axis=1)
 
-    if "author" in res_display:
+    # Author
+    if "author" in res.columns:
+
         def trim_author(s):
             if not isinstance(s, str) or not s:
                 return ""
             author_bits = [i.split(",")[0].strip("{}") for i in s.split(" and ")]
             if len(author_bits) > 1:
                 *first, last = author_bits
-                return ", ".join(first) + f", and {last}"
+                name = ", ".join(first) + f", and {last}"
             else:
-                return author_bits[0] if author_bits else ""
+                name = author_bits[0] if author_bits else ""
+            return f"[yellow]{name}[/yellow]"
 
-        res_display["author"] = res_display["author"].map(trim_author)
+        res["author"] = res["author"].map(trim_author)
+
+    # Type
+    if "type" in res.columns:
+        res["type"] = res["type"].map(
+            lambda x: "[red]bk[/red]" if x == "book" else "  "
+        )
+
+    # Journal/Publisher -> Source
+    if "journal" in res.columns or "publisher" in res.columns:
+
+        def format_source(row):
+            source = str(row.get("journal") or row.get("publisher") or "").strip("{}")
+            if not source or source == "nan":
+                return ""
+            source = " ".join(source.split()[:4])
+            return f"[i]{source}[/i]"
+
+        res["source"] = res.apply(format_source, axis=1)
+
+    return res
+
+
+def _display_results(lib, result, table=False):
+    """Internal helper to display query results in tabular or list format."""
+    if result.empty:
+        click.echo("No results found.")
+        return
+
+    # 1. Decorate for display
+    decorated = decorate_results(lib, result)
 
     if table:
-        # Table output
-        if "path" in res_display:
-            res_display = res_display.drop(columns=["path"])
-        qd(res_display)
+        # Table output using Rich Table
+        rich_table = Table(show_header=True, header_style="bold magenta", box=None)
+
+        # Decide which columns to show
+        preferred_cols = ["tag", "type", "author", "title", "year", "hash", "source"]
+        cols_to_show = [c for c in preferred_cols if c in decorated.columns]
+
+        for col in cols_to_show:
+            rich_table.add_column(col)
+
+        for _, row in decorated.iterrows():
+            rich_table.add_row(*[str(row.get(c, "")) for c in cols_to_show])
+
+        console.print(rich_table)
     else:
-        # List output
-        console = Console()
-        formatted_output = format_biblio(res_display)
-        console.print(formatted_output)
-        console.print("\n")
+        # List (Compact) output - former format_biblio logic
+        mx_tag = (
+            decorated.tag.str.len().max() if "tag" in decorated.columns else 10
+        )
+        mx_tag = min(20, mx_tag + 1)
+        tag_fmt = f"{{:<{mx_tag}}}"
+
+        for _, row in decorated.iterrows():
+            bits = []
+            if "hash" in row:
+                bits.append(row["hash"])
+            if "type" in row:
+                bits.append(row["type"])
+            if "title" in row:
+                bits.append(f'"{str(row["title"]).strip("{}")}"')
+            if "author" in row:
+                bits.append(row["author"])
+            if "source" in row:
+                bits.append(row["source"])
+
+            line = ""
+            if "tag" in row:
+                line = tag_fmt.format(row["tag"])
+
+            line += " " + " ".join(bits)
+            console.print(line)
+        console.print("")  # spacing
 
 
 # ========================================================================================
@@ -941,25 +1005,36 @@ def _display_results(lib, result, table=False):
     help='Database (dataframe) to process. Must be "database" (default), "doc", "ref", or "ref-doc".',
 )
 @click.option(
-    "-t", "--table",
+    "-t",
+    "--table",
     is_flag=True,
     default=False,
     show_default=True,
-    help="Output results in a tabular format (default is compact)."
+    help="Output results in a tabular format (default is compact).",
 )
 @click.option(
-    "-o", "--output",
+    "-o",
+    "--output",
     type=click.Path(exists=False, file_okay=True, dir_okay=False, path_type=Path),
-    help="Output results to a .qmd file."
+    help="Output results to a .qmd file.",
 )
 @click.option(
-    "-a", "--abstract",
+    "-a",
+    "--abstract",
     is_flag=True,
     default=False,
     show_default=True,
-    help="Include abstracts in the .qmd output."
+    help="Include abstracts in the .qmd output.",
 )
-def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bool):
+@click.pass_context
+def q(
+    ctx,
+    expr: tuple,
+    database: str,
+    table: bool,
+    output: Path | None,
+    abstract: bool,
+):
     """Execute a single query and return immediately."""
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -978,7 +1053,17 @@ def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bo
         click.echo(f"querex not attached to {database}, exiting.")
         return
 
-    expr_str = " ".join(expr)
+    expr_joined = " ".join(expr)
+    if not expr_joined:
+        click.echo("No expression provided.")
+        return
+
+    # Automatically ensure metadata is selected for reference-style databases
+    if database in ("database", "ref") and "select" not in expr_joined.lower():
+        expr_str = "select path, hash, type, * " + expr_joined
+    else:
+        expr_str = expr_joined
+
     try:
         result = df.querex(expr_str)
 
@@ -989,11 +1074,14 @@ def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bo
 
         if output:
             from .quarto import generate_qmd_report
+
             out_path = Path(output)
             if not out_path.suffix:
                 out_path = out_path.with_suffix(".qmd")
 
-            generate_qmd_report(lib, result, out_path, include_abstract=abstract, query=expr_str)
+            generate_qmd_report(
+                lib, result, out_path, include_abstract=abstract, query=expr_str
+            )
             click.echo(f"Summary of {len(result)} results written to {out_path}")
         else:
             _display_results(lib, result, table=table)
@@ -1004,71 +1092,39 @@ def q(expr: tuple, database: str, table: bool, output: Path | None, abstract: bo
 
 @entry.command()
 @click.option(
-    "--top",
-    type=int,
-    default=-1,
-    help="Number of results to return, -1 for all (default)."
-)
-@click.option(
-    "-r", "--recent/--no-recent",
-    is_flag=True,
-    default=True,
-    show_default=True,
-    help="Recent order"
-)
-@click.option(
-    "-t", "--table",
+    "-t",
+    "--table",
     is_flag=True,
     default=False,
     show_default=True,
-    help="Output in table format"
+    help="Output in table format",
 )
-@click.argument(
-    "expr",
-    type=str,
-    nargs=-1
-)
-def f(top, recent, table, expr):
+@click.argument("expr", type=str, nargs=-1)
+@click.pass_context
+def f(ctx, table, expr):
     """
     Find expr by tag or query if expr is a full query statement.
 
-    if expr starts ! or contains ~ it is interpreted as a full query statement,
-    otherwise tag ~ is prepended.
+    Alias for 'q recent top 50 tag ~ expr' (unless expr is already a full statement).
     """
-    lib = LibraryContext.get()
-    if lib.is_empty:
-        click.echo("No library open...don't know what to query. Returning")
-        return
-
-    df = lib.database
-    if getattr(df, "querex", None) is None:
-        click.echo("querex not attached to database, exiting.")
-        return
-
-    builder = deque()
     expr_joined = " ".join(expr)
     if not expr_joined:
         click.echo("No expression provided.")
         return
 
-    if expr_joined[0] == "!" or expr_joined.find("~") > 0:
-        builder.append(expr_joined)
+    # If it's not already a full query statement, wrap it
+    if expr_joined[0] != "!" and expr_joined.find("~") == -1:
+        query_expr = f"recent top 50 tag ~ {expr_joined}"
     else:
-        builder.append("tag ~ ")
-        builder.append(expr_joined)
-    builder.appendleft("select path, hash, type, *")
-    if top > 0:
-        builder.appendleft(f"top {top}")
-    if recent:
-        builder.appendleft("recent")
-    expr_str = " ".join(builder)
+        # already a query, but we still want the defaults if not specified
+        query_expr = expr_joined
+        if "top" not in query_expr.lower():
+            query_expr = "top 50 " + query_expr
+        if "recent" not in query_expr.lower():
+            query_expr = "recent " + query_expr
 
-    # execute query
-    try:
-        result = df.querex(expr_str)
-        _display_results(lib, result, table=table)
-    except Exception as e:
-        click.echo(f"[Query Error] {e}")
+    # Forward to q
+    ctx.invoke(q, expr=tuple(query_expr.split()), table=table)
 
 
 # ========================================================================================

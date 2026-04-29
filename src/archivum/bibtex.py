@@ -11,7 +11,6 @@ from pathlib import Path
 from textwrap import wrap
 from typing import Any, List
 import pandas as pd
-from rich.text import Text
 
 logger = logging.getLogger(__name__)
 
@@ -209,63 +208,6 @@ def dict_to_bibtex_crossref(data: Any) -> str:
         padding = " " * (max_len - len(k))
         lines.append(f"  {k}{padding} = {{{clean_val}}},")
     lines.append("}")
-
-    return "\n".join(lines)
-
-
-def format_biblio(df: pd.DataFrame) -> str:
-    """Print out a df, one entry per line, MLA/AP style."""
-    df_sorted = df.sort_values("tag")
-    lines = []
-    mx_tag = df_sorted.tag.str.len().max()
-    mx_tag = min(20, mx_tag + 1)
-    tag_str = f'{{x:<{mx_tag}s}}'
-    # wrapper = partial(wrap, width=80, subsequent_indent=' ' * (mx_tag + 11))
-    for _, row in df_sorted.iterrows():
-        # Clean fields
-        fields = {
-            col: str(row.get(col, "")).strip("{}") if pd.notna(row.get(col)) else ""
-            for col in ["author", "title", "journal", "publisher", "type"]
-        }
-
-        source = fields["journal"] or fields["publisher"]
-        # only three words of journal title
-        source = ' '.join([i for i in source.split( )[:4]])
-
-        # Use [i] for italics in Rich
-        source_str = f"[i]{source}[/i]" if source else ""
-        # Build the clickable link using Rich markup
-        # Syntax: [link=file:///path/to/file]hash[:6][/link]
-        short_hash = str(row["hash"])[:6]
-
-        if pd.notna(row.get("path")) and row["path"]:
-            path_uri = Path(row["path"]).resolve().as_uri()
-            clickable_hash = f"[link={path_uri}][blue]{short_hash}[/blue][/link]"
-        else:
-            clickable_hash = f'HH{short_hash}'
-
-        if fields['type'] == 'book':
-            type = '[red]bk[/red]'
-        else:
-            # keep spacing
-            type = '  '  # None
-
-        bits = []
-        bits.append(clickable_hash)
-        if type:
-            bits.append(type)
-        bits.append(f"\"{fields['title']}\"")
-        # bits.append(f"{fields['title'][:50]:<50s}")
-        if (fa := fields['author']) != '':
-            bits.append(f'[yellow]{fa}[/yellow]')
-        if source_str:
-            bits.append(source_str)
-        # better alignment of tags
-        # spcer = '' if row['tag'][-1] in list('abcdefgh') else ' '
-        # line = f"[{row['tag']}{spcer}] " + ', '.join(bits)
-        # line = '\n'.join(wrapper(tag_str.format(x=row['tag']) + ' '.join(bits)))
-        line = tag_str.format(x=row['tag']) + ' '.join(bits)
-        lines.append(line)
 
     return "\n".join(lines)
 
