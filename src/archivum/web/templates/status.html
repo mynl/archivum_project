@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Library Status</h2>
+
+<div class="status-grid">
+    <div class="status-label">Library Name</div>
+    <div>{{ status.name }}</div>
+
+    <div class="status-label">Configuration</div>
+    <div><code>{{ status.config_path }}</code></div>
+
+    <div class="status-label">Document Store</div>
+    <div><code>{{ status.doc_store }}</code></div>
+
+    <div class="status-label">References</div>
+    <div>{{ status.ref_count }}</div>
+
+    <div class="status-label">Documents</div>
+    <div>{{ status.doc_count }}</div>
+
+    <div class="status-label">Links (Ref-Doc)</div>
+    <div>{{ status.ref_doc_count }}</div>
+</div>
+
+<div style="margin-top: 2rem;">
+    <h3>Configuration Details</h3>
+    <pre style="background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto;">
+{{ lib.config.model_dump_json(indent=4) }}
+    </pre>
+</div>
+{% endblock %}

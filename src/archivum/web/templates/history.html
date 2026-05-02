@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2>Library History</h2>
+<p class="muted">History of imports and modifications based on audit files.</p>
+
+{% if history is not none and not history.empty %}
+<table>
+    <thead>
+        <tr>
+            {% for col in history.columns %}
+            <th>{{ col|capitalize }}</th>
+            {% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for _, row in history.iterrows() %}
+        <tr>
+            {% for col in history.columns %}
+            <td>{{ row[col] }}</td>
+            {% endfor %}
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>No history records found.</p>
+{% endif %}
+{% endblock %}

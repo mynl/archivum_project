@@ -441,6 +441,46 @@ def library_audit(verbose, execute):
         click.echo("OK: No orphaned text extracts.")
 
 
+@entry.command()
+@click.argument("lib_name", type=str, default="")
+@click.option("-p", "--port", default=5000, help="Port to run the server on.")
+@click.option("-b", "--browser/--no-browser", "open_browser", default=True, help="Open browser automatically.")
+@click.option("-d", "--debug", is_flag=True, help="Run in Flask debug mode.")
+def serve(lib_name, port, open_browser, debug):
+    """Launch the web interface."""
+    from .web import create_app
+    import webbrowser
+    from threading import Timer
+
+    # Logic to open the library, similar to 'uber'
+    if lib_name == "":
+        lib_name = DEFAULT_LIBRARY
+
+    try:
+        lib = Library(lib_name)
+        LibraryContext.set(lib)
+        lib.start_watcher()
+        click.echo(f"Serving library: {lib.name}")
+    except Exception as e:
+        click.error(f"Error opening library '{lib_name}': {e}")
+        return
+
+    app = create_app()
+    
+    url = f"http://127.0.0.1:{port}"
+    if open_browser:
+        # Give the server a moment to start before opening browser
+        Timer(1.5, lambda: webbrowser.open(url)).start()
+    
+    click.echo(f"Starting Archivum Web at {url}")
+    try:
+        # Disable reloader if not in debug to avoid issues with Library singleton
+        app.run(host="127.0.0.1", port=port, debug=debug, use_reloader=debug)
+    finally:
+        # Ensure watcher is stopped on exit
+        lib.stop_watcher()
+
+
 # ========================================================================================
 @entry.command()
 @click.option(

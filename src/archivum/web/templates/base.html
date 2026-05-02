@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Archivum | {{ lib.name if lib else 'No Library' }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="brand">
+                <span class="root">Archivum</span>
+                <span class="sep">➔</span>
+                <span class="library">{{ lib.name if lib else 'No Library' }}</span>
+            </div>
+            <div class="menu">
+                <a href="{{ url_for('main.index') }}" class="{{ 'active' if request.endpoint == 'main.index' }}">Query</a>
+                <a href="{{ url_for('main.status') }}" class="{{ 'active' if request.endpoint == 'main.status' }}">Status</a>
+                <a href="{{ url_for('main.history') }}" class="{{ 'active' if request.endpoint == 'main.history' }}">History</a>
+            </div>
+            <div class="sync-status" hx-get="{{ url_for('main.sync_check') }}" hx-trigger="every 10s" hx-swap="none">
+                <span class="indicator"></span>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            if (evt.detail.pathInfo.requestPath.includes('sync-check')) {
+                const indicator = document.querySelector('.indicator');
+                if (evt.detail.xhr.responseText === 'reload-needed') {
+                    indicator.classList.add('needs-reload');
+                    indicator.title = 'Library has changed and needs reload';
+                } else {
+                    indicator.classList.remove('needs-reload');
+                    indicator.title = 'Library is up to date';
+                }
+            }
+        });
+    </script>
+</body>
+</html>
