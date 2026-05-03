@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, send_file, abort
+from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context
 from ..cli import LibraryContext
 import pandas as pd
 from pathlib import Path
@@ -226,80 +226,13 @@ def rg_search():
     case_sensitive = request.args.get('case') == 'sensitive'
     glob1 = request.args.get('glob1', '').strip()
     glob2 = request.args.get('glob2', '').strip()
+    filter_mode = request.args.get('filter', 'tagged')
     
     lib = LibraryContext.get()
     if lib.is_empty:
         return "No library open."
 
-    # Build command manually for files mode to avoid --json/--stats from run_ripgrep
-    if show_files:
-        cmd = ['rg', '--files']
-        if glob1: cmd.extend(['-g', f'*{glob1}*.md'])
-        if glob2: cmd.extend(['-g', f'*{glob2}*.md'])
-        cmd.append(str(lib.text_dir_path))
-        
-        rg_cmd = f"{' '.join(cmd)}"
-        status_html = f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
-        
-        try:
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            stdout, stderr = proc.communicate()
-            stdout = stdout or ""
-            stderr = stderr or ""
-            
-            # Advanced metadata lookup - first 10 chars of hash
-            hash_prefix_to_meta = {}
-            if not lib.ref_doc_df.empty:
-                latest_links = lib.ref_doc_df.sort_values(['hash', 'version'], ascending=[True, False]).drop_duplicates('hash')
-                meta_df = latest_links.merge(lib.ref_df, on='tag', how='left')
-                for _, row in meta_df.iterrows():
-                    prefix = str(row.hash)[:10]
-                    hash_prefix_to_meta[prefix] = {
-                        'tag': row.tag,
-                        'title': str(row.get('title', '')).replace('{', '').replace('}', ''),
-                        'authors': trim_author(row.get('author', ''))
-                    }
-
-            files = []
-            for line in stdout.splitlines():
-                p = line.strip()
-                if not p: continue
-                h_prefix = Path(p).name[:10]
-                meta = hash_prefix_to_meta.get(h_prefix, {})
-                files.append({
-                    'hash': h_prefix,
-                    'tag': meta.get('tag'),
-                    'title': meta.get('title', h_prefix)
-                })
-            return f"{status_html}{render_template('components/rg_files.html', files=files)}"
-        except Exception as e:
-            return f"{status_html}<div class='error'>Ripgrep Error: {str(e)}</div>"
-
-    # Normal search or counts
-    args = []
-    if not case_sensitive:
-        args.append('-i')
-        
-    if show_counts:
-        # We still use --json because run_ripgrep forces it, but we'll parse 'end' events
-        pass
-    else:
-        args.extend(['-A', context_a, '-B', context_b])
-    
-    if glob1:
-        args.extend(['-g', f'*{glob1}*.md'])
-    if glob2:
-        args.extend(['-g', f'*{glob2}*.md'])
-    
-    rc, proc = lib.run_ripgrep(query, args)
-    # Reconstruct cmd for display
-    rg_cmd = f"rg --json --stats -C 1 -g *.md {' '.join(args)} \"{query}\" {lib.text_dir_full_name}"
-    status_html = f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
-
-    if rc != 0:
-        return f"{status_html}<p class='muted'>No matches found.</p>"
-    
-    # Advanced metadata lookup - first 10 chars of hash
+    # Cache metadata lookup once
     hash_prefix_to_meta = {}
     if not lib.ref_doc_df.empty:
         latest_links = lib.ref_doc_df.sort_values(['hash', 'version'], ascending=[True, False]).drop_duplicates('hash')
@@ -312,36 +245,136 @@ def rg_search():
                 'authors': trim_author(row.get('author', ''))
             }
 
-    if show_counts:
-        counts = {}
+    def generate_results():
+        logger.info(f"Starting rg_search generator for query: {query}, filter: {filter_mode}")
+        if show_files:
+            cmd = ['rg', '--files']
+            if glob1: cmd.extend(['-g', f'*{glob1}*.md'])
+            if glob2: cmd.extend(['-g', f'*{glob2}*.md'])
+            cmd.append(str(lib.text_dir_path))
+            rg_cmd = f"{' '.join(cmd)}"
+            yield f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
+            
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                files = []
+                for line in proc.stdout:
+                    p = line.strip()
+                    if not p: continue
+                    h_prefix = Path(p).name[:10]
+                    meta = hash_prefix_to_meta.get(h_prefix, {})
+                    
+                    if filter_mode == 'tagged' and not meta.get('tag'):
+                        continue
+
+                    files.append({
+                        'hash': h_prefix,
+                        'tag': meta.get('tag'),
+                        'title': meta.get('title', h_prefix)
+                    })
+                yield f"<div hx-swap-oob='innerHTML:#rg-results'>{render_template('components/rg_files.html', files=files)}</div>"
+            except Exception as e:
+                yield f"<div class='error' hx-swap-oob='beforeend:#rg-results'>Ripgrep Error: {str(e)}</div>"
+            return
+
+        # Normal search or counts
+        args = []
+        if not case_sensitive:
+            args.append('-i')
+        if not show_counts:
+            args.extend(['-A', context_a, '-B', context_b])
+        if glob1:
+            args.extend(['-g', f'*{glob1}*.md'])
+        if glob2:
+            args.extend(['-g', f'*{glob2}*.md'])
+        
+        rc, proc = lib.run_ripgrep(query, args)
+        rg_cmd = f"rg --json --line-buffered --stats -C 1 -g *.md {' '.join(args)} \"{query}\" {lib.text_dir_full_name}"
+        yield f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
+
+        if show_counts:
+            counts = {}
+            for line in proc.stdout:
+                try:
+                    event = json.loads(line)
+                    if event.get('type') == 'match':
+                        path_text = event['data'].get('path', {}).get('text', '')
+                        h_prefix = Path(path_text).name[:10]
+                        counts[h_prefix] = counts.get(h_prefix, 0) + 1
+                except: continue
+            
+            counts_list = []
+            for h_prefix, count_val in counts.items():
+                meta = hash_prefix_to_meta.get(h_prefix, {})
+                
+                if filter_mode == 'tagged' and not meta.get('tag'):
+                    continue
+
+                counts_list.append({
+                    'hash': h_prefix, 
+                    'count': count_val,
+                    'tag': meta.get('tag'),
+                    'title': meta.get('title', ''),
+                    'authors': meta.get('authors', '')
+                })
+            counts_list.sort(key=lambda x: x['count'], reverse=True)
+            yield f"<div hx-swap-oob='innerHTML:#rg-results'>{render_template('components/rg_counts.html', counts=counts_list)}</div>"
+            return
+
+        # Streaming Blocks for normal search
+        current_block = None
+        match_count = 0
         for line in proc.stdout:
             try:
                 event = json.loads(line)
-                # Count matches manually from JSON stream
-                if event.get('type') == 'match':
-                    data = event['data']
-                    path_text = data.get('path', {}).get('text', '')
+                etype = event.get('type')
+                if etype == 'begin':
+                    path_text = event['data'].get('path', {}).get('text')
                     h_prefix = Path(path_text).name[:10]
-                    counts[h_prefix] = counts.get(h_prefix, 0) + 1
-            except: continue
-        
-        counts_list = []
-        for h_prefix, count_val in counts.items():
-            meta = hash_prefix_to_meta.get(h_prefix, {})
-            counts_list.append({
-                'hash': h_prefix, 
-                'count': count_val,
-                'tag': meta.get('tag'),
-                'title': meta.get('title', ''),
-                'authors': meta.get('authors', '')
-            })
-        
-        # Sort by count descending
-        counts_list.sort(key=lambda x: x['count'], reverse=True)
-        return f"{status_html}{render_template('components/rg_counts.html', counts=counts_list)}"
+                    meta = hash_prefix_to_meta.get(h_prefix, {})
+                    
+                    if filter_mode == 'tagged' and not meta.get('tag'):
+                        current_block = None
+                        continue
 
-    results = parse_rg_json(proc, lib)
-    return f"{status_html}{render_template('components/rg_results.html', results=results)}"
+                    current_block = {
+                        'hash': h_prefix,
+                        'tag': meta.get('tag'),
+                        'title': meta.get('title', ''),
+                        'authors': meta.get('authors', ''),
+                        'lines': []
+                    }
+                elif etype in ['match', 'context'] and current_block:
+                    data = event['data']
+                    line_text = data.get('lines', {}).get('text', '')
+                    line_number = data.get('line_number')
+                    submatches = data.get('submatches', [])
+                    
+                    formatted_line = ""
+                    last_pos = 0
+                    for match in sorted(submatches, key=lambda x: x['start']):
+                        start, end = match['start'], match['end']
+                        formatted_line += html.escape(line_text[last_pos:start])
+                        formatted_line += f'<mark>{html.escape(line_text[start:end])}</mark>'
+                        last_pos = end
+                    formatted_line += html.escape(line_text[last_pos:])
+                    
+                    current_block['lines'].append({
+                        'type': event['type'],
+                        'number': line_number,
+                        'text': formatted_line
+                    })
+                elif etype == 'end' and current_block:
+                    match_count += 1
+                    # Yield the completed block OOB - appends to results
+                    yield f"<div hx-swap-oob='beforeend:#rg-results'>{render_template('components/rg_block.html', block=current_block)}</div>"
+                    current_block = None
+            except: continue
+
+        if match_count == 0:
+             yield f"<div hx-swap-oob='innerHTML:#rg-results'><p class='muted'>No matches found.</p></div>"
+
+    return Response(stream_with_context(generate_results()), mimetype='text/html')
 
 def get_path_for_hash(lib, h):
     if lib.is_empty: return None

@@ -143,8 +143,8 @@ main {
 
 .list-item {
     display: block;
-    padding: 2px 4px 2px 1.5rem;
-    text-indent: -1.5rem;
+    padding: 2px 4px 2px 3rem;
+    text-indent: -3rem;
     border-bottom: 1px solid #fafafa;
 }
 
@@ -165,7 +165,7 @@ main {
 
 .list-item .tag {
     display: inline-block;
-    width: 120px;
+    width: 140px;
     color: var(--primary-color);
 }
 
@@ -342,6 +342,8 @@ button {
     flex: 1;
     white-space: pre-wrap;
     word-break: break-all;
+    padding-left: 1.5rem;
+    text-indent: -1.5rem;
 }
 
 mark {

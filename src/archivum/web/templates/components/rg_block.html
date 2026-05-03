@@ -1,0 +1,20 @@
+<div class="rg-block">
+    <div class="rg-header">
+        {% if block.tag %}
+        <a href="{{ url_for('main.view', tag=block.tag) }}" class="tag" target="_blank">{{ block.tag }}</a>
+        <span class="title">{{ block.title }}</span>
+        <span class="authors">{{ block.authors }}</span>
+        {% else %}
+        <a href="{{ url_for('main.view_hash', h=block.hash) }}" class="tag" target="_blank">{{ block.hash }}</a>
+        <span class="title muted">[No Reference Tag]</span>
+        {% endif %}
+    </div>
+    <div class="rg-lines">
+        {% for line in block.lines %}
+        <div class="rg-line {{ line.type }}">
+            <span class="line-number">{{ line.number if line.number else '' }}</span>
+            <span class="line-text">{{ line.text|safe }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>

@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
+<script>
+    function clearResults() {
+        document.getElementById('rg-results').innerHTML = '';
+        document.getElementById('rg-status').style.display = 'none';
+    }
+</script>
+
 <div class="search-container" style="display: flex; gap: 0.5rem;">
     <input type="text" 
            id="rg-input" 
@@ -8,15 +15,19 @@
            placeholder="Full-text search (ripgrep)..." 
            hx-get="{{ url_for('main.rg_search') }}" 
            hx-trigger="keyup[key=='Enter']" 
-           hx-target="#rg-results" 
+           hx-target="#rg-stream-sink" 
+           hx-swap="innerHTML"
            hx-include="#rg-controls input"
            hx-indicator="#rg-indicator"
+           hx-on:click="clearResults()"
            style="flex-grow: 1;"
            autofocus>
     <button hx-get="{{ url_for('main.rg_search') }}" 
-            hx-target="#rg-results" 
+            hx-target="#rg-stream-sink" 
+            hx-swap="innerHTML"
             hx-include="#rg-input, #rg-controls input"
             hx-indicator="#rg-indicator"
+            hx-on:click="clearResults()"
             class="btn-primary">
         Execute
     </button>
@@ -25,9 +36,11 @@
 <div id="rg-controls" class="view-options" style="align-items: center; justify-content: flex-start; gap: 1.5rem;">
     <button hx-get="{{ url_for('main.rg_search') }}" 
             hx-vals='{"counts": "true"}' 
-            hx-target="#rg-results" 
+            hx-target="#rg-stream-sink" 
+            hx-swap="innerHTML"
             hx-include="#rg-input, #rg-controls input"
             hx-indicator="#rg-indicator"
+            hx-on:click="clearResults()"
             class="btn-small">Counts</button>
 
     <div style="display: flex; gap: 0.75rem; align-items: center;">
@@ -47,12 +60,19 @@
         
         <button hx-get="{{ url_for('main.rg_search') }}" 
                 hx-vals='{"files": "true"}' 
-                hx-target="#rg-results" 
-                hx-include="#rg-input, #rg-controls input"
+                hx-target="#rg-stream-sink" 
+                hx-swap="innerHTML"
+                hx-include="#rg-controls input"
                 hx-indicator="#rg-indicator"
+                hx-on:click="clearResults()"
                 class="btn-small">Files</button>
-    </div>
-</div>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <label><input type="radio" name="filter" value="tagged" checked> Tagged</label>
+        <label><input type="radio" name="filter" value="all"> All</label>
+        </div>
+        </div>
 
 <div id="rg-status" class="rg-info" style="margin-bottom: 1rem; display: none;">
     <!-- Last command will be displayed here -->
@@ -60,6 +80,10 @@
 
 <div id="rg-indicator" class="htmx-indicator rg-info">
     Running ripgrep...
+</div>
+
+<div id="rg-stream-sink" style="display: none;">
+    <!-- OOB chunks will be processed even if targeted here -->
 </div>
 
 <div id="rg-results">

@@ -936,6 +936,7 @@ class Library(LibraryBase):
         cmd = [
             "rg",
             "--json",
+            "--line-buffered",
             "--stats",
             "-C",
             "1",
