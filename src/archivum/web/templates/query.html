@@ -2,15 +2,18 @@
 
 {% block content %}
 <div class="search-container">
-    <input type="text" 
-           id="search-input" 
-           name="q" 
-           placeholder="Search references (f fuzzy, q querex)..." 
-           hx-get="{{ url_for('main.search') }}" 
-           hx-trigger="keyup changed delay:250ms" 
-           hx-target="#results" 
-           hx-include="[name='view_mode']:checked"
-           autofocus>
+    <div class="search-wrapper">
+        <input type="text" 
+               id="search-input" 
+               name="q" 
+               placeholder="Search references (tag, f query, q query)..." 
+               hx-get="{{ url_for('main.search') }}" 
+               hx-trigger="keyup changed delay:250ms" 
+               hx-target="#results" 
+               hx-include="[name='view_mode']:checked"
+               autofocus>
+        <i class="bi bi-x-circle clear-input" onclick="clearInput('search-input')"></i>
+    </div>
 </div>
 
 <div class="view-options d-flex align-items-center gap-4">
@@ -28,7 +31,7 @@
 
 <div id="results" class="mt-4">
     <!-- Results will be loaded here via HTMX -->
-    <p class="text-muted">Start typing to search (prefixes: 'q ' Querex, 'f ' Fuzzy)...</p>
+    <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
 </div>
 
 {% include "components/edit_modal.html" %}

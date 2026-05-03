@@ -86,6 +86,34 @@ archivum find-doc "\path\to\paper.pdf"
 
 ---
 
+## Web Interface
+
+Archivum includes a powerful web interface built with Flask, Bootstrap 5, and HTMX.
+
+### Key Features
+- **Real-time Search**: Instant filtering of references using fuzzy matching and `querex` expressions.
+- **Streaming Ripgrep**: Blazing fast full-text search that streams results to the browser as they are found. Supports complex filters like context lines, case sensitivity, and glob patterns.
+- **BibTeX Editor**: A dedicated master-detail interface for managing metadata. Includes live tag filtering and keyboard-driven navigation (Up/Down to select, Enter to load).
+- **Responsive Design**: Fully mobile-ready with a collapsible sidebar and reflowing control bars.
+- **Search History**: Terminal-style query recall using Up/Down arrows in all search boxes.
+- **Library Status**: Deep visibility into database integrity and file synchronization.
+
+### Usage
+Launch the web interface from the terminal:
+```powershell
+archivum serve
+```
+By default, this serves the library at `http://127.0.0.1:9124`. Use the `--browser` (or `-b`) flag to open it automatically.
+
+### Architecture
+The web layer is designed for high performance and low overhead:
+- **HTMX Integration**: Most interactions are handled via HTMX, providing a "Single Page App" feel without the complexity of a heavy frontend framework.
+- **Response Streaming**: The Ripgrep engine uses HTTP chunked transfer encoding and HTMX OOB (Out-of-Band) swaps to provide immediate visual feedback during long-running searches.
+- **Bootstrap 5**: Provides the structural grid and responsive components, customized for a high-density, professional look.
+- **Local Storage**: Search history is persisted in the browser's local storage for a consistent user experience across reloads.
+
+---
+
 ## Architecture & Data Model
 
 Archivum is built on a content-addressable model where file identity is king.

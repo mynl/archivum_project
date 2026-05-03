@@ -1,32 +1,125 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2>Library Status</h2>
-
-<div class="status-grid">
-    <div class="status-label">Library Name</div>
-    <div>{{ status.name }}</div>
-
-    <div class="status-label">Configuration</div>
-    <div><code>{{ status.config_path }}</code></div>
-
-    <div class="status-label">Document Store</div>
-    <div><code>{{ status.doc_store }}</code></div>
-
-    <div class="status-label">References</div>
-    <div>{{ status.ref_count }}</div>
-
-    <div class="status-label">Documents</div>
-    <div>{{ status.doc_count }}</div>
-
-    <div class="status-label">Links (Ref-Doc)</div>
-    <div>{{ status.ref_doc_count }}</div>
+<div class="row">
+    <div class="col-12 mb-4">
+        <h2 class="fw-bold">Library Status</h2>
+        <hr>
+    </div>
 </div>
 
-<div style="margin-top: 2rem;">
-    <h3>Configuration Details</h3>
-    <pre style="background: #f4f4f4; padding: 1rem; border-radius: 4px; overflow-x: auto;">
-{{ lib.config.model_dump_json(indent=4) }}
-    </pre>
+<div class="row">
+    <div class="col-lg-6">
+        <h5 class="text-muted small fw-bold text-uppercase mb-3">General Information</h5>
+        <div class="card shadow-sm border-0 mb-4">
+            <div class="card-body p-0">
+                <table class="table table-borderless mb-0">
+                    <tbody>
+                        <tr>
+                            <td class="ps-4 py-3 fw-bold text-muted small" style="width: 200px;">Library Name</td>
+                            <td class="py-3 fw-bold">{{ status.name }}</td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3 fw-bold text-muted small">Status</td>
+                            <td class="py-3">
+                                {% if status.needs_reload %}
+                                <span class="badge bg-warning text-dark px-3 py-2"><i class="bi bi-exclamation-triangle-fill me-2"></i> Reload Needed</span>
+                                {% else %}
+                                <span class="badge bg-success px-3 py-2"><i class="bi bi-check-circle-fill me-2"></i> Synchronized</span>
+                                {% endif %}
+                                
+                                {% if status.watcher_active %}
+                                <span class="badge bg-info text-dark ms-2 px-3 py-2"><i class="bi bi-eye-fill me-2"></i> Watcher Active</span>
+                                {% else %}
+                                <span class="badge bg-secondary ms-2 px-3 py-2">Watcher Inactive</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3 fw-bold text-muted small">Path</td>
+                            <td class="py-3"><code class="text-primary">{{ status.config_path }}</code></td>
+                        </tr>
+                        <tr>
+                            <td class="ps-4 py-3 fw-bold text-muted small">Document Store</td>
+                            <td class="py-3"><code class="text-secondary">{{ status.doc_store }}</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <h5 class="text-muted small fw-bold text-uppercase mb-3">Library Contents</h5>
+        <div class="row g-3">
+            <div class="col-sm-4">
+                <div class="card border-0 shadow-sm text-center py-3">
+                    <div class="h2 fw-bold mb-0">{{ status.ref_count }}</div>
+                    <div class="small text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">References</div>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <div class="card border-0 shadow-sm text-center py-3">
+                    <div class="h2 fw-bold mb-0">{{ status.doc_count }}</div>
+                    <div class="small text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Documents</div>
+                </div>
+            </div>
+            <div class="col-sm-4">
+                <div class="card border-0 shadow-sm text-center py-3">
+                    <div class="h2 fw-bold mb-0">{{ status.ref_doc_count }}</div>
+                    <div class="small text-muted text-uppercase fw-bold" style="font-size: 0.7rem;">Links</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-4">
+    <div class="col-12">
+        <h5 class="text-muted small fw-bold text-uppercase mb-3">Underlying Feather Files</h5>
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead class="bg-light">
+                        <tr>
+                            <th class="ps-4 py-3 border-0">File</th>
+                            <th class="py-3 border-0">Disk MTime</th>
+                            <th class="py-3 border-0">Last Sync</th>
+                            <th class="pe-4 py-3 border-0 text-end">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for f in status.files %}
+                        <tr>
+                            <td class="ps-4 py-3 font-monospace small fw-bold">{{ f.File }}</td>
+                            <td class="py-3 small">{{ f['Disk MTime'] }}</td>
+                            <td class="py-3 small">{{ f['Last Sync'] }}</td>
+                            <td class="pe-4 py-3 text-end">
+                                {% if f.Status == 'MATCH' %}
+                                <span class="badge rounded-pill bg-success-subtle text-success border border-success-subtle px-3">MATCH</span>
+                                {% elif f.Status == 'MISSING' %}
+                                <span class="badge rounded-pill bg-danger-subtle text-danger border border-danger-subtle px-3">MISSING</span>
+                                {% else %}
+                                <span class="badge rounded-pill bg-warning-subtle text-warning border border-warning-subtle px-3">OUT OF SYNC</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-12">
+        <h5 class="text-muted small fw-bold text-uppercase mb-3">Configuration JSON</h5>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0">
+                <pre class="mb-0 p-4 font-monospace small bg-dark text-light rounded-bottom" style="max-height: 400px; overflow-y: auto;">{{ lib.config.model_dump_json(indent=4) }}</pre>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}

@@ -6,7 +6,23 @@
     --active-bg: #e9ecef;
 }
 
-/* Big Search Input Styles (restored and improved) */
+/* 1. Header & Branding - Narrower, No Whitespace */
+header {
+    background-color: #fff;
+}
+
+.navbar {
+    min-height: 60px;
+}
+
+/* Remove extra whitespace around logo */
+header img {
+    margin-top: -5px;
+    margin-bottom: -5px;
+    display: block;
+}
+
+/* 2. Big Search Inputs (consistent with previous high-impact design) */
 #search-input, #rg-input {
     width: 100%;
     padding: 1rem 1.5rem;
@@ -27,34 +43,17 @@
     margin-bottom: 2rem;
 }
 
-/* Custom Overrides & UI Polish */
+/* 3. Navigation Styling */
+.nav-pills .nav-link {
+    transition: all 0.2s;
+}
+
 .nav-pills .nav-link.active {
     background-color: var(--bg-color);
     color: var(--primary-color) !important;
 }
 
-.indicator {
-    display: inline-block;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background-color: #198754;
-    border: 2px solid white;
-    box-shadow: 0 0 0 1px #ccc;
-}
-
-.indicator.needs-reload {
-    background-color: #ffc107;
-    animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-    0% { transform: scale(0.9); opacity: 0.7; }
-    70% { transform: scale(1.2); opacity: 1; }
-    100% { transform: scale(0.9); opacity: 0.7; }
-}
-
-/* Dense List Styling */
+/* 4. Dense List Styling (with improved wrapping) */
 .dense-list {
     font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 0.85rem;
@@ -89,10 +88,10 @@
     margin-right: 0.6rem;
 }
 
-/* Ripgrep Specifics */
+/* 5. Ripgrep Specifics */
 .view-options {
     background-color: #f8f9fa;
-    padding: 1rem;
+    padding: 0.75rem 1rem;
     border-radius: 8px;
     border: 1px solid #dee2e6;
     margin-bottom: 1.5rem;
@@ -138,8 +137,8 @@
     flex: 1;
     white-space: pre-wrap;
     word-break: break-word;
-    padding-left: 2rem;
-    text-indent: -2rem;
+    padding-left: 1.5rem;
+    text-indent: -1.5rem;
 }
 
 mark {
@@ -148,31 +147,38 @@ mark {
     padding: 0 2px;
 }
 
-/* Status Grid */
-.status-grid {
-    display: grid;
-    grid-template-columns: 200px 1fr;
-    gap: 1rem;
-    background-color: #fff;
-    padding: 1.5rem;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
+/* 6. Utility Components */
+.indicator {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #198754;
+    border: 2px solid white;
+    box-shadow: 0 0 0 1px #ccc;
 }
 
-.status-label {
-    font-weight: bold;
-    color: #6c757d;
+.indicator.needs-reload {
+    background-color: #ffc107;
+    animation: pulse 2s infinite;
 }
 
-/* Utility */
-.btn-small {
-    padding: 0.25rem 0.75rem;
-    font-size: 0.85rem;
+@keyframes pulse {
+    0% { transform: scale(0.9); opacity: 0.7; }
+    70% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.9); opacity: 0.7; }
 }
 
+.hover-opacity-100:hover {
+    opacity: 1 !important;
+}
+
+/* 7. Responsive Adjustments */
 @media (max-width: 992px) {
-    .view-options .row > div {
-        margin-bottom: 0.5rem;
+    .navbar-collapse {
+        margin-top: 1rem;
+        border-top: 1px solid #eee;
+        padding-top: 1rem;
     }
 }
 

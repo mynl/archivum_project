@@ -1,45 +1,169 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row">
-    <div class="col-md-4 border-end">
-        <h5 class="mb-3 text-muted small fw-bold text-uppercase">Select Reference</h5>
-        <div class="position-relative mb-4">
-            <input type="text" 
-                   id="tag-search" 
-                   name="q" 
-                   value="{{ initial_tag }}"
-                   placeholder="Type tag to edit..." 
-                   class="form-control form-control-lg border-2"
-                   hx-get="{{ url_for('main.tag_suggest') }}" 
-                   hx-trigger="keyup changed delay:100ms" 
-                   hx-target="#tag-suggestions"
-                   autocomplete="off">
-            <div id="tag-suggestions" class="list-group position-absolute w-100 shadow-sm z-3" style="margin-top: 2px;"></div>
+<div class="row g-0 border rounded shadow-sm bg-white overflow-hidden" style="height: calc(100vh - 100px);">
+    <!-- Left Sidebar: Tag List -->
+    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100">
+        <div class="p-3 border-bottom bg-light">
+            <h6 class="mb-3 text-muted small fw-bold text-uppercase">Reference Tags</h6>
+            <div class="search-wrapper">
+                <input type="text" 
+                       id="tag-filter" 
+                       placeholder="Filter tags..." 
+                       class="form-control form-control-sm border-2"
+                       onkeyup="filterTags(event)"
+                       autocomplete="off">
+                <i class="bi bi-x-circle clear-input" style="font-size: 0.8rem; right: 10px;" onclick="clearFilter()"></i>
+            </div>
+            <div class="mt-2 text-muted" style="font-size: 0.7rem;">
+                <i class="bi bi-keyboard me-1"></i> Use <b>↑/↓</b> to navigate, <b>Enter</b> to load.
+            </div>
         </div>
-        <div id="edit-history" class="small text-muted">
-            <p>Recent tags will appear here.</p>
+        
+        <div id="tag-list" class="list-group list-group-flush overflow-auto flex-grow-1">
+            {% for tag in lib.all_tags %}
+            <button type="button" 
+                    class="tag-item list-group-item list-group-item-action py-2 border-0 small font-monospace" 
+                    data-tag="{{ tag|lower }}"
+                    hx-get="{{ url_for('main.edit_tag', tag=tag) }}" 
+                    hx-target="#editor-container"
+                    hx-trigger="click"
+                    onclick="setActiveTag(this)">
+                {{ tag }}
+            </button>
+            {% endfor %}
         </div>
     </div>
     
-    <div class="col-md-8 px-5">
-        <div id="editor-container" 
+    <!-- Right Panel: Editor -->
+    <div class="col-md-8 col-lg-9 d-flex flex-column h-100 bg-light-subtle">
+        <div id="editor-container" class="p-0 flex-grow-1 overflow-auto"
              {% if initial_tag %} 
              hx-get="{{ url_for('main.edit_tag', tag=initial_tag) }}" 
              hx-trigger="load" 
              {% endif %}>
-            <div class="text-center py-5">
-                <p class="text-muted">Search for a tag on the left to start editing.</p>
+            <div class="text-center py-5 mt-5">
+                <div class="mb-4 text-muted opacity-25">
+                    <i class="bi bi-pencil-square" style="font-size: 6rem;"></i>
+                </div>
+                <h4 class="text-muted fw-light">No Reference Selected</h4>
+                <p class="text-muted">Search and select a tag from the sidebar to edit.</p>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    document.body.addEventListener('click', function(evt) {
-        if (!evt.target.closest('#tag-search') && !evt.target.closest('#tag-suggestions')) {
-            document.getElementById('tag-suggestions').innerHTML = '';
+    let selectedIndex = -1;
+
+    function filterTags(event) {
+        // Handle keyboard navigation
+        if (event.key === 'ArrowDown') {
+            navigateList(1);
+            return;
+        } else if (event.key === 'ArrowUp') {
+            navigateList(-1);
+            return;
+        } else if (event.key === 'Enter') {
+            const visible = getVisibleItems();
+            if (selectedIndex >= 0 && selectedIndex < visible.length) {
+                visible[selectedIndex].click();
+            }
+            return;
+        }
+
+        const input = document.getElementById('tag-filter');
+        const filter = input.value.toLowerCase();
+        const items = document.querySelectorAll('.tag-item');
+        
+        items.forEach(item => {
+            const tag = item.getAttribute('data-tag');
+            if (tag.includes(filter)) {
+                item.classList.remove('d-none');
+            } else {
+                item.classList.add('d-none');
+            }
+        });
+        
+        // Reset selection on filter change
+        selectedIndex = -1;
+        document.querySelectorAll('.tag-item').forEach(el => el.classList.remove('bg-primary-subtle'));
+    }
+
+    function getVisibleItems() {
+        return Array.from(document.querySelectorAll('.tag-item:not(.d-none)'));
+    }
+
+    function navigateList(direction) {
+        const visible = getVisibleItems();
+        if (visible.length === 0) return;
+
+        if (selectedIndex >= 0) {
+            visible[selectedIndex].classList.remove('bg-primary-subtle');
+        }
+
+        selectedIndex += direction;
+        if (selectedIndex < 0) selectedIndex = visible.length - 1;
+        if (selectedIndex >= visible.length) selectedIndex = 0;
+
+        const active = visible[selectedIndex];
+        active.classList.add('bg-primary-subtle');
+        active.scrollIntoView({ block: 'nearest' });
+    }
+
+    function clearFilter() {
+        const input = document.getElementById('tag-filter');
+        input.value = '';
+        filterTags({ key: '' });
+        input.focus();
+    }
+
+    function setActiveTag(element) {
+        document.querySelectorAll('.tag-item').forEach(el => el.classList.remove('active', 'fw-bold', 'bg-primary-subtle'));
+        element.classList.add('active', 'fw-bold');
+    }
+
+    // Auto-scroll to initial tag if provided
+    window.addEventListener('load', () => {
+        const initial = "{{ initial_tag }}";
+        if (initial) {
+            const el = document.querySelector(`.tag-item[data-tag="${initial.toLowerCase()}"]`);
+            if (el) {
+                setTimeout(() => {
+                    el.scrollIntoView({ block: 'center' });
+                    setActiveTag(el);
+                }, 100);
+            }
         }
     });
 </script>
+
+<style>
+    .tag-item {
+        transition: background-color 0.05s ease;
+        font-size: 0.82rem;
+        min-height: 1.5rem;
+        flex-shrink: 0;
+        display: block;
+        padding: 0.15rem 0.6rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        border-bottom: 1px solid #f9f9f8;
+    }
+    .tag-item.active {
+        background-color: var(--primary-color) !important;
+        color: white !important;
+    }
+    .bg-primary-subtle {
+        background-color: #e7f1ff !important;
+    }
+    #tag-list::-webkit-scrollbar {
+        width: 5px;
+    }
+    #tag-list::-webkit-scrollbar-thumb {
+        background: #ccc;
+        border-radius: 10px;
+    }
+</style>
 {% endblock %}

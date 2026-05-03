@@ -1,10 +1,8 @@
 {% if matches %}
 {% for tag in matches %}
 <button type="button" 
-        class="list-group-item list-group-item-action" 
-        hx-get="{{ url_for('main.edit_tag', tag=tag) }}" 
-        hx-target="#editor-container"
-        onclick="document.getElementById('tag-suggestions').innerHTML = ''; document.getElementById('tag-search').value = '{{ tag }}';">
+        class="list-group-item list-group-item-action py-2" 
+        onclick="document.getElementById('tag-search').value = '{{ tag }}'; document.getElementById('tag-suggestions').innerHTML = ''; document.getElementById('load-tag-btn').click();">
     {{ tag }}
 </button>
 {% endfor %}
