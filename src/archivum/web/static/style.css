@@ -20,7 +20,7 @@ body {
 header {
     background-color: var(--header-bg);
     border-bottom: 1px solid var(--border-color);
-    padding: 0.5rem 1rem;
+    padding: 1rem;
     position: sticky;
     top: 0;
     z-index: 1000;
@@ -31,32 +31,43 @@ nav {
     align-items: center;
     max-width: 1200px;
     margin: 0 auto;
+    gap: 1rem;
 }
 
 .brand {
-    font-weight: bold;
-    margin-right: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
 }
 
-.brand .root {
-    color: var(--muted-color);
+.brand .logo {
+    height: 100px;
+    width: auto;
 }
 
-.brand .sep {
-    margin: 0 0.5rem;
+.brand .library {
+    font-size: 1.2rem;
+}
+
+.menu-sep {
     color: #ccc;
+    font-size: 1.5rem;
+    margin: 0 0.5rem;
 }
 
 .menu {
     display: flex;
-    gap: 1.5rem;
+    gap: 1rem;
+    background-color: #f1f3f5;
+    padding: 0.4rem;
+    border-radius: 6px;
 }
 
 .menu a {
     text-decoration: none;
     color: var(--text-color);
     font-weight: 500;
-    padding: 0.25rem 0.5rem;
+    padding: 0.4rem 0.8rem;
     border-radius: 4px;
 }
 
@@ -65,9 +76,9 @@ nav {
 }
 
 .menu a.active {
+    background-color: var(--bg-color);
     color: var(--primary-color);
-    border-bottom: 2px solid var(--primary-color);
-    border-radius: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 .sync-status {
@@ -99,31 +110,27 @@ main {
     padding: 0 1rem;
 }
 
-/* Search Bar */
+/* Search Bar - Unified */
 .search-container {
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
     display: flex;
     gap: 1rem;
 }
 
-#search-input {
+#search-input, #rg-input, #cmd-input {
     flex-grow: 1;
     padding: 0.75rem 1rem;
     font-size: 1.1rem;
     border: 1px solid #ccc;
     border-radius: 4px;
     outline: none;
+    box-sizing: border-box;
+    width: 100%;
 }
 
-#search-input:focus {
+#search-input:focus, #rg-input:focus, #cmd-input:focus {
     border-color: var(--primary-color);
     box-shadow: 0 0 0 2px rgba(0, 86, 179, 0.1);
-}
-
-.search-type {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
 }
 
 /* List Style (CLI-like) */
@@ -136,13 +143,13 @@ main {
 
 .list-item {
     display: block;
-    padding: 2px 4px 2px 1.5rem; /* Reduced indent padding */
-    text-indent: -1.5rem; /* pull first line back */
+    padding: 2px 4px 2px 1.5rem;
+    text-indent: -1.5rem;
     border-bottom: 1px solid #fafafa;
 }
 
 .list-item.book-row {
-    background-color: #fff9f9; /* Slightly stronger red tint */
+    background-color: #fffafa;
 }
 
 .list-item:hover {
@@ -152,7 +159,7 @@ main {
 .list-item > * {
     display: inline;
     text-indent: 0;
-    margin-right: 0.35rem; /* Tighter gaps */
+    margin-right: 0.35rem;
     white-space: normal;
 }
 
@@ -163,7 +170,7 @@ main {
 }
 
 .list-item .type-tag {
-    color: #e03131; /* Stronger red */
+    color: #e03131;
     font-weight: 800;
     margin-right: 0.2rem;
     font-size: 0.75rem;
@@ -179,14 +186,20 @@ main {
 
 .list-item .title.bold {
     font-weight: bold;
+    color: #000 !important; /* Force black for contrast */
+}
+
+.list-item.book-row .title {
+    font-weight: bold;
+    color: #000;
 }
 
 .list-item .author {
-    color: #555;
+    color: var(--muted-color);
 }
 
 .list-item .journal {
-    color: #666;
+    color: var(--muted-color);
     font-size: 0.75rem;
 }
 
@@ -197,6 +210,14 @@ main {
     font-size: 0.8rem;
     color: var(--muted-color);
     margin-bottom: 0.5rem;
+}
+
+/* Tables */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+    font-size: 0.85rem;
 }
 
 th {
@@ -214,23 +235,41 @@ td {
     border-bottom: 1px solid var(--border-color);
 }
 
-tr:hover {
-    background-color: #fcfcfc;
+tr.book-row {
+    background-color: #fffafa;
 }
 
-.tag {
-    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
-    color: var(--primary-color);
-    text-decoration: none;
+/* Buttons */
+button {
+    cursor: pointer;
+    font-family: inherit;
 }
 
-.tag:hover {
-    text-decoration: underline;
+.btn-primary {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    font-weight: bold;
 }
 
-.year {
-    color: var(--muted-color);
-    font-family: monospace;
+.btn-primary:hover {
+    filter: brightness(1.1);
+}
+
+.btn-small {
+    padding: 0.2rem 0.6rem;
+    font-size: 0.8rem;
+    background-color: #f8f9fa;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    color: var(--text-color);
+}
+
+.btn-small:hover {
+    background-color: #e9ecef;
+    border-color: #bbb;
 }
 
 .error {
@@ -240,6 +279,98 @@ tr:hover {
     border: 1px solid #f5c6cb;
     border-radius: 4px;
     margin: 1rem 0;
+}
+
+/* Ripgrep Results */
+.rg-results {
+    margin-top: 1rem;
+}
+
+.rg-block {
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.rg-header {
+    background-color: var(--header-bg);
+    padding: 0.4rem 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.85rem;
+    display: flex;
+    gap: 1rem;
+    align-items: baseline;
+    flex-wrap: wrap;
+}
+
+.rg-header .title {
+    font-weight: bold;
+    color: #000;
+}
+
+.rg-header .authors {
+    color: var(--muted-color);
+    font-size: 0.8rem;
+}
+
+.rg-lines {
+    padding: 0.5rem 0;
+    font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    line-height: 1.3;
+}
+
+.rg-line {
+    display: flex;
+    gap: 1rem;
+    padding: 0.1rem 0.75rem;
+}
+
+.rg-line.context {
+    opacity: 0.6;
+}
+
+.rg-line .line-number {
+    flex: 0 0 40px;
+    text-align: right;
+    color: var(--muted-color);
+    user-select: none;
+}
+
+.rg-line .line-text {
+    flex: 1;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+mark {
+    background-color: #ffec99;
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+.rg-info {
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background-color: #f0f4f8;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--muted-color);
+}
+
+.htmx-indicator {
+    display: none;
+}
+
+.htmx-request .htmx-indicator {
+    display: inline-block;
+}
+
+.htmx-request.htmx-indicator {
+    display: inline-block;
 }
 
 /* Status & History */

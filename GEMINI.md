@@ -69,19 +69,31 @@ Archivum is a personal document and reference management system (similar to Mend
     - Integrated search and document opening.
     - History and status reporting.
 
-### 4. Document Processing & Metadata Discovery
+### 4. Web Interface
+- **Framework**: Built with `Flask` and `HTMX`-style dynamic updates.
+- **Entry Point**: `src/archivum/web/app.py` (launched via `archivum serve`).
+- **Features**:
+    - **Search**: Interactive `querexfuzz` search interface with live results.
+    - **Ripgrep Integration**: Full-text search across the document library with highlighted snippets and context.
+    - **Document Viewer**: Integrated PDF viewer for directly opening documents from the browser.
+    - **Command Execution**: Limited execution of CLI commands via a web-based terminal emulator.
+    - **Status & History**: Real-time view of library statistics and command history.
+
+### 5. Document Processing & Metadata Discovery
 - **Metadata Extraction (`Document` class)**: Located in `src/archivum/document.py`. It uses a Gather -> Rank -> Verify strategy:
     - **Gather**: Collects info from filenames, PDF metadata (MuPDF), and visual OCR (finding the largest font for titles).
     - **Enhance**: Performs lookups against external APIs (Crossref, Arxiv).
     - **Verify**: Reconciles multiple sources to produce high-confidence bibliographic data.
 - **Full-text Search**: Extracts text from PDFs (via `pdftotext` or `pymupdf`) and provides a search interface using `ripgrep` (`rg` command).
 
-### 5. Key Modules
+### 6. Key Modules
 | Module | Description |
 | :--- | :--- |
 | `library.py` | Core data management, DataFrame handling, and persistence. |
 | `cli.py` | Command-line interface and interactive Uber Shell. |
+| `web/` | Flask-based web interface (routes, templates, and app factory). |
 | `document.py` | PDF processing, metadata discovery, and text extraction. |
+| `gui.py` | Tkinter-based metadata editor. |
 | `reference.py` | Data structure for bibliographic entries. |
 | `config.py` | Pydantic-based configuration management. |
 | `import_bibtex.py` | Logic for incremental imports from `.bib` files. |
@@ -91,6 +103,7 @@ Archivum is a personal document and reference management system (similar to Mend
 ## Dependencies
 - **Data**: `pandas`, `pyarrow` (feather).
 - **CLI/UI**: `click`, `prompt_toolkit`, `rich`, `uber_shell`.
+- **Web**: `flask`, `jinja2`.
 - **PDF/Metadata**: `pymupdf` (fitz), `nameparser`, `rapidfuzz`.
 - **Search**: `ripgrep` (external dependency).
 - **Core Utils**: `pydantic`, `pyyaml`, `pendulum`, `lark`.
@@ -98,8 +111,8 @@ Archivum is a personal document and reference management system (similar to Mend
 ## Workflow
 1. **Create/Open**: Use `create` or `open` to set the active library.
 2. **Import**: Bring in new docs via `import-bibtex` or `import-doc`.
-3. **Query**: Use the `query` command or `uber` shell to find documents.
-4. **Open**: Documents can be opened directly from the CLI/REPL using their `tag` or `title`.
+3. **Query**: Use the `query` command, `uber` shell, or `serve` (web interface) to find documents.
+4. **Open**: Documents can be opened directly from the CLI/REPL or viewed in the Web Interface.
 5. **Sync**: Changes are saved back to `.feather` files and the `.bib` file.
 
 ## Design Philosophy

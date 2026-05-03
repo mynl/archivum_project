@@ -4,7 +4,6 @@
     <thead>
         <tr>
             <th>Tag</th>
-            <th>Year</th>
             <th>Author</th>
             <th>Title</th>
             <th>Source</th>
@@ -16,7 +15,6 @@
             <td>
                 <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag" target="_blank">{{ row.tag }}</a>
             </td>
-            <td class="year">{{ row.year_display }}</td>
             <td class="author">{{ row.author_display }}</td>
             <td class="title {{ 'bold' if row.is_book else '' }}">{{ row.title_display }}</td>
             <td class="journal">{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</td>
@@ -29,7 +27,6 @@
     {% for _, row in results.iterrows() %}
     <div class="list-item {{ 'book-row' if row.is_book else '' }}">
         <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag" target="_blank">{{ row.tag }}</a>
-        <span class="type-tag">{{ 'bk' if row.is_book else '' }}</span>
         <span class="year">{{ row.year_display }}</span>
         <span class="title {{ 'bold' if row.is_book else '' }}">"{{ row.title_display }}"</span>
         <span class="author">{{ row.author_display }}</span>

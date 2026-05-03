@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="search-container" style="display: flex; gap: 0.5rem;">
+    <input type="text" 
+           id="rg-input" 
+           name="q" 
+           placeholder="Full-text search (ripgrep)..." 
+           hx-get="{{ url_for('main.rg_search') }}" 
+           hx-trigger="keyup[key=='Enter']" 
+           hx-target="#rg-results" 
+           hx-include="#rg-controls input"
+           hx-indicator="#rg-indicator"
+           style="flex-grow: 1;"
+           autofocus>
+    <button hx-get="{{ url_for('main.rg_search') }}" 
+            hx-target="#rg-results" 
+            hx-include="#rg-input, #rg-controls input"
+            hx-indicator="#rg-indicator"
+            class="btn-primary">
+        Execute
+    </button>
+</div>
+
+<div id="rg-controls" class="view-options" style="align-items: center; justify-content: flex-start; gap: 1.5rem;">
+    <button hx-get="{{ url_for('main.rg_search') }}" 
+            hx-vals='{"counts": "true"}' 
+            hx-target="#rg-results" 
+            hx-include="#rg-input, #rg-controls input"
+            hx-indicator="#rg-indicator"
+            class="btn-small">Counts</button>
+
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <label title="Context lines before match">B: <input type="number" name="before" value="0" min="0" max="10" style="width: 45px;"></label>
+        <label title="Context lines after match">A: <input type="number" name="after" value="0" min="0" max="10" style="width: 45px;"></label>
+    </div>
+
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        <label><input type="radio" name="case" value="ignore" checked> Ignore Case</label>
+        <label><input type="radio" name="case" value="sensitive"> Sensitive</label>
+    </div>
+
+    <div style="display: flex; gap: 0.5rem; align-items: center;">
+        <span>Globs:</span>
+        <input type="text" name="glob1" placeholder="Pattern 1" style="width: 100px; font-size: 0.8rem; padding: 2px 5px;">
+        <input type="text" name="glob2" placeholder="Pattern 2" style="width: 100px; font-size: 0.8rem; padding: 2px 5px;">
+        
+        <button hx-get="{{ url_for('main.rg_search') }}" 
+                hx-vals='{"files": "true"}' 
+                hx-target="#rg-results" 
+                hx-include="#rg-input, #rg-controls input"
+                hx-indicator="#rg-indicator"
+                class="btn-small">Files</button>
+    </div>
+</div>
+
+<div id="rg-status" class="rg-info" style="margin-bottom: 1rem; display: none;">
+    <!-- Last command will be displayed here -->
+</div>
+
+<div id="rg-indicator" class="htmx-indicator rg-info">
+    Running ripgrep...
+</div>
+
+<div id="rg-results">
+    <p class="muted">Press Enter or click Execute to search document text...</p>
+</div>
+{% endblock %}

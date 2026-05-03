@@ -1,0 +1,20 @@
+{% if counts %}
+<div class="dense-list">
+    {% for item in counts %}
+    <div class="list-item">
+        <span class="count-badge" style="display: inline-block; min-width: 2rem; background: #eee; text-align: center; border-radius: 4px; padding: 0 4px; font-size: 0.8rem; margin-right: 0.5rem;">{{ item.count }}</span>
+        <a href="{{ url_for('main.view_hash', h=item.hash) }}" class="tag" target="_blank">{{ item.hash }}</a>
+        {% if item.tag %}
+            <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag" target="_blank">{{ item.tag }}</a>
+        {% else %}
+            <span class="muted">[No Tag]</span>
+        {% endif %}
+        <span class="title">"{{ item.title }}"</span>
+        <span class="author muted" style="font-size: 0.9rem;">{{ item.authors }}</span>
+    </div>
+    {% endfor %}
+</div>
+<p class="muted" style="margin-top: 1rem; font-size: 0.8rem;">{{ counts|length }} documents matched.</p>
+{% else %}
+<p class="muted">No matches found.</p>
+{% endif %}

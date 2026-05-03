@@ -1,0 +1,18 @@
+{% if files %}
+<div class="dense-list">
+    {% for item in files %}
+    <div class="list-item">
+        <a href="{{ url_for('main.view_hash', h=item.hash) }}" class="tag" target="_blank">{{ item.hash[:12] }}</a>
+        {% if item.tag %}
+            <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag" target="_blank">{{ item.tag }}</a>
+        {% else %}
+            <span class="muted">[No Tag]</span>
+        {% endif %}
+        <span class="title">"{{ item.title }}"</span>
+    </div>
+    {% endfor %}
+</div>
+<p class="muted" style="margin-top: 1rem; font-size: 0.8rem;">{{ files|length }} files matching globs.</p>
+{% else %}
+<p class="muted">No files matched the glob patterns.</p>
+{% endif %}

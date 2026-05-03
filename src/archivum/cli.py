@@ -45,7 +45,7 @@ from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
 from .library import Library
 from .document import Document  # type: ignore[import-untyped]
-from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, GLOBAL_CONFIG
 from .utilities import make_qd
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
@@ -98,7 +98,21 @@ class LibraryContext:
     @classmethod
     def get(cls):  # noqa
         if cls.current is None:
-            return cls.no_library
+            lib_name = os.environ.get('ARCHIVUM_LIBRARY')
+            if lib_name:
+                try:
+                    # Avoid circular import if called during module init, 
+                    # but it's already imported at top level anyway.
+                    cls.current = Library(lib_name)
+                    # lib.start_watcher() - maybe not here, let the caller decide or just do it?
+                    # For web app, we want the watcher.
+                    cls.current.start_watcher()
+                    logger.debug("Auto-loaded library %s from ARCHIVUM_LIBRARY", lib_name)
+                except Exception as e:
+                    logger.error("Failed to auto-load library %s: %s", lib_name, e)
+                    return cls.no_library
+            else:
+                return cls.no_library
         return cls.current
 
     @classmethod
@@ -185,7 +199,7 @@ def get_prompt(cmd):
             f"<ansiyellow>{cmd} > </ansiyellow>"
         )
     except AttributeError as e:
-        logger.error("get prompt error", e, sep="\n")
+        logger.error(f"get prompt error: {e}")
         return HTML(f"ERR: <ansiyellow>{cmd} > </ansiyellow>")
 
 
@@ -443,10 +457,11 @@ def library_audit(verbose, execute):
 
 @entry.command()
 @click.argument("lib_name", type=str, default="")
-@click.option("-p", "--port", default=5000, help="Port to run the server on.")
-@click.option("-b", "--browser/--no-browser", "open_browser", default=True, help="Open browser automatically.")
-@click.option("-d", "--debug", is_flag=True, help="Run in Flask debug mode.")
-def serve(lib_name, port, open_browser, debug):
+@click.option("-p", "--port", default=9124, help="Port to run the server on.")
+@click.option("-a", "--address", default="127.0.0.1", help="Host address to bind to (e.g. 0.0.0.0 for all interfaces).")
+@click.option("-b", "--browser", "open_browser", is_flag=True, default=False, help="Open browser automatically.")
+@click.option("-d", "--debug", is_flag=True, help="Run in Flask debug mode (includes reloader).")
+def serve(lib_name, port, address, open_browser, debug):
     """Launch the web interface."""
     from .web import create_app
     import webbrowser
@@ -457,28 +472,38 @@ def serve(lib_name, port, open_browser, debug):
         lib_name = DEFAULT_LIBRARY
 
     try:
+        # We need to set the library in the singleton so the app.run(debug=True)
+        # fork can also access it if needed, though env var is safer for subprocesses.
         lib = Library(lib_name)
         LibraryContext.set(lib)
         lib.start_watcher()
         click.echo(f"Serving library: {lib.name}")
     except Exception as e:
-        click.error(f"Error opening library '{lib_name}': {e}")
+        click.secho(f"Error opening library '{lib_name}': {e}", fg="red")
         return
 
+    # Set environment variable so the Flask app and its subprocesses know which lib to use
+    os.environ['ARCHIVUM_LIBRARY'] = lib.name
+    # Also update GLOBAL_CONFIG so Library() calls in this process use it
+    GLOBAL_CONFIG['default_library'] = lib.name
+
     app = create_app()
-    
-    url = f"http://127.0.0.1:{port}"
+    # Use '127.0.0.1' for the browser link if binding to 0.0.0.0, else use address
+    display_addr = "127.0.0.1" if address == "0.0.0.0" else address
+    url = f"http://{display_addr}:{port}"
     if open_browser:
         # Give the server a moment to start before opening browser
         Timer(1.5, lambda: webbrowser.open(url)).start()
-    
-    click.echo(f"Starting Archivum Web at {url}")
+
+    click.echo(f"Starting Archivum Web at {url} (binding to {address})")
     try:
-        # Disable reloader if not in debug to avoid issues with Library singleton
-        app.run(host="127.0.0.1", port=port, debug=debug, use_reloader=debug)
+        # debug=True enables the auto-reloader
+        app.run(host=address, port=port, debug=debug, use_reloader=debug)
     finally:
+
         # Ensure watcher is stopped on exit
-        lib.stop_watcher()
+        if not debug: # Reloader makes this tricky, but for standard run it's good
+            lib.stop_watcher()
 
 
 # ========================================================================================
@@ -949,9 +974,11 @@ def decorate_results(lib, df):
             if not isinstance(s, str) or not s:
                 return ""
             author_bits = [i.split(",")[0].strip("{}") for i in s.split(" and ")]
-            if len(author_bits) > 1:
+            if len(author_bits) > 2:
                 *first, last = author_bits
                 name = ", ".join(first) + f", and {last}"
+            elif len(author_bits) == 2:
+                name = f"{author_bits[0]} and {author_bits[1]}"
             else:
                 name = author_bits[0] if author_bits else ""
             return f"[yellow]{name}[/yellow]"

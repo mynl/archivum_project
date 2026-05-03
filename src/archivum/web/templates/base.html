@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Archivum | {{ lib.name if lib else 'No Library' }}</title>
+    <link rel="shortcut icon" href="{{ url_for('static', filename='icon/favicon.ico') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
 </head>
@@ -11,12 +12,13 @@
     <header>
         <nav>
             <div class="brand">
-                <span class="root">Archivum</span>
-                <span class="sep">➔</span>
-                <span class="library">{{ lib.name if lib else 'No Library' }}</span>
+                <img src="{{ url_for('static', filename='icon/android-chrome-192x192.png') }}" alt="Archivum Logo" class="logo">
+                <span class="library"><b>{{ lib.name if lib else 'No Library' }}</b></span>
             </div>
+            <div class="menu-sep">|</div>
             <div class="menu">
                 <a href="{{ url_for('main.index') }}" class="{{ 'active' if request.endpoint == 'main.index' }}">Query</a>
+                <a href="{{ url_for('main.ripgrep_page') }}" class="{{ 'active' if request.endpoint == 'main.ripgrep_page' }}">Ripgrep</a>
                 <a href="{{ url_for('main.status') }}" class="{{ 'active' if request.endpoint == 'main.status' }}">Status</a>
                 <a href="{{ url_for('main.history') }}" class="{{ 'active' if request.endpoint == 'main.history' }}">History</a>
             </div>
@@ -36,10 +38,8 @@
                 const indicator = document.querySelector('.indicator');
                 if (evt.detail.xhr.responseText === 'reload-needed') {
                     indicator.classList.add('needs-reload');
-                    indicator.title = 'Library has changed and needs reload';
                 } else {
                     indicator.classList.remove('needs-reload');
-                    indicator.title = 'Library is up to date';
                 }
             }
         });

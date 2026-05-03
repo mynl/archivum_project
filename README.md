@@ -22,6 +22,7 @@ The standard workflow for adding a batch of new PDFs:
 ### 3. Finding & Searching
 *   **By Tag**: `tag -o` - Search for a tag. Use `-o` to open the associated document immediately.
 *   **By Hash**: `hash <hash_prefix> -o` - Search by file hash. Displays linked references or labels it as an "Orphan".
+*   **Web Interface**: `serve` - Launch the interactive web interface for search, browsing, and reading.
 *   **Find Local**: `find-doc <path>` - Hash a local file and see if it (or any matches) exists in your library.
 
 ### 4. Maintenance
@@ -35,6 +36,7 @@ The standard workflow for adding a batch of new PDFs:
 - **Identity-Based Linking**: References are linked to documents by content hash and version, not by volatile file paths.
 - **Library Portability**: All internal paths are stored relative to the library root. Move your library anywhere, and it just works.
 - **Smart Sharding**: Automatically organizes documents into a hash-based directory structure with rich, informative names.
+- **Modern Web Interface**: A Flask and HTMX-powered web interface for querying, full-text search (ripgrep), and integrated document viewing.
 - **Powerful Search**: Multi-modal search using `querexfuzz` (regex + SQL-like) and full-text search via `ripgrep`.
 
 ---

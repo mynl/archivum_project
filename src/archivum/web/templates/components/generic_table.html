@@ -1,0 +1,41 @@
+<div class="table-container" style="margin-top: 1rem; overflow-x: auto;">
+    <table class="generic-table">
+        <thead>
+            <tr>
+                {% for col in df.columns %}
+                <th>{{ col }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for _, row in df.iterrows() %}
+            <tr>
+                {% for col in df.columns %}
+                <td>{{ row[col] }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<style>
+    .generic-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+    }
+    .generic-table th {
+        background-color: #f8f9fa;
+        text-align: left;
+        padding: 0.5rem;
+        border-bottom: 2px solid #eee;
+    }
+    .generic-table td {
+        padding: 0.5rem;
+        border-bottom: 1px solid #eee;
+    }
+    .generic-table tr:hover {
+        background-color: #fcfcfc;
+    }
+</style>
