@@ -8,85 +8,96 @@
     }
 </script>
 
-<div class="search-container" style="display: flex; gap: 0.5rem;">
-    <input type="text" 
-           id="rg-input" 
-           name="q" 
-           placeholder="Full-text search (ripgrep)..." 
-           hx-get="{{ url_for('main.rg_search') }}" 
-           hx-trigger="keyup[key=='Enter']" 
-           hx-target="#rg-stream-sink" 
-           hx-swap="innerHTML"
-           hx-include="#rg-controls input"
-           hx-indicator="#rg-indicator"
-           hx-on:click="clearResults()"
-           style="flex-grow: 1;"
-           autofocus>
-    <button hx-get="{{ url_for('main.rg_search') }}" 
-            hx-target="#rg-stream-sink" 
-            hx-swap="innerHTML"
-            hx-include="#rg-input, #rg-controls input"
-            hx-indicator="#rg-indicator"
-            hx-on:click="clearResults()"
-            class="btn-primary">
-        Execute
-    </button>
-</div>
-
-<div id="rg-controls" class="view-options" style="align-items: center; justify-content: flex-start; gap: 1.5rem;">
-    <button hx-get="{{ url_for('main.rg_search') }}" 
-            hx-vals='{"counts": "true"}' 
-            hx-target="#rg-stream-sink" 
-            hx-swap="innerHTML"
-            hx-include="#rg-input, #rg-controls input"
-            hx-indicator="#rg-indicator"
-            hx-on:click="clearResults()"
-            class="btn-small">Counts</button>
-
-    <div style="display: flex; gap: 0.75rem; align-items: center;">
-        <label title="Context lines before match">B: <input type="number" name="before" value="0" min="0" max="10" style="width: 45px;"></label>
-        <label title="Context lines after match">A: <input type="number" name="after" value="0" min="0" max="10" style="width: 45px;"></label>
+<div class="search-container row g-2">
+    <div class="col">
+        <input type="text" 
+               id="rg-input" 
+               name="q" 
+               placeholder="Full-text search (ripgrep)..." 
+               hx-get="{{ url_for('main.rg_search') }}" 
+               hx-trigger="keyup[key=='Enter']" 
+               hx-target="#rg-stream-sink" 
+               hx-swap="innerHTML"
+               hx-include="#rg-controls input"
+               hx-indicator="#rg-indicator"
+               hx-on:click="clearResults()"
+               autofocus>
     </div>
-
-    <div style="display: flex; gap: 0.75rem; align-items: center;">
-        <label><input type="radio" name="case" value="ignore" checked> Ignore Case</label>
-        <label><input type="radio" name="case" value="sensitive"> Sensitive</label>
-    </div>
-
-    <div style="display: flex; gap: 0.5rem; align-items: center;">
-        <span>Globs:</span>
-        <input type="text" name="glob1" placeholder="Pattern 1" style="width: 100px; font-size: 0.8rem; padding: 2px 5px;">
-        <input type="text" name="glob2" placeholder="Pattern 2" style="width: 100px; font-size: 0.8rem; padding: 2px 5px;">
-        
+    <div class="col-auto">
         <button hx-get="{{ url_for('main.rg_search') }}" 
-                hx-vals='{"files": "true"}' 
                 hx-target="#rg-stream-sink" 
                 hx-swap="innerHTML"
-                hx-include="#rg-controls input"
+                hx-include="#rg-input, #rg-controls input"
                 hx-indicator="#rg-indicator"
                 hx-on:click="clearResults()"
-                class="btn-small">Files</button>
+                class="btn btn-primary btn-lg px-4"
+                style="height: 100%;">
+            Execute
+        </button>
+    </div>
+</div>
+
+<div id="rg-controls" class="view-options">
+    <div class="row align-items-center g-3">
+        <!-- Modes -->
+        <div class="col-auto border-end pe-3 d-flex gap-2">
+            <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"counts": "true"}' 
+                    hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
+                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm">Counts</button>
         </div>
 
-        <div style="display: flex; gap: 0.75rem; align-items: center;">
-        <label><input type="radio" name="filter" value="tagged" checked> Tagged</label>
-        <label><input type="radio" name="filter" value="all"> All</label>
-        </div>
+        <!-- Filter -->
+        <div class="col-auto border-end px-3">
+            <div class="btn-group" role="group">
+                <input type="radio" class="btn-check" name="filter" id="filter_tagged" value="tagged" checked>
+                <label class="btn btn-outline-secondary btn-sm" for="filter_tagged">Tagged</label>
+                <input type="radio" class="btn-check" name="filter" id="filter_all" value="all">
+                <label class="btn btn-outline-secondary btn-sm" for="filter_all">All</label>
+            </div>
         </div>
 
-<div id="rg-status" class="rg-info" style="margin-bottom: 1rem; display: none;">
+        <!-- Context -->
+        <div class="col-auto border-end px-3 d-flex align-items-center gap-2">
+            <label class="small">B: <input type="number" name="before" value="0" min="0" max="10" class="form-control form-control-sm d-inline-block" style="width: 50px;"></label>
+            <label class="small">A: <input type="number" name="after" value="0" min="0" max="10" class="form-control form-control-sm d-inline-block" style="width: 50px;"></label>
+        </div>
+
+        <!-- Case -->
+        <div class="col-auto border-end px-3">
+            <div class="btn-group btn-group-sm">
+                <input type="radio" class="btn-check" name="case" id="case_ignore" value="ignore" checked>
+                <label class="btn btn-outline-secondary" for="case_ignore">Ignore Case</label>
+                <input type="radio" class="btn-check" name="case" id="case_sensitive" value="sensitive">
+                <label class="btn btn-outline-secondary" for="case_sensitive">Sensitive</label>
+            </div>
+        </div>
+
+        <!-- Globs & Files -->
+        <div class="col d-flex align-items-center gap-2 overflow-hidden">
+            <span class="small fw-bold text-muted">GLOBS:</span>
+            <input type="text" name="glob1" placeholder="*.md" class="form-control form-control-sm" style="width: 100px;">
+            <input type="text" name="glob2" placeholder="Pattern" class="form-control form-control-sm" style="width: 100px;">
+            <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"files": "true"}' 
+                    hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
+                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm ms-2">Files</button>
+        </div>
+    </div>
+</div>
+
+<div id="rg-status" class="alert alert-secondary py-2 px-3 mb-3 border-0 shadow-sm" style="display: none; font-size: 0.85rem;">
     <!-- Last command will be displayed here -->
 </div>
 
-<div id="rg-indicator" class="htmx-indicator rg-info">
-    Running ripgrep...
+<div id="rg-indicator" class="htmx-indicator mb-3">
+    <div class="d-flex align-items-center gap-2 text-primary">
+        <div class="spinner-border spinner-border-sm" role="status"></div>
+        <span>Running ripgrep search...</span>
+    </div>
 </div>
 
-<div id="rg-stream-sink" style="display: none;">
-    <!-- OOB chunks will be processed even if targeted here -->
-</div>
+<div id="rg-stream-sink" style="display: none;"></div>
 
 <div id="rg-results">
-    <p class="muted">Press Enter or click Execute to search document text...</p>
+    <p class="text-muted">Press Enter or click Execute to search document text...</p>
 </div>
 {% endblock %}

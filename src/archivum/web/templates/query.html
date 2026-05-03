@@ -13,24 +13,23 @@
            autofocus>
 </div>
 
-<div class="view-options">
-    <span>View Mode:</span>
-    <label>
-        <input type="radio" name="view_mode" value="list" checked 
-               hx-get="{{ url_for('main.search') }}" 
-               hx-target="#results" 
-               hx-include="#search-input"> Dense List
-    </label>
-    <label>
-        <input type="radio" name="view_mode" value="table" 
-               hx-get="{{ url_for('main.search') }}" 
-               hx-target="#results" 
-               hx-include="#search-input"> Table
-    </label>
+<div class="view-options d-flex align-items-center gap-4">
+    <span class="fw-bold text-muted small text-uppercase">View Mode:</span>
+    <div class="btn-group" role="group">
+        <input type="radio" class="btn-check" name="view_mode" id="view_list" value="list" checked 
+               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
+        <label class="btn btn-outline-secondary btn-sm" for="view_list">Dense List</label>
+
+        <input type="radio" class="btn-check" name="view_mode" id="view_table" value="table" 
+               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
+        <label class="btn btn-outline-secondary btn-sm" for="view_table">Table</label>
+    </div>
 </div>
 
-<div id="results">
+<div id="results" class="mt-4">
     <!-- Results will be loaded here via HTMX -->
-    <p class="muted">Start typing to search (prefixes: 'q ' Querex, 'f ' Fuzzy)...</p>
+    <p class="text-muted">Start typing to search (prefixes: 'q ' Querex, 'f ' Fuzzy)...</p>
 </div>
+
+{% include "components/edit_modal.html" %}
 {% endblock %}
