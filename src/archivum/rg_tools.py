@@ -107,7 +107,6 @@ class RipgrepTools:
             "rg",
             "--encoding",
             "utf-8",
-            "--pcre2",
         ]
 
         # Search mode needs structured output for presentation.

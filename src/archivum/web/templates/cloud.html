@@ -12,7 +12,7 @@
     <div class="card-body p-5">
         <div class="d-flex flex-wrap justify-content-center align-items-center gap-3" style="line-height: 1.2;">
             {% for word, weight in words %}
-            <a href="{{ url_for('main.index') }}?q=f title ~ /{{ word }}/" 
+            <a href="{{ url_for('main.index') }}?q=q select year, * title ~ /{{ word }}/ order by -year" 
                class="word-cloud-item text-decoration-none" 
                style="font-size: {{ 0.8 + (weight / max_weight) * 3 }}rem; opacity: {{ 0.4 + (weight / max_weight) * 0.6 }}; font-weight: {{ 400 + (weight / max_weight) * 500|round }};"
                title="{{ weight }} papers">

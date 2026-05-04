@@ -931,23 +931,21 @@ class Library(LibraryBase):
 
     def run_ripgrep(self, pattern, args):
         """Execute and format ripgrep search against library full text extracts."""
-        # figure library location and prefix and suffix search terms
-
+        # Execute ripgrep from within the text directory to get relative paths
+        # This avoids Windows drive letter colons in the output, making parsing easier.
         cmd = [
             "rg",
-            "--json",
             "--line-buffered",
             "--stats",
             "-C",
             "1",
             "--encoding",
             "utf-8",
-            "--pcre2",  # perl compliant regex
             *args,
             pattern,
-            self.text_dir_full_name,
+            ".",
         ]
-        logger.info("will run %s", cmd)
+        logger.info("will run %s in %s", cmd, self.text_dir_full_name)
         # execute command
         try:
             proc = subprocess.Popen(
@@ -956,6 +954,7 @@ class Library(LibraryBase):
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
+                cwd=self.text_dir_full_name
             )
         except FileNotFoundError:
             return "FileNotFoundError", "[red]ripgrep (rg) not found on PATH[/red]"

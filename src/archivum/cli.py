@@ -2063,7 +2063,7 @@ def rg_old(args, n):
     if not args:
         click.echo("Missing pattern!", err=True)
     pattern = args[0]
-    args = args[1:]
+    args = ["--json"] + list(args[1:])
     return_value, proc = lib.run_ripgrep(pattern, args)
     if return_value == "FileNotFoundError":
         console.print(proc)

@@ -22,6 +22,9 @@
                    hx-include="#rg-controls input"
                    hx-indicator="#rg-indicator"
                    hx-on:click="clearResults()"
+                   autocapitalize="none"
+                   autocorrect="off"
+                   spellcheck="false"
                    autofocus>
             <i class="bi bi-x-circle clear-input" onclick="clearInput('rg-input')"></i>
         </div>
@@ -104,7 +107,15 @@
 
 <div id="rg-stream-sink" style="display: none;"></div>
 
+<div id="rg-stats-header" class="mb-3">
+    <!-- Stats will be injected here via OOB swap -->
+</div>
+
 <div id="rg-results">
     <p class="text-muted">Press Enter or click Execute to search document text...</p>
+</div>
+
+<div id="rg-more-container" class="text-center my-4" style="display: none;">
+    <!-- More button will be injected here via OOB swap -->
 </div>
 {% endblock %}
