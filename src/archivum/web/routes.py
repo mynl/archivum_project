@@ -18,23 +18,28 @@ _CACHE = {
     'last_sync': None,
     'author_counts': None,
     'history': None,
-    'insights': None
+    'insights': None,
+    'audit': None
 }
 
 def get_cached_data(lib, key, calculator):
     """Retrieve from cache or calculate if library state changed."""
     global _CACHE
     lib_id = id(lib)
-    last_sync = lib.ref_df.index.max() # Simple proxy for 'has changed'
+    # Use disk mtime of the feather files as a more robust change indicator
+    feather_path = lib.config_path / "ref.feather"
+    last_sync = feather_path.stat().st_mtime if feather_path.exists() else 0
     
     # Invalidate if it's a different library instance or if ref_df might have changed
     if _CACHE['lib_id'] != lib_id or _CACHE['last_sync'] != last_sync:
+        logger.info(f"Invalidating cache for {lib.name} (last_sync: {last_sync})")
         _CACHE = {
             'lib_id': lib_id,
             'last_sync': last_sync,
             'author_counts': None,
             'history': None,
-            'insights': None
+            'insights': None,
+            'audit': None
         }
     
     if _CACHE.get(key) is None:
@@ -54,8 +59,14 @@ def health_page():
     action = request.args.get('action')
     if action == 'clean_extracts':
         lib.clean_text_extracts(execute=True)
+        # Manually invalidate cache after destructive action
+        global _CACHE
+        _CACHE['audit'] = None
     
-    findings = lib.audit()
+    def calc_audit():
+        return lib.audit()
+        
+    findings = get_cached_data(lib, 'audit', calc_audit)
     return render_template('health.html', lib=lib, findings=findings)
 
 @bp.route('/ingest')
@@ -680,11 +691,29 @@ def rg_search():
 
     def generate_results():
         logger.info(f"Starting rg_search generator for query: {query}, filter: {filter_mode}")
+        
+        def format_glob(g):
+            if not g: return None
+            # If it already looks like a glob or has an extension, leave it (but wrap in * if no wildcards)
+            if '*' in g or '?' in g or '[' in g:
+                return g
+            if '.' in g:
+                return f'*{g}*'
+            # Default to matching partial filename with .md extension
+            return f'*{g}*.md'
+
+        # Base arguments for all modes
+        common_args = []
+        g1 = format_glob(glob1)
+        if g1: common_args.extend(['--iglob', g1])
+        g2 = format_glob(glob2)
+        if g2: common_args.extend(['--iglob', g2])
+        
+        if not (g1 or g2):
+            common_args.extend(['-g', '*.md'])
+
         if show_files:
-            cmd = ['rg', '--files']
-            if glob1: cmd.extend(['-g', f'*{glob1}*.md'])
-            if glob2: cmd.extend(['-g', f'*{glob2}*.md'])
-            cmd.append(str(lib.text_dir_path))
+            cmd = ['rg', '--files'] + common_args + [str(lib.text_dir_path)]
             rg_cmd = f"{' '.join(cmd)}"
             yield f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
             
@@ -711,18 +740,19 @@ def rg_search():
             return
 
         # Normal search or counts
-        args = []
+        args = list(common_args)
         if not case_sensitive:
             args.append('-i')
         if not show_counts:
             args.extend(['-A', context_a, '-B', context_b])
-        if glob1:
-            args.extend(['-g', f'*{glob1}*.md'])
-        if glob2:
-            args.extend(['-g', f'*{glob2}*.md'])
         
         rc, proc = lib.run_ripgrep(query, args)
-        rg_cmd = f"rg --json --line-buffered --stats -C 1 {' '.join(args)} \"{query}\" {lib.text_dir_full_name}"
+        # Accurate command reporting
+        full_cmd = [
+            "rg", "--json", "--line-buffered", "--stats", "-C", "1",
+            "--encoding", "utf-8", "--pcre2"
+        ] + args + [f'"{query}"', lib.text_dir_full_name]
+        rg_cmd = " ".join(full_cmd)
         yield f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
 
         if show_counts:

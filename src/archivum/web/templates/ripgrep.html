@@ -79,14 +79,14 @@
             </div>
         </div>
 
-        <!-- Globs & Files -->
-        <div class="d-flex align-items-center gap-2 flex-grow-1 min-w-0">
-            <span class="small fw-bold text-muted d-none d-sm-inline">GLOBS:</span>
-            <input type="text" name="glob1" placeholder="*.md" class="form-control form-control-sm" style="width: 80px;">
-            <input type="text" name="glob2" placeholder="Pattern" class="form-control form-control-sm" style="width: 80px;">
+        <!-- Globs & Files (Right Aligned Group) -->
+        <div class="d-flex align-items-center gap-2 ms-auto">
+            <span class="small fw-bold text-muted d-none d-md-inline">GLOBS:</span>
+            <input type="text" name="glob1" placeholder="*.md" class="form-control form-control-sm" style="width: 100px;">
+            <input type="text" name="glob2" placeholder="Pattern" class="form-control form-control-sm" style="width: 100px;">
             <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"files": "true"}' 
                     hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
-                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm ms-auto">Files</button>
+                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm">Files</button>
         </div>
     </div>
 </div>

@@ -940,13 +940,11 @@ class Library(LibraryBase):
             "--stats",
             "-C",
             "1",
-            "-g",
-            "*.md",
             "--encoding",
             "utf-8",
             "--pcre2",  # perl compliant regex
-            pattern,
             *args,
+            pattern,
             self.text_dir_full_name,
         ]
         logger.info("will run %s", cmd)

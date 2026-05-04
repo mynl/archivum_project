@@ -69,7 +69,7 @@
                 <p class="text-muted small mb-3">Physical files exist in the database but have no bibliographic reference linked to them.</p>
                 <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 200px;">
                     {% for doc in findings.docs_missing_ref %}
-                    <div class="list-group-item small font-monospace py-2 text-truncate" title="{{ doc }}">{{ doc }}</div>
+                    <div class="list-group-item small font-monospace py-1" style="word-break: break-all; line-height: 1.2;">{{ doc }}</div>
                     {% endfor %}
                 </div>
             </div>
@@ -92,7 +92,7 @@
                 <p class="text-muted small mb-3">Text extraction files that don't correspond to any document in the library.</p>
                 <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 200px;">
                     {% for orphan in findings.orphan_extracts %}
-                    <div class="list-group-item small font-monospace py-2 text-truncate" title="{{ orphan.name }}">{{ orphan.name }}</div>
+                    <div class="list-group-item small font-monospace py-1" style="word-break: break-all; line-height: 1.2;">{{ orphan.name }}</div>
                     {% endfor %}
                 </div>
             </div>
@@ -112,7 +112,7 @@
                 <p class="text-muted small mb-3">Bibliographic entries that exist in the library but have no physical files attached.</p>
                 <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 300px;">
                     {% for ref in findings.refs_missing_doc %}
-                    <a href="{{ url_for('main.index') }}?q=tag == {{ ref }}" class="list-group-item list-group-item-action small py-2">{{ ref }}</a>
+                    <a href="{{ url_for('main.index') }}?q=q tag ~ {{ ref }}" class="list-group-item list-group-item-action small py-2">{{ ref }}</a>
                     {% endfor %}
                 </div>
             </div>

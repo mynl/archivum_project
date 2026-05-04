@@ -81,12 +81,16 @@
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.editor_page' else 'text-dark fw-medium' }}">Edit</a>
                         </li>
                         <li class="nav-item">
+                            <a href="{{ url_for('main.authors_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.authors_page' else 'text-dark fw-medium' }}">Authors</a>
+                        </li>
+                        <li class="nav-item">
                             <a href="{{ url_for('main.insights_page') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.insights_page' else 'text-dark fw-medium' }}">Insights</a>
                         </li>
                         <li class="nav-item">
-                            <a href="{{ url_for('main.authors_page') }}" 
-                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.authors_page' else 'text-dark fw-medium' }}">Authors</a>
+                            <a href="{{ url_for('main.cloud_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.cloud_page' else 'text-dark fw-medium' }}">Cloud</a>
                         </li>
                         <li class="nav-item">
                             <a href="{{ url_for('main.status') }}" 
@@ -95,10 +99,6 @@
                         <li class="nav-item">
                             <a href="{{ url_for('main.health_page') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.health_page' else 'text-dark fw-medium' }}">Health</a>
-                        </li>
-                        <li class="nav-item">
-                            <a href="{{ url_for('main.cloud_page') }}" 
-                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.cloud_page' else 'text-dark fw-medium' }}">Cloud</a>
                         </li>
                     </ul>
                 </div>
