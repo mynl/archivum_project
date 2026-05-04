@@ -289,7 +289,7 @@ def rg_search():
             args.extend(['-g', f'*{glob2}*.md'])
         
         rc, proc = lib.run_ripgrep(query, args)
-        rg_cmd = f"rg --json --line-buffered --stats -C 1 -g *.md {' '.join(args)} \"{query}\" {lib.text_dir_full_name}"
+        rg_cmd = f"rg --json --line-buffered --stats -C 1 {' '.join(args)} \"{query}\" {lib.text_dir_full_name}"
         yield f"<div id='rg-status' class='rg-info' style='margin-bottom: 1rem; display: block;' hx-swap-oob='true'>Last Command: <code>{html.escape(rg_cmd)}</code></div>"
 
         if show_counts:
