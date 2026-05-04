@@ -47,5 +47,19 @@
         input.value = 'q top 10 recent';
         htmx.trigger(input, 'keyup');
     }
+
+    // Deep-linking from Insights
+    window.addEventListener('load', () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const query = urlParams.get('q');
+        if (query) {
+            const input = document.getElementById('search-input');
+            if (input) {
+                input.value = query;
+                // Small delay to ensure HTMX is ready
+                setTimeout(() => htmx.trigger(input, 'keyup'), 100);
+            }
+        }
+    });
 </script>
 {% endblock %}

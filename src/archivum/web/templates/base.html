@@ -81,6 +81,10 @@
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.editor_page' else 'text-dark fw-medium' }}">Edit</a>
                         </li>
                         <li class="nav-item">
+                            <a href="{{ url_for('main.insights_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.insights_page' else 'text-dark fw-medium' }}">Insights</a>
+                        </li>
+                        <li class="nav-item">
                             <a href="{{ url_for('main.status') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.status' else 'text-dark fw-medium' }}">Status</a>
                         </li>

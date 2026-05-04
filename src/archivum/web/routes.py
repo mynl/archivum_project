@@ -304,6 +304,54 @@ def view_temp(filename):
     if not temp_path.exists(): abort(404)
     return send_file(str(temp_path.absolute()), mimetype='application/pdf')
 
+@bp.route('/insights')
+def insights_page():
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    
+    # 1. Total Counts
+    total_refs = len(lib.ref_df)
+    total_docs = len(lib.doc_df)
+    
+    # Orphans (files with no tags)
+    tagged_hashes = set(lib.ref_doc_df.hash.unique())
+    total_orphans = len(lib.doc_df[~lib.doc_df.hash.isin(tagged_hashes)])
+    
+    # 2. Top Authors (need to explode first)
+    top_authors = []
+    if not lib.ref_df.empty and 'author' in lib.ref_df.columns:
+        exploded = lib.ref_df.assign(author=lib.ref_df.author.str.split(' and ')).explode('author')
+        top_authors = exploded['author'].value_counts().head(10).to_dict().items()
+        
+    # 3. Top Journals
+    top_journals = []
+    if not lib.ref_df.empty:
+        # Check both journal and booktitle
+        sources = pd.concat([lib.ref_df.get('journal', pd.Series()), lib.ref_df.get('booktitle', pd.Series())])
+        top_journals = sources[sources != ""].value_counts().head(10).to_dict().items()
+        
+    # 4. Top Years
+    top_years = []
+    if not lib.ref_df.empty and 'year' in lib.ref_df.columns:
+        top_years = lib.ref_df['year'].value_counts().head(10).to_dict().items()
+        # Sort by year instead of count
+        top_years = sorted(top_years, key=lambda x: str(x[0]), reverse=True)
+        
+    # 5. Top Publishers
+    top_publishers = []
+    if not lib.ref_df.empty and 'publisher' in lib.ref_df.columns:
+        top_publishers = lib.ref_df['publisher'][lib.ref_df.publisher != ""].value_counts().head(10).to_dict().items()
+
+    return render_template('insights.html', 
+                           lib=lib,
+                           total_refs=total_refs,
+                           total_docs=total_docs,
+                           total_orphans=total_orphans,
+                           top_authors=top_authors,
+                           top_journals=top_journals,
+                           top_years=top_years,
+                           top_publishers=top_publishers)
+
 @bp.route('/')
 def index():
     return render_template('query.html')
