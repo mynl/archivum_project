@@ -1,0 +1,109 @@
+<div class="workbench-header d-flex justify-content-between align-items-center mb-4 bg-white p-3 rounded-3 shadow-sm">
+    <div>
+        <h4 class="fw-bold mb-0">Ingest Workbench</h4>
+        <div class="text-muted small">
+            <span class="badge bg-light text-dark border me-2">Hash: {{ doc.hash[:12] if doc else 'N/A' }}</span>
+            {% if duplicate_tag %}
+                <span class="badge bg-danger">Duplicate Found: {{ duplicate_tag }}</span>
+            {% else %}
+                <span class="badge bg-success">No Duplicate</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <button class="btn btn-outline-secondary fw-bold" onclick="location.reload()">Cancel</button>
+        <form hx-post="{{ url_for('main.ingest_commit') }}" hx-target="#ingest-container" hx-indicator="#commit-indicator">
+            <input type="hidden" name="temp_path" value="{{ temp_path }}">
+            <input type="hidden" name="hash" value="{{ doc.hash if doc else '' }}">
+            <textarea name="bibtex" class="d-none" id="final-bibtex"></textarea>
+            <button type="submit" class="btn btn-primary px-4 fw-bold" onclick="document.getElementById('final-bibtex').value = document.getElementById('workbench-bibtex').value">
+                <span id="commit-indicator" class="htmx-indicator spinner-border spinner-border-sm me-2"></span>
+                GO: Archive Document
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4" style="height: calc(100vh - 250px);">
+    <!-- Left Pane: PDF Viewer -->
+    <div class="col-md-6 h-100">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body p-0">
+                {% if temp_filename %}
+                    <iframe src="{{ url_for('main.view_temp', filename=temp_filename) }}" width="100%" height="100%" style="border: none; border-radius: 0 0 8px 8px;"></iframe>
+                {% else %}
+                    <div class="d-flex align-items-center justify-content-center h-100 text-muted">
+                        No PDF preview available
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Pane: BibTeX Editor & Controls -->
+    <div class="col-md-6 h-100 d-flex flex-column">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
+                <span class="text-muted small fw-bold text-uppercase">BibTeX Editor</span>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-primary fw-bold" 
+                            hx-post="{{ url_for('main.ingest_enhance', action='names') }}" 
+                            hx-target="#workbench-bibtex" 
+                            hx-include="#workbench-bibtex">
+                        <i class="bi bi-person-check me-1"></i> Normalize Names
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary fw-bold" 
+                            hx-post="{{ url_for('main.ingest_enhance', action='tag') }}" 
+                            hx-target="#workbench-bibtex" 
+                            hx-include="#workbench-bibtex">
+                        <i class="bi bi-tag me-1"></i> Generate Tag
+                    </button>
+                </div>
+            </div>
+            <div class="card-body p-0">
+                <textarea id="workbench-bibtex" name="bibtex" class="form-control font-monospace p-3 border-0" rows="12" style="resize: none; font-size: 0.9rem;">{{ bibtex }}</textarea>
+            </div>
+        </div>
+
+        <!-- Candidate Cards / Diagnostics -->
+        <div class="mt-3 overflow-auto" style="max-height: 200px;">
+            <div class="text-muted small fw-bold text-uppercase mb-2">Metadata Diagnostics</div>
+            {% if doc and doc.candidates %}
+                {% for source, data in doc.candidates.items() %}
+                    {% if data %}
+                    <div class="card mb-2 border-0 shadow-sm">
+                        <div class="card-body py-2 px-3 d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="badge bg-info text-dark me-2">{{ source|capitalize }}</span>
+                                <span class="small text-truncate d-inline-block" style="max-width: 300px;">{{ data.title }}</span>
+                            </div>
+                            <button class="btn btn-sm btn-link text-primary p-0 fw-bold" 
+                                    onclick="mergeCandidate({{ data|tojson|safe }})">Merge</button>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+    function mergeCandidate(data) {
+        const editor = document.getElementById('workbench-bibtex');
+        let bib = editor.value;
+        
+        // Simple regex-based replacement for BibTeX fields
+        for (const [key, value] of Object.entries(data)) {
+            if (!value) continue;
+            const re = new RegExp(`(${key}\\s*=\\s*){.*?}`, 'i');
+            if (re.test(bib)) {
+                bib = bib.replace(re, `$1{${value}}`);
+            } else if (bib.includes('}')) {
+                // Append before the last closing brace if field doesn't exist
+                bib = bib.replace(/\s*}\s*$/, `,\n  ${key} = {${value}}\n}`);
+            }
+        }
+        editor.value = bib;
+    }
+</script>

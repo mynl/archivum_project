@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div id="ingest-container">
+    <div class="row g-4">
+        <!-- Zone A: The File -->
+        <div class="col-md-6">
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                    <h5 class="card-title fw-bold text-dark mb-0">Zone A: The Document</h5>
+                </div>
+                <div class="card-body p-4">
+                    <div id="ingest-error" class="mb-4 d-none">
+                        <div class="alert alert-danger alert-dismissible fade show shadow-sm border-0" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                            <span id="error-message"></span>
+                            <button type="button" class="btn-close" onclick="document.getElementById('ingest-error').classList.add('d-none')"></button>
+                        </div>
+                    </div>
+
+                    <form id="file-form" hx-post="{{ url_for('main.ingest_start') }}" hx-encoding="multipart/form-data" hx-target="#ingest-container" hx-indicator="#process-indicator">
+                        <div class="mb-4">
+                            <label class="form-label text-muted small fw-bold text-uppercase">Drag & Drop or Upload PDF</label>
+                            <div id="drop-zone" class="drop-zone rounded-3 border-2 border-dashed d-flex flex-column align-items-center justify-content-center p-5 bg-light" style="min-height: 200px; cursor: pointer;">
+                                <i class="bi bi-cloud-arrow-up display-4 text-muted mb-3"></i>
+                                <span class="text-muted text-center px-3">Drop PDF here or click to browse</span>
+                                <input type="file" name="file" id="file-input" class="d-none" accept=".pdf,.djvu">
+                            </div>
+                            <div id="file-name" class="mt-2 text-primary fw-medium small"></div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label text-muted small fw-bold text-uppercase">Or Paste URL / Filename</label>
+                            <div class="input-group shadow-sm">
+                                <span class="input-group-text bg-white border-end-0"><i class="bi bi-link-45deg"></i></span>
+                                <input type="text" name="url_path" class="form-control border-start-0" placeholder="https://arxiv.org/pdf/... or C:\path\to\doc.pdf">
+                            </div>
+                        </div>
+
+                        <div class="d-grid mt-4">
+                            <button type="submit" class="btn btn-primary btn-lg shadow-sm fw-bold">
+                                <span id="process-indicator" class="htmx-indicator spinner-border spinner-border-sm me-2"></span>
+                                Start Processing
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone B: The BibTeX -->
+        <div class="col-md-6">
+            <div class="card h-100 shadow-sm border-0">
+                <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                    <h5 class="card-title fw-bold text-dark mb-0">Zone B: BibTeX Metadata</h5>
+                </div>
+                <div class="card-body p-4 d-flex flex-column">
+                    <div class="mb-3 d-flex flex-column">
+                        <label class="form-label text-muted small fw-bold text-uppercase">Paste BibTeX (e.g. from Google Scholar)</label>
+                        <textarea name="bibtex" id="bibtex-input" class="form-control font-monospace small" rows="12" placeholder="@article{...}"></textarea>
+                    </div>
+                    <div class="text-muted small mt-auto">
+                        <i class="bi bi-info-circle me-1"></i> If you leave this empty, Archivum will try to extract it from the file in Zone A.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileNameDisplay = document.getElementById('file-name');
+
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-primary', 'bg-white');
+    });
+
+    ['dragleave', 'dragend'].forEach(type => {
+        dropZone.addEventListener(type, () => {
+            dropZone.classList.remove('border-primary', 'bg-white');
+        });
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-primary', 'bg-white');
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            fileNameDisplay.textContent = 'Selected: ' + fileInput.files[0].name;
+        }
+    });
+
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length) {
+            fileNameDisplay.textContent = 'Selected: ' + fileInput.files[0].name;
+        }
+    });
+
+    // Ensure BibTeX is sent with the form if it was pasted manually
+    document.getElementById('file-form').addEventListener('htmx:configRequest', (event) => {
+        const bibtex = document.getElementById('bibtex-input').value;
+        if (bibtex) {
+            event.detail.parameters['bibtex'] = bibtex;
+        }
+    });
+
+    // Handle HTMX Errors
+    document.body.addEventListener('htmx:responseError', function(evt) {
+        const errorContainer = document.getElementById('ingest-error');
+        const errorMessage = document.getElementById('error-message');
+        if (errorContainer && errorMessage) {
+            errorMessage.textContent = evt.detail.xhr.responseText || 'An unknown error occurred';
+            errorContainer.classList.remove('d-none');
+        }
+    });
+</script>
+
+<style>
+    .drop-zone { transition: all 0.2s ease-in-out; }
+    .drop-zone:hover { background-color: #f8f9fa !important; border-color: #0d6efd !important; }
+    .htmx-indicator { display: none; }
+    .htmx-request .htmx-indicator { display: inline-block; }
+    .htmx-request.btn { pointer-events: none; opacity: 0.8; }
+</style>
+{% endblock %}

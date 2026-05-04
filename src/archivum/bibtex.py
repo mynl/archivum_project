@@ -105,6 +105,41 @@ def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
     return "\n".join(lines)
 
 
+def bibtex_to_dict(bibtex_str: str) -> dict[str, dict[str, str]]:
+    """
+    Very simple BibTeX parser for a single entry.
+    Returns {tag: {field: value, 'type': entry_type}}
+    """
+    if not bibtex_str:
+        return {}
+
+    # Normalize
+    entry = bibtex_str.strip().replace('\r\n', '\n').replace('\r', '\n')
+
+    # Header: @type{tag,
+    header_match = re.match(r"\s*@?([a-zA-Z0-9\.\\\-_]+)\s*\{\s*([^,]+),", entry)
+    if not header_match:
+        return {}
+
+    entry_type, tag = header_match.groups()
+    result = {"type": entry_type}
+
+    # Body
+    body = entry[header_match.end():].strip()
+    if body.endswith('}'):
+        body = body[:-1]
+
+    # Fields: key = {value} or key = "value"
+    # This regex is simplified but covers most cases
+    # Added [a-zA-Z0-9\-_] to keys to be more robust
+    field_pattern = r"\s*([a-zA-Z0-9\-_]+)\s*=\s*[\{\"](.*?)[\}\"]\s*,?\s*(?:\n|\Z)"
+    for m in re.finditer(field_pattern, body, flags=re.DOTALL):
+        k, v = m.groups()
+        result[k.lower()] = v.strip()
+
+    return {tag: result}
+
+
 def dict_to_bibtex_crossref(data: Any) -> str:
     """
     Converts a dict-like object to a BibTeX string.

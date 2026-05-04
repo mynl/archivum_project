@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row g-0 border rounded shadow-sm bg-white overflow-hidden" style="height: calc(100vh - 100px);">
+<div class="row g-0 border rounded shadow-sm bg-white overflow-hidden edit-main-row">
     <!-- Left Sidebar: Tag List -->
-    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100">
+    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100 tag-sidebar">
         <div class="p-3 border-bottom bg-light">
             <h6 class="mb-3 text-muted small fw-bold text-uppercase">Reference Tags</h6>
             <div class="search-wrapper">
@@ -15,12 +15,12 @@
                        autocomplete="off">
                 <i class="bi bi-x-circle clear-input" style="font-size: 0.8rem; right: 10px;" onclick="clearFilter()"></i>
             </div>
-            <div class="mt-2 text-muted" style="font-size: 0.7rem;">
+            <div class="mt-2 text-muted d-none d-md-block" style="font-size: 0.7rem;">
                 <i class="bi bi-keyboard me-1"></i> Use <b>↑/↓</b> to navigate, <b>Enter</b> to load.
             </div>
         </div>
         
-        <div id="tag-list" class="list-group list-group-flush overflow-auto flex-grow-1">
+        <div id="tag-list" class="list-group list-group-flush overflow-auto flex-grow-1 tag-list-container">
             {% for tag in lib.all_tags %}
             <button type="button" 
                     class="tag-item list-group-item list-group-item-action py-2 border-0 small font-monospace" 
@@ -36,7 +36,7 @@
     </div>
     
     <!-- Right Panel: Editor -->
-    <div class="col-md-8 col-lg-9 d-flex flex-column h-100 bg-light-subtle">
+    <div class="col-md-8 col-lg-9 d-flex flex-column h-100 bg-light-subtle editor-panel">
         <div id="editor-container" class="p-0 flex-grow-1 overflow-auto"
              {% if initial_tag %} 
              hx-get="{{ url_for('main.edit_tag', tag=initial_tag) }}" 
@@ -164,6 +164,40 @@
     #tag-list::-webkit-scrollbar-thumb {
         background: #ccc;
         border-radius: 10px;
+    }
+
+    /* Desktop View */
+    @media (min-width: 768px) {
+        .edit-main-row {
+            height: calc(100vh - 100px);
+        }
+        .tag-list-container {
+            height: 12rem !important; /* Exactly 8 lines */
+            max-height: 12rem !important;
+            flex-grow: 0 !important;
+            border-bottom: 1px solid #dee2e6;
+        }
+    }
+
+    /* Mobile View */
+    @media (max-width: 767.98px) {
+        .edit-main-row {
+            height: auto;
+            overflow: visible !important;
+        }
+        .tag-sidebar {
+            height: auto !important;
+            margin-bottom: 1rem;
+        }
+        .tag-list-container {
+            height: 12rem !important; /* Exactly 8 lines */
+            max-height: 12rem !important;
+            flex-grow: 0 !important;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .editor-panel {
+            height: calc(100vh - 200px) !important;
+        }
     }
 </style>
 {% endblock %}
