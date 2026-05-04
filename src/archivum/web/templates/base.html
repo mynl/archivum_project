@@ -85,24 +85,22 @@
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.insights_page' else 'text-dark fw-medium' }}">Insights</a>
                         </li>
                         <li class="nav-item">
+                            <a href="{{ url_for('main.authors_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.authors_page' else 'text-dark fw-medium' }}">Authors</a>
+                        </li>
+                        <li class="nav-item">
                             <a href="{{ url_for('main.status') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.status' else 'text-dark fw-medium' }}">Status</a>
                         </li>
                         <li class="nav-item">
-                            <a href="{{ url_for('main.history') }}" 
-                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.history' else 'text-dark fw-medium' }}">History</a>
+                            <a href="{{ url_for('main.health_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.health_page' else 'text-dark fw-medium' }}">Health</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{{ url_for('main.cloud_page') }}" 
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.cloud_page' else 'text-dark fw-medium' }}">Cloud</a>
                         </li>
                     </ul>
-
-                    <!-- Sync Status (Right Aligned) -->
-                    <div class="ms-auto d-flex align-items-center">
-                        <div id="sync-indicator" 
-                             class="indicator" 
-                             title="Library Sync Status"
-                             hx-get="{{ url_for('main.sync_check') }}" 
-                             hx-trigger="every 10s"
-                             hx-swap="none"></div>
-                    </div>
                 </div>
             </div>
         </nav>
@@ -169,17 +167,6 @@
         window.addEventListener('load', () => {
             initSearchInput('search-input');
             initSearchInput('rg-input');
-        });
-
-        document.body.addEventListener('htmx:afterRequest', function(evt) {
-            if (evt.detail.pathInfo.requestPath.includes('sync-check')) {
-                const indicator = document.getElementById('sync-indicator');
-                if (evt.detail.xhr.responseText === 'reload-needed') {
-                    indicator.classList.add('needs-reload');
-                } else {
-                    indicator.classList.remove('needs-reload');
-                }
-            }
         });
     </script>
 </body>

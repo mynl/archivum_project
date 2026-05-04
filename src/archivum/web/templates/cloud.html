@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <h4 class="fw-bold text-dark mb-0">Semantic Cloud</h4>
+        <p class="text-muted small">Visual distribution of common keywords found in paper titles (excluding stop words).</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-5">
+        <div class="d-flex flex-wrap justify-content-center align-items-center gap-3" style="line-height: 1.2;">
+            {% for word, weight in words %}
+            <a href="{{ url_for('main.index') }}?q=f title ~ /{{ word }}/" 
+               class="word-cloud-item text-decoration-none" 
+               style="font-size: {{ 0.8 + (weight / max_weight) * 3 }}rem; opacity: {{ 0.4 + (weight / max_weight) * 0.6 }}; font-weight: {{ 400 + (weight / max_weight) * 500|round }};"
+               title="{{ weight }} papers">
+               {{ word }}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<style>
+    .word-cloud-item {
+        color: var(--bs-primary);
+        transition: all 0.2s ease;
+        padding: 0 0.5rem;
+    }
+    .word-cloud-item:hover {
+        color: var(--bs-dark);
+        transform: scale(1.1);
+        opacity: 1 !important;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+    }
+</style>
+{% endblock %}

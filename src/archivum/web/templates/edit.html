@@ -57,18 +57,14 @@
     let selectedIndex = -1;
 
     function filterTags(event) {
-        // Handle keyboard navigation
+        // Handle keyboard navigation directly in the input for better flow
         if (event.key === 'ArrowDown') {
             navigateList(1);
+            event.preventDefault();
             return;
         } else if (event.key === 'ArrowUp') {
             navigateList(-1);
-            return;
-        } else if (event.key === 'Enter') {
-            const visible = getVisibleItems();
-            if (selectedIndex >= 0 && selectedIndex < visible.length) {
-                visible[selectedIndex].click();
-            }
+            event.preventDefault();
             return;
         }
 
@@ -98,18 +94,23 @@
         const visible = getVisibleItems();
         if (visible.length === 0) return;
 
-        if (selectedIndex >= 0) {
-            visible[selectedIndex].classList.remove('bg-primary-subtle');
-        }
-
         selectedIndex += direction;
         if (selectedIndex < 0) selectedIndex = visible.length - 1;
         if (selectedIndex >= visible.length) selectedIndex = 0;
 
         const active = visible[selectedIndex];
-        active.classList.add('bg-primary-subtle');
+        active.click(); // This triggers HTMX and setActiveTag
         active.scrollIntoView({ block: 'nearest' });
     }
+
+    // Global keyboard listener for when the input isn't focused
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        if (document.activeElement.id === 'tag-filter') return; // Already handled in filterTags
+
+        e.preventDefault();
+        navigateList(e.key === 'ArrowDown' ? 1 : -1);
+    });
 
     function clearFilter() {
         const input = document.getElementById('tag-filter');

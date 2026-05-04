@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <h4 class="fw-bold text-dark mb-0">Library Health Audit</h4>
+        <p class="text-muted small">Comprehensive structural check of bibliographic references and physical files.</p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <!-- Summary Cards -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 text-center p-3 {{ 'bg-danger-subtle' if findings.missing_physical_files else 'bg-success-subtle' }}">
+            <h2 class="fw-bold mb-0">{{ findings.missing_physical_files|length }}</h2>
+            <div class="small fw-bold text-uppercase text-muted">Missing Files</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 text-center p-3 {{ 'bg-warning-subtle' if findings.docs_missing_ref else 'bg-success-subtle' }}">
+            <h2 class="fw-bold mb-0">{{ findings.docs_missing_ref|length }}</h2>
+            <div class="small fw-bold text-uppercase text-muted">Orphan Docs</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 text-center p-3 {{ 'bg-warning-subtle' if findings.orphan_extracts else 'bg-success-subtle' }}">
+            <h2 class="fw-bold mb-0">{{ findings.orphan_extracts|length }}</h2>
+            <div class="small fw-bold text-uppercase text-muted">Orphan Extracts</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 text-center p-3 {{ 'bg-danger-subtle' if (findings.broken_tag_links or findings.broken_id_links) else 'bg-success-subtle' }}">
+            <h2 class="fw-bold mb-0">{{ (findings.broken_tag_links|length) + (findings.broken_id_links|length) }}</h2>
+            <div class="small fw-bold text-uppercase text-muted">Broken Links</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-2">
+    <!-- Missing Physical Files -->
+    {% if findings.missing_physical_files %}
+    <div class="col-12">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                <h6 class="card-title fw-bold text-danger small text-uppercase mb-0">Missing Physical Files</h6>
+                <span class="badge bg-danger rounded-pill">{{ findings.missing_physical_files|length }}</span>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted small mb-3">References point to these files, but they do not exist in the document store.</p>
+                <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 300px;">
+                    {% for file in findings.missing_physical_files %}
+                    <div class="list-group-item small font-monospace py-2 bg-light-subtle text-truncate" title="{{ file }}">{{ file }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Orphan Documents -->
+    {% if findings.docs_missing_ref %}
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                <h6 class="card-title fw-bold text-warning small text-uppercase mb-0">Orphan Documents</h6>
+                <span class="badge bg-warning text-dark rounded-pill">{{ findings.docs_missing_ref|length }}</span>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted small mb-3">Physical files exist in the database but have no bibliographic reference linked to them.</p>
+                <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 200px;">
+                    {% for doc in findings.docs_missing_ref %}
+                    <div class="list-group-item small font-monospace py-2 text-truncate" title="{{ doc }}">{{ doc }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Orphan Extracts -->
+    {% if findings.orphan_extracts %}
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                <h6 class="card-title fw-bold text-warning small text-uppercase mb-0">Orphan Text Extracts</h6>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-warning text-dark rounded-pill">{{ findings.orphan_extracts|length }}</span>
+                    <a href="{{ url_for('main.health_page', action='clean_extracts') }}" class="btn btn-sm btn-outline-warning fw-bold py-0" onclick="return confirm('Delete all orphaned text files?')">Clean</a>
+                </div>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted small mb-3">Text extraction files that don't correspond to any document in the library.</p>
+                <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 200px;">
+                    {% for orphan in findings.orphan_extracts %}
+                    <div class="list-group-item small font-monospace py-2 text-truncate" title="{{ orphan.name }}">{{ orphan.name }}</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Refs Missing Doc -->
+    {% if findings.refs_missing_doc %}
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4 d-flex justify-content-between align-items-center">
+                <h6 class="card-title fw-bold text-info small text-uppercase mb-0">References Missing Documents</h6>
+                <span class="badge bg-info text-dark rounded-pill">{{ findings.refs_missing_doc|length }}</span>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted small mb-3">Bibliographic entries that exist in the library but have no physical files attached.</p>
+                <div class="list-group list-group-flush border rounded overflow-auto" style="max-height: 300px;">
+                    {% for ref in findings.refs_missing_doc %}
+                    <a href="{{ url_for('main.index') }}?q=tag == {{ ref }}" class="list-group-item list-group-item-action small py-2">{{ ref }}</a>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Metadata Quality -->
+    {% if findings.metadata_quality %}
+    <div class="col-md-6">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                <h6 class="card-title fw-bold text-muted small text-uppercase mb-0">Metadata Quality</h6>
+            </div>
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small">Missing DOI</span>
+                    <span class="badge {{ 'bg-warning' if findings.metadata_quality.missing_doi else 'bg-light text-muted' }} rounded-pill">{{ findings.metadata_quality.missing_doi }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small">Missing Year</span>
+                    <span class="badge {{ 'bg-warning' if findings.metadata_quality.missing_year else 'bg-light text-muted' }} rounded-pill">{{ findings.metadata_quality.missing_year }}</span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="small">Missing Source (Journal/Book)</span>
+                    <span class="badge {{ 'bg-warning' if findings.metadata_quality.missing_source else 'bg-light text-muted' }} rounded-pill">{{ findings.metadata_quality.missing_source }}</span>
+                </div>
+                <div class="mt-3 pt-3 border-top">
+                    <div class="progress" style="height: 10px;">
+                        {% set total = findings.metadata_quality.total %}
+                        {% if total > 0 %}
+                            {% set complete = total - findings.metadata_quality.missing_doi %}
+                            {% set pct = (complete / total * 100)|round|int %}
+                            <div class="progress-bar bg-success" role="progressbar" style="width: {{ pct }}%" aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"></div>
+                        {% endif %}
+                    </div>
+                    <div class="text-center mt-2 text-muted" style="font-size: 0.7rem;">DOI Completeness</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% if not findings.missing_physical_files and not findings.docs_missing_ref and not findings.refs_missing_doc and not findings.broken_tag_links and not findings.broken_id_links %}
+<div class="text-center py-5 mt-5">
+    <div class="mb-4 text-success opacity-25">
+        <i class="bi bi-shield-check" style="font-size: 8rem;"></i>
+    </div>
+    <h3 class="text-success fw-bold">Library is Healthy</h3>
+    <p class="text-muted">No structural issues or missing files were found in your library.</p>
+</div>
+{% endif %}
+
+{% endblock %}

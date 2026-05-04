@@ -37,11 +37,15 @@
                             </div>
                         </div>
 
-                        <div class="d-grid mt-4">
-                            <button type="submit" class="btn btn-primary btn-lg shadow-sm fw-bold">
+                        <div class="d-grid mt-4 text-center">
+                            <button type="submit" class="btn btn-primary btn-lg shadow-sm fw-bold w-100" id="submit-btn">
                                 <span id="process-indicator" class="htmx-indicator spinner-border spinner-border-sm me-2"></span>
-                                Start Processing
+                                <span class="btn-text">Start Processing</span>
                             </button>
+                            <div class="htmx-indicator mt-3 text-muted small animate-pulse" id="processing-msg">
+                                <i class="bi bi-gear-fill spin me-2"></i> 
+                                Downloading and analyzing document. Please wait, this may take a minute...
+                            </div>
                         </div>
                     </form>
                 </div>

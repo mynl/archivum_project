@@ -135,6 +135,32 @@ def remove_accents(s: str) -> str:
     )
 
 
+def trim_author(s):
+    """Clean author string: short names, truncate at 3 with et al. if more."""
+    if not isinstance(s, str) or not s:
+        return ""
+    # Split and clean
+    # Remove {} and handle LaTeX-style author strings
+    s = s.replace('{', '').replace('}', '')
+    author_bits = [i.split(",")[0].strip() for i in s.split(" and ")]
+    if len(author_bits) > 3:
+        name = ", ".join(author_bits[:3]) + " et al."
+    elif len(author_bits) == 3:
+        name = ", ".join(author_bits[:2]) + f", and {author_bits[2]}"
+    elif len(author_bits) == 2:
+        name = f"{author_bits[0]} and {author_bits[1]}"
+    else:
+        name = author_bits[0] if author_bits else ""
+    return name
+
+
+def clean_latex(s):
+    """Remove LaTeX braces from a string."""
+    if not isinstance(s, str):
+        return ""
+    return s.replace('{', '').replace('}', '')
+
+
 def accent_mapper_dict(names, verbose=False):
     """Make dict mapper for name -> accented name from list of names."""
     # both versions of the name must be in names

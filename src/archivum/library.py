@@ -1225,6 +1225,20 @@ class Library(LibraryBase):
         # 5. Orphan Text Extracts
         findings["orphan_extracts"] = self.clean_text_extracts(execute=False)
 
+        # 6. Metadata Quality
+        if not self.ref_df.empty:
+            findings["metadata_quality"] = {
+                "total": len(self.ref_df),
+                "missing_doi": int(self.ref_df.doi.isna().sum() + (self.ref_df.doi == "").sum()),
+                "missing_year": int(self.ref_df.year.isna().sum() + (self.ref_df.year == "").sum()),
+            }
+            # Journal/Booktitle source check
+            sources = self.ref_df.get('journal', pd.Series(dtype=str)).fillna("") + \
+                      self.ref_df.get('booktitle', pd.Series(dtype=str)).fillna("")
+            findings["metadata_quality"]["missing_source"] = int((sources == "").sum())
+        else:
+            findings["metadata_quality"] = {"total": 0, "missing_doi": 0, "missing_year": 0, "missing_source": 0}
+
         return findings
 
     def reset_library(self):

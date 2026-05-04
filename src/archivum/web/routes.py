@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context
 from ..cli import LibraryContext
+from ..utilities import trim_author, clean_latex
 import pandas as pd
 from pathlib import Path
 import logging
@@ -7,10 +8,55 @@ import json
 import html
 import subprocess
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
+# Simple in-memory cache for expensive library analytics
+_CACHE = {
+    'lib_id': None,
+    'last_sync': None,
+    'author_counts': None,
+    'history': None,
+    'insights': None
+}
+
+def get_cached_data(lib, key, calculator):
+    """Retrieve from cache or calculate if library state changed."""
+    global _CACHE
+    lib_id = id(lib)
+    last_sync = lib.ref_df.index.max() # Simple proxy for 'has changed'
+    
+    # Invalidate if it's a different library instance or if ref_df might have changed
+    if _CACHE['lib_id'] != lib_id or _CACHE['last_sync'] != last_sync:
+        _CACHE = {
+            'lib_id': lib_id,
+            'last_sync': last_sync,
+            'author_counts': None,
+            'history': None,
+            'insights': None
+        }
+    
+    if _CACHE.get(key) is None:
+        start_time = time.time()
+        _CACHE[key] = calculator()
+        logger.info(f"Calculated {key} in {time.time() - start_time:.2f}s")
+    
+    return _CACHE[key]
+
 bp = Blueprint('main', __name__)
+
+@bp.route('/health')
+def health_page():
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    
+    action = request.args.get('action')
+    if action == 'clean_extracts':
+        lib.clean_text_extracts(execute=True)
+    
+    findings = lib.audit()
+    return render_template('health.html', lib=lib, findings=findings)
 
 @bp.route('/ingest')
 def ingest_page():
@@ -304,73 +350,92 @@ def view_temp(filename):
     if not temp_path.exists(): abort(404)
     return send_file(str(temp_path.absolute()), mimetype='application/pdf')
 
+@bp.route('/authors')
+def authors_page():
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+
+    def calc_authors():
+        if lib.ref_df.empty: return []
+        exploded = lib.ref_df[['tag', 'author']].copy()
+        exploded['author'] = exploded['author'].str.split(' and ')
+        exploded = exploded.explode('author')
+        author_counts = exploded['author'].value_counts()
+        return [(name, count) for name, count in author_counts.items() if name and name.strip()]
+    
+    authors = get_cached_data(lib, 'author_counts', calc_authors)
+    selected_author = request.args.get('author', '')
+    
+    return render_template('authors.html', lib=lib, authors=authors, selected_author=selected_author)
+
 @bp.route('/insights')
 def insights_page():
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
     
-    # 1. Total Counts
-    total_refs = len(lib.ref_df)
-    total_docs = len(lib.doc_df)
-    
-    # Orphans (files with no tags)
-    tagged_hashes = set(lib.ref_doc_df.hash.unique())
-    total_orphans = len(lib.doc_df[~lib.doc_df.hash.isin(tagged_hashes)])
-    
-    # 2. Top Authors (need to explode first)
-    top_authors = []
-    if not lib.ref_df.empty and 'author' in lib.ref_df.columns:
-        exploded = lib.ref_df.assign(author=lib.ref_df.author.str.split(' and ')).explode('author')
-        top_authors = exploded['author'].value_counts().head(10).to_dict().items()
+    def calc_insights():
+        total_refs = len(lib.ref_df)
+        total_docs = len(lib.doc_df)
         
-    # 3. Top Journals
-    top_journals = []
-    if not lib.ref_df.empty:
-        # Check both journal and booktitle
-        sources = pd.concat([lib.ref_df.get('journal', pd.Series()), lib.ref_df.get('booktitle', pd.Series())])
-        top_journals = sources[sources != ""].value_counts().head(10).to_dict().items()
+        # Orphans (files with no tags)
+        tagged_hashes = set(lib.ref_doc_df.hash.unique())
+        total_orphans = len(lib.doc_df[~lib.doc_df.hash.isin(tagged_hashes)])
         
-    # 4. Top Years
-    top_years = []
-    if not lib.ref_df.empty and 'year' in lib.ref_df.columns:
-        top_years = lib.ref_df['year'].value_counts().head(10).to_dict().items()
-        # Sort by year instead of count
-        top_years = sorted(top_years, key=lambda x: str(x[0]), reverse=True)
-        
-    # 5. Top Publishers
-    top_publishers = []
-    if not lib.ref_df.empty and 'publisher' in lib.ref_df.columns:
-        top_publishers = lib.ref_df['publisher'][lib.ref_df.publisher != ""].value_counts().head(10).to_dict().items()
+        # 2. Top Authors (need to explode first)
+        top_authors = []
+        if not lib.ref_df.empty and 'author' in lib.ref_df.columns:
+            exploded = lib.ref_df.assign(author=lib.ref_df.author.str.split(' and ')).explode('author')
+            top_authors = exploded['author'].value_counts().head(10).to_dict().items()
+            
+        # 3. Top Journals
+        top_journals = []
+        if not lib.ref_df.empty:
+            sources = pd.concat([lib.ref_df.get('journal', pd.Series()), lib.ref_df.get('booktitle', pd.Series())])
+            top_journals = sources[sources != ""].value_counts().head(10).to_dict().items()
+            
+        # 4. Top Years
+        top_years = []
+        if not lib.ref_df.empty and 'year' in lib.ref_df.columns:
+            top_years = lib.ref_df['year'].value_counts().head(10).to_dict().items()
+            top_years = sorted(top_years, key=lambda x: str(x[0]), reverse=True)
+            
+        # 5. Top Publishers
+        top_publishers = []
+        if not lib.ref_df.empty and 'publisher' in lib.ref_df.columns:
+            top_publishers = lib.ref_df['publisher'][lib.ref_df.publisher != ""].value_counts().head(10).to_dict().items()
+
+        return {
+            'total_refs': total_refs,
+            'total_docs': total_docs,
+            'total_orphans': total_orphans,
+            'top_authors': top_authors,
+            'top_journals': top_journals,
+            'top_years': top_years,
+            'top_publishers': top_publishers
+        }
+
+    insights = get_cached_data(lib, 'insights', calc_insights)
+
+    # 6. Library History
+    def calc_history():
+        try:
+            history_df = lib.history()
+            if not history_df.empty:
+                return history_df.reset_index().to_dict('records')
+        except Exception as e:
+            logger.warning(f"Could not load library history: {e}")
+        return []
+
+    history = get_cached_data(lib, 'history', calc_history)
 
     return render_template('insights.html', 
                            lib=lib,
-                           total_refs=total_refs,
-                           total_docs=total_docs,
-                           total_orphans=total_orphans,
-                           top_authors=top_authors,
-                           top_journals=top_journals,
-                           top_years=top_years,
-                           top_publishers=top_publishers)
+                           **insights,
+                           history=history)
 
 @bp.route('/')
 def index():
     return render_template('query.html')
-
-def trim_author(s):
-    """Clean author string: short names, truncate at 3 with et al. if more."""
-    if not isinstance(s, str) or not s:
-        return ""
-    # Split and clean
-    author_bits = [i.split(",")[0].strip("{} ") for i in s.split(" and ")]
-    if len(author_bits) > 3:
-        name = ", ".join(author_bits[:3]) + " et al."
-    elif len(author_bits) == 3:
-        name = ", ".join(author_bits[:2]) + f", and {author_bits[2]}"
-    elif len(author_bits) == 2:
-        name = f"{author_bits[0]} and {author_bits[1]}"
-    else:
-        name = author_bits[0] if author_bits else ""
-    return name.replace('{', '').replace('}', '')
 
 def parse_rg_json(proc, lib):
     """Parse ripgrep JSON output and group by document with full metadata."""
@@ -450,6 +515,77 @@ def parse_rg_json(proc, lib):
         
     return blocks
 
+@bp.route('/author-search/<path:author>')
+def author_search(author):
+    lib = LibraryContext.get()
+    if lib.is_empty: return "No library"
+
+    # Use native querex sorting: order by -year
+    # We explicitly select year to ensure it's available for sorting
+    query_expr = f"select year, path, hash, type, * ! /{author}/ order by -year"
+    
+    try:
+        df = lib.database
+        result = df.querex(query_expr)
+        if not isinstance(result, pd.DataFrame):
+            return f"Query error: {result}"
+        
+        return _render_search_results(result, view_mode='list')
+        
+    except Exception as e:
+        logger.error(f"Author search error: {e}")
+        return f"Error: {str(e)}"
+
+def _prepare_search_results(df):
+    """Clean and format a DataFrame for display in search results."""
+    if not isinstance(df, pd.DataFrame):
+        return df
+    
+    display_results = df.copy()
+    
+    def find_col(df, target):
+        cols = {c.lower(): c for c in df.columns}
+        return cols.get(target.lower())
+
+    type_col = find_col(display_results, 'type')
+    year_col = find_col(display_results, 'year')
+    title_col = find_col(display_results, 'title')
+    author_col = find_col(display_results, 'author')
+    journal_col = find_col(display_results, 'journal')
+    publisher_col = find_col(display_results, 'publisher')
+
+    # Clean strings
+    for col in [title_col, author_col, journal_col, publisher_col]:
+        if col:
+            display_results[col] = display_results[col].apply(clean_latex)
+    
+    if author_col:
+        display_results['author_display'] = display_results[author_col].apply(trim_author)
+    else:
+        display_results['author_display'] = ""
+
+    if type_col:
+        display_results['is_book'] = display_results[type_col].fillna('').astype(str).str.lower().isin(['book', '@book'])
+    else:
+        display_results['is_book'] = False
+
+    if year_col:
+        display_results['year_display'] = display_results[year_col].fillna('').astype(str).apply(lambda x: x.split('.')[0] if '.' in x else x)
+    else:
+        display_results['year_display'] = ""
+        
+    if title_col:
+        display_results['title_display'] = display_results[title_col]
+    else:
+        display_results['title_display'] = "[No Title]"
+
+    return display_results
+
+def _render_search_results(df, view_mode='list'):
+    """Helper to render results consistently."""
+    prepared_df = _prepare_search_results(df)
+    return render_template('components/results.html', results=prepared_df, view_mode=view_mode)
+
 @bp.route('/search')
 def search():
     raw_query = request.args.get('q', '').strip()
@@ -478,9 +614,6 @@ def search():
 
     try:
         if search_type == 'f':
-            # Ensure we select type for book detection even in fuzzy mode
-            # querexfuzz 'f' mode (tag ~ ...) usually returns all columns if not specified,
-            # but we explicitly add them if we are constructing the expression.
             if query[0] != "!" and query.find("~") == -1:
                 query_expr = f"recent top 50 select type, * tag ~ {query}"
             else:
@@ -502,49 +635,8 @@ def search():
         if not isinstance(result, pd.DataFrame):
             return f"Query error: result is {type(result)}"
 
-        display_results = result.copy()
-        
-        def find_col(df, target):
-            cols = {c.lower(): c for c in df.columns}
-            return cols.get(target.lower())
-
-        type_col = find_col(display_results, 'type')
-        year_col = find_col(display_results, 'year')
-        title_col = find_col(display_results, 'title')
-        author_col = find_col(display_results, 'author')
-
-        def clean_latex(s):
-            if not isinstance(s, str):
-                return ""
-            return s.replace('{', '').replace('}', '')
-
-        # Clean strings
-        for col in [title_col, author_col, find_col(display_results, 'journal'), find_col(display_results, 'publisher')]:
-            if col:
-                display_results[col] = display_results[col].apply(clean_latex)
-        
-        if author_col:
-            display_results['author_display'] = display_results[author_col].apply(trim_author)
-        else:
-            display_results['author_display'] = ""
-
-        if type_col:
-            display_results['is_book'] = display_results[type_col].fillna('').astype(str).str.lower().isin(['book', '@book'])
-        else:
-            display_results['is_book'] = False
-
-        if year_col:
-            display_results['year_display'] = display_results[year_col].fillna('').astype(str).apply(lambda x: x.split('.')[0] if '.' in x else x)
-        else:
-            display_results['year_display'] = ""
-            
-        if title_col:
-            display_results['title_display'] = display_results[title_col]
-        else:
-            display_results['title_display'] = "[No Title]"
-
         view_mode = request.args.get('view_mode', 'list')
-        return render_template('components/results.html', results=display_results, view_mode=view_mode)
+        return _render_search_results(result, view_mode=view_mode)
     except Exception as e:
         logger.error(f"Search error: {e}")
         return f"<div class='error'>Error: {str(e)}</div>"
@@ -765,18 +857,41 @@ def status():
     }
     return render_template('status.html', status=status_info)
 
-@bp.route('/history')
-def history():
+@bp.route('/cloud')
+def cloud_page():
     lib = LibraryContext.get()
-    if lib.is_empty: return "No library open."
-    df = lib.history()
-    if not df.empty and 'created' in df.columns:
-        df = df.sort_values(by='created', ascending=False)
-    elif not df.empty:
-        # Fallback to first column if 'created' is missing
-        sort_col = next((c for c in df.columns if c.lower() in ['date', 'timestamp', 'time']), df.columns[0])
-        df = df.sort_values(by=sort_col, ascending=False)
-    return render_template('history.html', history=df)
+    if lib.is_empty: abort(404)
+    
+    import re
+    from collections import Counter
+    
+    # 1. Stop words (simple list for research)
+    stop_words = {
+        'the', 'a', 'an', 'and', 'or', 'of', 'for', 'in', 'on', 'with', 'by', 'to', 'from',
+        'is', 'are', 'was', 'were', 'that', 'this', 'those', 'these', 'it', 'its', 'their',
+        'as', 'at', 'into', 'using', 'based', 'based on', 'towards', 'through', 'between',
+        'during', 'each', 'every', 'other', 'some', 'any', 'all', 'such', 'very', 'not',
+        'than', 'more', 'about', 'under', 'over', 'between', 'can', 'will', 'should',
+        'method', 'model', 'approach', 'analysis', 'results', 'data', 'study', 'system',
+        'research', 'paper', 'new', 'proposed', 'using', 'use', 'via', 'from', 'an', 'a'
+    }
+    
+    # 2. Tokenize titles
+    words = []
+    for title in lib.ref_df.title.dropna():
+        # Remove LaTeX braces and non-alpha
+        clean_title = title.replace('{', '').replace('}', '').lower()
+        tokens = re.findall(r'\b[a-z]{4,}\b', clean_title) # Words with 4+ letters
+        words.extend([w for w in tokens if w not in stop_words])
+    
+    # 3. Frequency count
+    counts = Counter(words).most_common(100)
+    if not counts:
+        return render_template('cloud.html', lib=lib, words=[], max_weight=1)
+        
+    max_weight = counts[0][1]
+    
+    return render_template('cloud.html', lib=lib, words=counts, max_weight=max_weight)
 
 from ..import_bibtex import Bib2df_Incremental
 from ..bibtex import dict_to_bibtex
@@ -822,8 +937,3 @@ def edit_tag(tag):
     except Exception as e:
         logger.error(f"Error updating reference {tag}: {e}")
         return f"Error: {str(e)}", 500
-
-@bp.route('/sync-check')
-def sync_check():
-    lib = LibraryContext.get()
-    return ("reload-needed", 200) if lib.needs_reload else ("ok", 200)

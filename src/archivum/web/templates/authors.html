@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row g-0 border rounded shadow-sm bg-white overflow-hidden author-main-row">
+    <!-- Left Sidebar: Author List -->
+    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100 author-sidebar">
+        <div class="p-3 border-bottom bg-light">
+            <h6 class="mb-3 text-muted small fw-bold text-uppercase">Author Index</h6>
+            <div class="search-wrapper">
+                <input type="text" 
+                       id="author-filter" 
+                       placeholder="Filter authors..." 
+                       class="form-control form-control-sm border-2"
+                       onkeyup="filterAuthors(event)"
+                       autocomplete="off">
+                <i class="bi bi-x-circle clear-input" style="font-size: 0.8rem; right: 10px;" onclick="clearAuthorFilter()"></i>
+            </div>
+        </div>
+        
+        <div id="author-list" class="list-group list-group-flush overflow-auto flex-grow-1 author-list-container">
+            {% for author, count in authors %}
+            <button type="button" 
+                    class="author-item list-group-item list-group-item-action py-2 border-0 small d-flex justify-content-between align-items-center" 
+                    data-author="{{ author|lower }}"
+                    hx-get="{{ url_for('main.author_search', author=author) }}" 
+                    hx-target="#author-results"
+                    hx-trigger="click"
+                    onclick="setActiveAuthor(this)">
+                <span class="text-truncate me-2">{{ author }}</span>
+                <span class="badge bg-light text-muted border">{{ count }}</span>
+            </button>
+            {% endfor %}
+        </div>
+    </div>
+    
+    <!-- Right Panel: Bibliography -->
+    <div class="col-md-8 col-lg-9 d-flex flex-column h-100 bg-light-subtle bibliography-panel">
+        <div id="author-results" class="p-4 flex-grow-1 overflow-auto">
+            <div class="text-center py-5 mt-5">
+                <div class="mb-4 text-muted opacity-25">
+                    <i class="bi bi-people" style="font-size: 6rem;"></i>
+                </div>
+                <h4 class="text-muted fw-light">Select an Author</h4>
+                <p class="text-muted">Search and select an author from the sidebar to view their papers.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function filterAuthors(event) {
+        const input = document.getElementById('author-filter');
+        const filter = input.value.toLowerCase();
+        const items = document.querySelectorAll('.author-item');
+        
+        items.forEach(item => {
+            const author = item.getAttribute('data-author');
+            if (author.includes(filter)) {
+                item.classList.remove('d-none');
+            } else {
+                item.classList.add('d-none');
+            }
+        });
+    }
+
+    function clearAuthorFilter() {
+        const input = document.getElementById('author-filter');
+        input.value = '';
+        filterAuthors();
+        input.focus();
+    }
+
+    function setActiveAuthor(element) {
+        document.querySelectorAll('.author-item').forEach(el => el.classList.remove('active', 'fw-bold'));
+        element.classList.add('active', 'fw-bold');
+    }
+
+    // Keyboard Navigation
+    window.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+        
+        // Don't intercept if user is typing in the filter unless they want to move focus
+        // But in this high-density UI, arrows usually mean "navigate the list"
+        
+        const active = document.querySelector('.author-item.active');
+        const visibleItems = Array.from(document.querySelectorAll('.author-item:not(.d-none)'));
+        if (visibleItems.length === 0) return;
+
+        let next;
+        if (!active) {
+            next = visibleItems[0];
+        } else {
+            const index = visibleItems.indexOf(active);
+            if (e.key === 'ArrowDown') {
+                next = visibleItems[index + 1] || visibleItems[0];
+            } else {
+                next = visibleItems[index - 1] || visibleItems[visibleItems.length - 1];
+            }
+        }
+
+        if (next) {
+            e.preventDefault();
+            next.click();
+            next.scrollIntoView({ behavior: 'instant', block: 'nearest' });
+        }
+    });
+
+    // Auto-select author if passed in URL
+    window.addEventListener('load', () => {
+        const selectedAuthor = {{ selected_author|tojson }};
+        if (selectedAuthor) {
+            const items = document.querySelectorAll('.author-item');
+            for (const item of items) {
+                // Check against the raw text in the span
+                if (item.querySelector('span').innerText.trim() === selectedAuthor) {
+                    // Small delay to ensure HTMX is ready
+                    setTimeout(() => {
+                        item.click();
+                        item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }, 100);
+                    break;
+                }
+            }
+        }
+    });
+</script>
+
+<style>
+    .author-item { transition: background-color 0.05s ease; font-size: 0.82rem; }
+    .author-item.active { background-color: var(--primary-color) !important; color: white !important; }
+    .author-item.active .badge { background-color: rgba(255,255,255,0.2) !important; color: white !important; border: none !important; }
+
+    /* Desktop View */
+    @media (min-width: 768px) {
+        .author-main-row { height: calc(100vh - 100px); }
+    }
+
+    /* Mobile View */
+    @media (max-width: 767.98px) {
+        .author-main-row { height: auto; overflow: visible !important; }
+        .author-list-container { height: 12rem !important; border-bottom: 1px solid #dee2e6; }
+        .bibliography-panel { height: calc(100vh - 200px) !important; }
+    }
+</style>
+{% endblock %}
