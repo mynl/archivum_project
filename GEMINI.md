@@ -3,7 +3,6 @@
 ## User Profile
 - Expert Python programmer.
 - PhD in Mathematics / Qualified Actuary.
-- Prefer concise, direct answers without prefaces.
 - Use `uv` for all pip installs and environment management.
 
 ## Coding Rules

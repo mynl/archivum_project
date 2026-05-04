@@ -785,8 +785,12 @@ def rg_search():
         last_file = None
 
         def parse_stats(stats_text):
-            m = re.search(r'(\d+\.\d+) seconds spent searching', stats_text)
-            if m: return f"{float(m.group(1)):.3f}s"
+            # Ripgrep reports CPU time as 'X.X seconds spent searching' 
+            # and wall-clock time as just 'X.X seconds' on the next line.
+            m = re.findall(r'(\d+\.\d+) seconds', stats_text)
+            if m:
+                # The last match in the stats block is the wall-clock time
+                return f"{float(m[-1]):.3f}s"
             return "0.000s"
 
         stats_buffer = []
@@ -825,7 +829,8 @@ def rg_search():
             counts_list.sort(key=lambda x: x['count'], reverse=True)
             yield f"<div hx-swap-oob='innerHTML:#rg-results'>{render_template('components/rg_counts.html', counts=counts_list)}</div>"
             
-            stats_html = f"<div class='text-muted small'>Searched ~<b>{total_docs_in_lib}</b> docs; summarized <b>{len(counts_list)}</b> documents in <b>{rg_internal_time}</b></div>"
+            total_elapsed = time.time() - start_time
+            stats_html = f"<div class='text-muted small'>Searched ~<b>{total_docs_in_lib}</b> docs; summarized <b>{len(counts_list)}</b> documents in {total_elapsed:.3f}s (RG: {rg_internal_time})</div>"
             yield f"<div id='rg-stats-header' hx-swap-oob='innerHTML'>{stats_html}</div>"
             return
 
@@ -907,7 +912,8 @@ def rg_search():
             stats_html = (
                 f"<div class='d-flex align-items-center gap-3 text-muted small'>"
                 f"<span>Searched ~<b>{total_docs_in_lib}</b> docs; found <b>{total_matches}</b> matches in <b>{files_count}</b> files</span>"
-                f"<span class='border-start ps-3'>Time: {rg_internal_time}</span>"
+                f"<span class='border-start ps-3'>RG: {rg_internal_time}</span>"
+                f"<span class='border-start ps-3'>Total: {total_elapsed:.3f}s</span>"
                 f"</div>"
             )
             yield f"<div id='rg-stats-header' hx-swap-oob='innerHTML'>{stats_html}</div>"
