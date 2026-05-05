@@ -122,12 +122,27 @@
 </script>
 
 <style>
+    /* Independent scrolling for split-pane layout */
+    .author-main-row {
+        height: calc(100vh - 120px); /* Adjust based on navbar height */
+        overflow: hidden;
+    }
+    .author-sidebar {
+        height: 100%;
+        overflow-y: auto;
+    }
+    .bibliography-panel {
+        height: 100%;
+        overflow-y: auto;
+    }
+
     .author-item { transition: background-color 0.05s ease; font-size: 0.82rem; }
     .author-item.active { background-color: var(--primary-color) !important; color: white !important; }
     .author-item.active .badge { background-color: rgba(255,255,255,0.2) !important; color: white !important; border: none !important; }
 
     /* Mobile View */
     @media (max-width: 767.98px) {
+        .author-main-row { height: auto; overflow: visible; }
         .author-list-container { max-height: 15rem; overflow-y: auto; border-bottom: 1px solid #dee2e6; }
     }
 </style>

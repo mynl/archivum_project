@@ -16,9 +16,11 @@
                 <td class="ps-3 py-2">
                     <div class="d-flex align-items-center">
                         <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none fw-bold" target="_blank">{{ row.tag }}</a>
+                        {% if is_admin %}
                         <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-2 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
                             <i class="bi bi-pencil-square"></i>
                         </a>
+                        {% endif %}
                     </div>
                 </td>
                 <td class="author text-muted small">{{ row.author_display }}</td>
@@ -35,9 +37,11 @@
     <div class="list-item {{ 'book-row' if row.is_book else '' }}">
         <span class="tag-container">
             <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none" target="_blank">{{ row.tag }}</a>
+            {% if is_admin %}
             <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
                 <i class="bi bi-pencil-square" style="font-size: 0.7rem;"></i>
             </a>
+            {% endif %}
         </span>
         <span class="content-wrapper">
             <span class="year text-muted small fw-bold me-1">{{ row.year_display }}</span>

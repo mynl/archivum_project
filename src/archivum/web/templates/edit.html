@@ -170,7 +170,16 @@
     /* Desktop View */
     @media (min-width: 768px) {
         .edit-main-row {
-            height: calc(100vh - 100px);
+            height: calc(100vh - 120px);
+            overflow: hidden;
+        }
+        .tag-sidebar {
+            height: 100% !important;
+            overflow-y: auto;
+        }
+        .editor-panel {
+            height: 100% !important;
+            overflow-y: auto;
         }
     }
 
@@ -189,9 +198,6 @@
             max-height: 12rem !important;
             flex-grow: 0 !important;
             border-bottom: 1px solid #dee2e6;
-        }
-        .editor-panel {
-            height: calc(100vh - 200px) !important;
         }
     }
 </style>

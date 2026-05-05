@@ -1,4 +1,5 @@
-from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context, url_for, make_response
+from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context, url_for, make_response, g
+from functools import wraps
 from ..cli import LibraryContext
 from ..utilities import trim_author, clean_latex
 from ..quarto import generate_qmd_report
@@ -55,6 +56,14 @@ def get_cached_data(lib, key, calculator):
 
 bp = Blueprint('main', __name__)
 
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not getattr(g, 'is_admin', False):
+            return "Permission Denied: Read-only mode enabled for external access.", 403
+        return f(*args, **kwargs)
+    return decorated_function
+
 @bp.before_app_request
 def check_for_reload():
     """Check if the library needs a reload due to external changes."""
@@ -65,6 +74,7 @@ def check_for_reload():
         LibraryContext.refresh()
 
 @bp.route('/health')
+@admin_required
 def health_page():
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
@@ -83,11 +93,13 @@ def health_page():
     return render_template('health.html', lib=lib, findings=findings)
 
 @bp.route('/ingest')
+@admin_required
 def ingest_page():
     lib = LibraryContext.get()
     return render_template('ingest.html', lib=lib)
 
 @bp.route('/ingest/start', methods=['POST'])
+@admin_required
 def ingest_start():
     lib = LibraryContext.get()
     if lib.is_empty: abort(400, "No library open")
@@ -199,6 +211,7 @@ def ingest_start():
                            duplicate_tag=duplicate_tag)
 
 @bp.route('/ingest/enhance', methods=['POST'])
+@admin_required
 def ingest_enhance():
     lib = LibraryContext.get()
     action = request.args.get('action')
@@ -252,6 +265,7 @@ def ingest_enhance():
     return bibtex
 
 @bp.route('/ingest/commit', methods=['POST'])
+@admin_required
 def ingest_commit():
     lib = LibraryContext.get()
     bibtex = request.form.get('bibtex')
@@ -1082,6 +1096,7 @@ from ..import_bibtex import Bib2df_Incremental
 from ..bibtex import dict_to_bibtex
 
 @bp.route('/edit')
+@admin_required
 def editor_page():
     tag = request.args.get('tag', '').strip()
     return render_template('edit.html', initial_tag=tag)
@@ -1097,6 +1112,7 @@ def tag_suggest():
     return render_template('components/tag_suggestions.html', matches=matches)
 
 @bp.route('/edit-tag/<tag>', methods=['GET', 'POST'])
+@admin_required
 def edit_tag(tag):
     lib = LibraryContext.get()
     if lib.is_empty: return "No library open."

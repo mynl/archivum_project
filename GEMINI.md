@@ -154,6 +154,17 @@ The web interface (`archivum serve`) has been significantly enhanced to provide 
 - **Tag Uniqueness**: The editor handles tag changes by updating the junction table (`ref_doc.feather`) and verifying that new tags do not already exist before persisting.
 - **CSS Density**: Custom CSS in `style.css` enforces high-density layouts (3rem hanging indents for lists, 1.5rem for ripgrep) while maintaining readability.
 
+### 3. Security & Access Control (Split-Horizon)
+- **Model**: Archivum uses an IP-based privilege model to distinguish between Admin and Read-Only users.
+- **Admin Access**: Granted to local traffic (`127.0.0.1`), local LAN (`192.168.x.x`), and direct VPN tunnel (`10.8.0.2`). Admins have full access to Ingest, Edit, Status, and Health modules.
+- **Read-Only Access**: Applied to traffic routed through the VPS bridge (`10.8.0.1`). Restricted users see a "READ ONLY" badge and are blocked from all modification routes via the `@admin_required` decorator and conditional UI rendering.
+- **Implementation**: The privilege level is established in `src/archivum/web/app.py` via a `before_request` hook that populates `g.is_admin`.
+
+### 4. Web UI Design Standards
+- **High-Density Split Panes**: Pages with sidebars (e.g., Authors, Editor) MUST use independent scroll containers for the sidebar and the main content area. This is implemented via CSS `height: calc(100vh - 120px)` on the main row and `overflow-y: auto` on the columns.
+- **Responsive Behavior**: Ensure high-density layouts reflow to stacked views on mobile (max-width: 767.98px).
+- **HTMX Streaming**: The search and ripgrep engines use HTMX for streaming OOB updates to provide immediate feedback.
+
 # File Organizaion
 
 * Definitive library is \s\ShardedDocLibrary
