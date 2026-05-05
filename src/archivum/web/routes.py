@@ -1,6 +1,7 @@
-from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context
+from flask import Blueprint, render_template, request, send_file, abort, Response, stream_with_context, url_for, make_response
 from ..cli import LibraryContext
 from ..utilities import trim_author, clean_latex
+from ..quarto import generate_qmd_report
 import pandas as pd
 from pathlib import Path
 import logging
@@ -1110,3 +1111,119 @@ def edit_tag(tag):
     except Exception as e:
         logger.error(f"Error updating reference {tag}: {e}")
         return f"Error: {str(e)}", 500
+
+@bp.route('/export/abstracts')
+def export_abstracts():
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    
+    raw_query = request.args.get('q', '').strip()
+    if not raw_query:
+        raw_query = "top 50 recent"
+    
+    # Determine search type and actual query string (matches search() logic)
+    lower_query = raw_query.lower()
+    if lower_query.startswith('q '):
+        search_type = 'q'
+        query = raw_query[2:].strip()
+    elif lower_query.startswith('f '):
+        search_type = 'f'
+        query = raw_query[2:].strip()
+    else:
+        search_type = 'f'
+        query = raw_query
+
+    if not query:
+        return "Empty query.", 400
+
+    # Standardize query for querex
+    try:
+        if search_type == 'f':
+            if query[0] != "!" and query.find("~") == -1:
+                query_expr = f"recent top 50 select path, hash, type, * tag ~ {query}"
+            else:
+                query_expr = query
+                if "select" not in query_expr.lower():
+                    query_expr = "select path, hash, type, * " + query_expr
+                if "top" not in query_expr.lower():
+                    query_expr = "top 50 " + query_expr
+                if "recent" not in query_expr.lower():
+                    query_expr = "recent " + query_expr
+        else:
+            query_expr = query
+            if "select" not in query_expr.lower():
+                query_expr = "select path, hash, type, * " + query_expr
+
+        df = lib.database
+        result = df.querex(query_expr)
+        
+        if not isinstance(result, pd.DataFrame) or result.empty:
+            return "No results found for report generation.", 400
+
+        # Generate unique filename based on MM_DD and short hash of query
+        import hashlib
+        now = datetime.now()
+        q_hash = hashlib.md5(raw_query.encode()).hexdigest()[:4].upper()
+        base_name = f"abstracts_{now.strftime('%m_%d')}_{q_hash}"
+        qmd_path = lib.exports_dir_path / f"{base_name}.qmd"
+        html_path = lib.exports_dir_path / f"{base_name}.html"
+        
+        # 1. Generate QMD
+        generate_qmd_report(lib, result, qmd_path, include_abstract=True, query=raw_query, web_links=True)
+        
+        # 2. Render to HTML via native Quarto CLI
+        try:
+            render_cmd = [
+                'quarto', 'render', str(qmd_path),
+                '--to', 'html',
+                '--embed-resources'
+            ]
+            subprocess.run(render_cmd, check=True, capture_output=True, text=True, cwd=str(lib.exports_dir_path))
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Quarto render failed: {e.stderr}")
+            return f"Error rendering report: {e.stderr}", 500
+            
+        # 3. Return JSON with the URL for the frontend fetch
+        file_url = url_for('main.serve_export', filename=html_path.name)
+        return {"url": file_url}
+        
+    except Exception as e:
+        logger.error(f"Export error: {e}")
+        return f"Error generating report: {str(e)}", 500
+
+@bp.route('/export/list')
+def export_list():
+    lib = LibraryContext.get()
+    if lib.is_empty: return ""
+    
+    # Get all HTML files in exports dir, sorted by newest first
+    exports = []
+    try:
+        for p in lib.exports_dir_path.glob("*.html"):
+            qmd_p = p.with_suffix(".qmd")
+            exports.append({
+                'name': p.name,
+                'path': url_for('main.serve_export', filename=p.name),
+                'qmd_path': url_for('main.serve_export', filename=qmd_p.name) if qmd_p.exists() else None,
+                'mtime': p.stat().st_mtime,
+                'date': datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+            })
+        exports.sort(key=lambda x: x['mtime'], reverse=True)
+    except Exception as e:
+        logger.error(f"Error listing exports: {e}")
+        
+    return render_template('components/export_list.html', exports=exports[:15])
+
+@bp.route('/export/view/<filename>')
+def serve_export(filename):
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    
+    file_path = lib.exports_dir_path / filename
+    if not file_path.exists(): abort(404)
+    
+    mimetype = 'text/html'
+    if filename.endswith('.qmd'):
+        mimetype = 'text/plain'
+        
+    return send_file(str(file_path), mimetype=mimetype)

@@ -81,7 +81,7 @@ def sanitize_for_latex(text: str) -> str:
     return "".join(ch for ch in text if ord(ch) >= 32 or ch in '\n\r\t')
 
 
-def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | None = None, abstract: bool = True) -> str:
+def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | None = None, abstract: bool = True, web_links: bool = False) -> str:
     """
     Format a single reference line for QMD output, optionally including an abstract.
     
@@ -90,6 +90,7 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
         row: A Series containing bibliographic and document info.
         paras: Optional list of paragraph indices where the tag is cited.
         abstract: Whether to include an abstract if available.
+        web_links: If True, use web-friendly /view/<tag> links.
         
     Returns:
         A formatted Markdown string.
@@ -111,10 +112,13 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
 
     # Document link
     doc_path = None
-    if hasattr(row, "path") and pd.notna(row.path):
-        doc_path = lib.abspath(row.path)
-    
-    doc_link = f', <a target="_blank" href="{doc_path}">file</a>.' if doc_path and doc_path.exists() else "."
+    if web_links:
+        doc_link = f', <a target="_blank" href="/view/{tag}">file</a>.'
+    else:
+        if hasattr(row, "path") and pd.notna(row.path):
+            doc_path = lib.abspath(row.path)
+        
+        doc_link = f', <a target="_blank" href="{doc_path}">file</a>.' if doc_path and doc_path.exists() else "."
 
     line = f"* {tag} [@{tag}], {title_part}{meta}{paras_str}{doc_link}"
     
@@ -171,12 +175,17 @@ def build_qmd_header(title: str, bibtex_file: str, csl_file: str = DEFAULT_CSL) 
     """
     Build the YAML header for a QMD file.
     """
+    # Path to favicon - assuming it's in the standard location relative to this file
+    # or we can just use a hardcoded link if we assume the server is up.
+    # For a self-contained file, we'll try to use a local path if we can find it.
+    
     lines = [
         "---",
-        f"title: {title}",
+        f"title: \"{title}\"",
         "author: archivum.export",
-        f"bibliography: {Path(bibtex_file).as_posix()}",
-        f"csl: {csl_file}",
+        f"bibliography: \"{Path(bibtex_file).as_posix()}\"",
+        f"csl: \"{Path(csl_file).as_posix()}\"",
+        "link-citations: true",
         "date-modified: last-modified",
         "format:",
         "  html:",
@@ -186,21 +195,15 @@ def build_qmd_header(title: str, bibtex_file: str, csl_file: str = DEFAULT_CSL) 
         "    page-layout: article",
         "    link-external-icon: true",
         "    link-external-newwindow: true",
-        "  pdf:",
-        "    documentclass: article",
-        "    papersize: a4",
-        "    fontsize: 10pt",
-        "    keep-tex: true",
-        "    geometry: margin=1in",
-        "    reference-section-title: 'References'",
-        "    pdf-engine: tectonic",
+        "    header-includes: |",
+        "      <link rel=\"shortcut icon\" href=\"/static/icon/favicon.ico\">",
         "---",
         "",
     ]
     return "\n".join(lines)
 
 
-def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_abstract: bool = True, query: str = ""):
+def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_abstract: bool = True, query: str = "", web_links: bool = False):
     """
     Generate a standalone QMD report from a DataFrame.
     """
@@ -239,15 +242,22 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_a
         pdf = pdf.sort_values(sort_cols)
 
     header = build_qmd_header("Archivum Query Extract", lib.config.bibtex_file)
-    lines = [header, "## References", ""]
+    lines = [header, "## Abstracts", ""]
     if query:
         lines.append(f"Query: `{query}`")
         lines.append("")
 
     for _, row in pdf.iterrows():
-        lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract))
+        lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract, web_links=web_links))
         lines.append("")
         
+    lines.append("")
+    lines.append("## Bibliography")
+    lines.append("")
+    lines.append("::: {#refs}")
+    lines.append(":::")
+    lines.append("")
+
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 

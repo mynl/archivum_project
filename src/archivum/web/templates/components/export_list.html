@@ -1,0 +1,18 @@
+{% if exports %}
+<div class="dropdown-header small text-muted text-uppercase fw-bold">Recent Reports (Last 7 Days)</div>
+{% for export in exports %}
+<li class="d-flex align-items-center">
+    <a class="dropdown-item d-flex justify-content-between align-items-center gap-3 flex-grow-1" href="{{ export.path }}" target="_blank">
+        <span class="text-truncate" style="max-width: 200px;">{{ export.name }}</span>
+        <small class="text-muted">{{ export.date }}</small>
+    </a>
+    {% if export.qmd_path %}
+    <a href="{{ export.qmd_path }}" target="_blank" class="px-3 text-muted hover-primary" title="View Source QMD">
+        <i class="bi bi-code-square"></i>
+    </a>
+    {% endif %}
+</li>
+{% endfor %}
+{% else %}
+<li class="px-3 py-2 small text-muted">No recent reports found.</li>
+{% endif %}

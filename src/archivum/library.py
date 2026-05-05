@@ -80,6 +80,10 @@ class Library(LibraryBase):
         self.debug_dir_path = resolve_path(str(self.config.debug_dir))
         self.debug_dir_path.mkdir(parents=True, exist_ok=True)
 
+        self.exports_dir_path = self.config_path / "exports"
+        self.exports_dir_path.mkdir(parents=True, exist_ok=True)
+        self._cleanup_exports()
+
         # State for auto-reload
         self.needs_reload = False
         self._ignore_until = 0.0
@@ -147,6 +151,20 @@ class Library(LibraryBase):
             # self._observer.join()
             self._observer = None
             logger.debug(f"Stopped watcher for {self.config_path}")
+
+    def _cleanup_exports(self, days: int = 7):
+        """Remove export files older than specified days."""
+        try:
+            cutoff = time.time() - (days * 86400)
+            for p in self.exports_dir_path.iterdir():
+                if p.is_file() and p.stat().st_mtime < cutoff:
+                    try:
+                        p.unlink()
+                        logger.debug(f"Deleted old export: {p.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete {p.name}: {e}")
+        except Exception as e:
+            logger.error(f"Error during exports cleanup: {e}")
 
     def __repr__(self):
         """Create simple string representation."""

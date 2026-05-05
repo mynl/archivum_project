@@ -114,6 +114,13 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 
     <script>
+        // Global HTMX event listener for opening exports
+        document.body.addEventListener('open-export', function(evt) {
+            if (evt.detail && evt.detail.url) {
+                window.open(evt.detail.url, '_blank');
+            }
+        });
+
         // --- Search History & Input Utilities ---
         const searchHistories = {};
 
