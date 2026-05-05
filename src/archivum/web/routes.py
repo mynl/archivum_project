@@ -55,6 +55,15 @@ def get_cached_data(lib, key, calculator):
 
 bp = Blueprint('main', __name__)
 
+@bp.before_app_request
+def check_for_reload():
+    """Check if the library needs a reload due to external changes."""
+    lib = LibraryContext.get()
+    if not lib.is_empty and lib.needs_reload:
+        logger.info(f"External changes detected. Reloading library '{lib.name}' in web context.")
+        lib.reset()
+        LibraryContext.refresh()
+
 @bp.route('/health')
 def health_page():
     lib = LibraryContext.get()
