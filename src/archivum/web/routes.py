@@ -711,9 +711,9 @@ _RG_CACHE = {
     'lib_name': None,
     'last_sync': None,
     'date': None,
-    'data': {},      # key -> counts_dict
+    'data': {},      # key -> {'counts': dict, 'cmd': str}
     'html': {},      # key -> rendered_html_fragments
-    'stats': {}      # key -> {matches: X, docs: Y}
+    'stats': {}      # key -> {matches: X, docs: Y, cmd: str}
 }
 
 def get_rg_cache_item(lib, key, subkey='html'):
@@ -722,13 +722,13 @@ def get_rg_cache_item(lib, key, subkey='html'):
     feather_path = lib.config_path / "ref.feather"
     last_sync = feather_path.stat().st_mtime if feather_path.exists() else 0
     today = datetime.now().date()
-
+    
     if (_RG_CACHE['lib_name'] != lib_id or 
         _RG_CACHE['last_sync'] != last_sync or 
         _RG_CACHE['date'] != today):
         logger.info(f"Invalidating RG cache for {lib_id}")
         _RG_CACHE = {'lib_name': lib_id, 'last_sync': last_sync, 'date': today, 'data': {}, 'html': {}, 'stats': {}}
-
+    
     return _RG_CACHE[subkey].get(key)
 
 def set_rg_cache_item(key, value, subkey='html'):
@@ -887,10 +887,12 @@ def rg_search():
                     year, size = meta.get('year', '9999'), meta.get('size', 0)
                     total_matches_sum += count_val
                     total_papers_set.add(h_prefix)
-                    if year not in year_data: year_data[year] = {'papers': 0, 'matches': 0, 'size': 0}
+                    
+                    if year not in year_data: year_data[year] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
                     year_data[year]['papers'] += 1
                     year_data[year]['matches'] += count_val
                     year_data[year]['size'] += size
+                    year_data[year]['hashes'].add(h_prefix[:6])
 
                     raw_authors = meta.get('authors', 'Unknown')
                     author_list = [a.strip().replace('{', '').replace('}', '') for a in raw_authors.split(' and ')]

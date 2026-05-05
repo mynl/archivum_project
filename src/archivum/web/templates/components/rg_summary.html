@@ -4,22 +4,24 @@
         <div class="col-xl-6">
             <h6 class="fw-bold text-muted mb-3"><i class="bi bi-calendar3 me-2"></i>Chronological Summary</h6>
             <div class="table-responsive border rounded bg-white shadow-sm">
-                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;" data-sort-col="1" data-sort-dir="desc">
                     <thead class="table-light">
-                        <tr>
-                            <th class="text-start ps-3">Year</th>
-                            <th class="text-end">Papers</th>
-                            <th class="text-end">Pct</th>
-                            <th class="text-end">Matches</th>
-                            <th class="text-end">Pct</th>
-                            <th class="text-end">Mtc/Pap</th>
-                            <th class="text-end pe-3">Mtc/100KB</th>
+                        <tr style="cursor: pointer;">
+                            <th class="text-start ps-3" onclick="sortTable(this.closest('table'), 0, 'num')">Year</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 1, 'num')">Papers <i class="bi bi-sort-down-alt small text-muted"></i></th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 2, 'num')">Pct</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 3, 'num')">Matches</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 4, 'num')">Pct</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 5, 'num')">Mtc/Pap</th>
+                            <th class="text-end pe-3" onclick="sortTable(this.closest('table'), 6, 'num')">Mtc/100KB</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for row in year_rows %}
                         <tr>
-                            <td class="text-start ps-3 fw-bold">{{ row.label }}</td>
+                            <td class="text-start ps-3">
+                                <a href="/?q={{ row.hash_query | urlencode }}" class="text-decoration-none">{{ row.label }}</a>
+                            </td>
                             <td class="text-end">{{ "{:,d}".format(row.papers) }}</td>
                             <td class="text-end text-muted">{{ "{:.1f}%".format(row.papers_pct) }}</td>
                             <td class="text-end">{{ "{:,d}".format(row.matches) }}</td>
@@ -51,16 +53,16 @@
         <div class="col-xl-6">
             <h6 class="fw-bold text-muted mb-3"><i class="bi bi-person-lines-fill me-2"></i>Intellectual Summary (Top 100)</h6>
             <div class="table-responsive border rounded bg-white shadow-sm">
-                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;" data-sort-col="3" data-sort-dir="desc">
                     <thead class="table-light">
-                        <tr>
-                            <th class="text-start ps-3">Author</th>
-                            <th class="text-end">Papers</th>
-                            <th class="text-end">Pct</th>
-                            <th class="text-end">Matches</th>
-                            <th class="text-end">Pct</th>
-                            <th class="text-end">Mtc/Pap</th>
-                            <th class="text-end pe-3">Mtc/100KB</th>
+                        <tr style="cursor: pointer;">
+                            <th class="text-start ps-3" onclick="sortTable(this.closest('table'), 0, 'str')">Author <i class="bi bi-sort-alpha-down small text-muted"></i></th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 1, 'num')">Papers</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 2, 'num')">Pct</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 3, 'num')">Matches</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 4, 'num')">Pct</th>
+                            <th class="text-end" onclick="sortTable(this.closest('table'), 5, 'num')">Mtc/Pap</th>
+                            <th class="text-end pe-3" onclick="sortTable(this.closest('table'), 6, 'num')">Mtc/100KB</th>
                         </tr>
                     </thead>
                     <tbody>

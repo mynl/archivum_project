@@ -6,6 +6,38 @@
         document.getElementById('rg-results').innerHTML = '';
         document.getElementById('rg-status').style.display = 'none';
     }
+
+    /**
+     * Client-side table sorting.
+     * @param {string} tableId - The ID of the table or a selector to find the table.
+     * @param {number} colIdx - 0-based column index.
+     * @param {string} type - 'num' or 'str'.
+     */
+    function sortTable(tableElement, colIdx, type) {
+        const tbody = tableElement.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const isAsc = tableElement.dataset.sortCol === String(colIdx) && tableElement.dataset.sortDir === 'asc';
+        
+        rows.sort((a, b) => {
+            let aVal = a.cells[colIdx].innerText.replace(/[%|,]/g, '').trim();
+            let bVal = b.cells[colIdx].innerText.replace(/[%|,]/g, '').trim();
+            
+            if (type === 'num') {
+                aVal = parseFloat(aVal) || 0;
+                bVal = parseFloat(bVal) || 0;
+                return isAsc ? bVal - aVal : aVal - bVal;
+            } else {
+                return isAsc ? bVal.localeCompare(aVal) : aVal.localeCompare(bVal);
+            }
+        });
+
+        // Re-append sorted rows
+        rows.forEach(row => tbody.appendChild(row));
+        
+        // Update state
+        tableElement.dataset.sortCol = colIdx;
+        tableElement.dataset.sortDir = isAsc ? 'desc' : 'asc';
+    }
 </script>
 
 <div class="search-container row g-2 mb-2">
