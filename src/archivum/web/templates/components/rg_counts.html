@@ -2,15 +2,19 @@
 <div class="dense-list">
     {% for item in counts %}
     <div class="list-item">
-        <span class="count-badge" style="display: inline-block; min-width: 2rem; background: #eee; text-align: center; border-radius: 4px; padding: 0 4px; font-size: 0.8rem; margin-right: 0.5rem;">{{ item.count }}</span>
-        <span class="muted" style="margin-right: 0.5rem;">{{ item.hash }}</span>
-        {% if item.tag %}
-            <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag" target="_blank">{{ item.tag }}</a>
-        {% else %}
-            <span class="muted">[No Tag]</span>
-        {% endif %}
-        <span class="title">"{{ item.title }}"</span>
-        <span class="author muted" style="font-size: 0.9rem;">{{ item.authors }}</span>
+        <span class="badge-container">
+            <span class="line-number" style="display: inline-block; min-width: 2.8rem; text-align: center; vertical-align: middle; margin-right: 0.2rem;">{{ item.count }}</span>
+            <span class="text-muted small ms-1" style="font-family: monospace; font-size: 0.7rem;">{{ item.hash[:8] }}</span>
+        </span>
+        <span class="content-wrapper">
+            {% if item.tag %}
+                <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag text-decoration-none fw-bold me-2" target="_blank">{{ item.tag }}</a>
+            {% else %}
+                <span class="text-muted me-2">[No Tag]</span>
+            {% endif %}
+            <span class="title">"{{ item.title }}"</span>
+            <span class="author text-muted small ms-2">{{ item.authors }}</span>
+        </span>
     </div>
     {% endfor %}
 </div>

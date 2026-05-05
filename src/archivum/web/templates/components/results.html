@@ -1,48 +1,50 @@
 {% if results is not none and not results.empty %}
 {% if view_mode == 'table' %}
-<table>
-    <thead>
-        <tr>
-            <th>Tag</th>
-            <th>Author</th>
-            <th>Title</th>
-            <th>Source</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for _, row in results.iterrows() %}
-        <tr>
-            <td>
-                <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag" target="_blank">{{ row.tag }}</a>
-                <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-50 hover-opacity-100" title="Edit Tag">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="bi bi-pencil-square" viewBox="0 0 16 16">
-                      <path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/>
-                      <path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/>
-                    </svg>
-                </a>
-            </td>
-            <td class="author">{{ row.author_display }}</td>
-            <td class="title {{ 'fw-bold' if row.is_book else '' }}">{{ row.title_display }}</td>
-            <td class="journal">{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="table-responsive shadow-sm rounded">
+    <table class="table table-hover table-sm align-middle mb-0 bg-white">
+        <thead class="table-light">
+            <tr>
+                <th class="ps-3">Tag</th>
+                <th>Author</th>
+                <th>Title</th>
+                <th>Source</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for _, row in results.iterrows() %}
+            <tr class="{{ 'table-info-subtle' if row.is_book else '' }}">
+                <td class="ps-3 py-2">
+                    <div class="d-flex align-items-center">
+                        <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none fw-bold" target="_blank">{{ row.tag }}</a>
+                        <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-2 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
+                            <i class="bi bi-pencil-square"></i>
+                        </a>
+                    </div>
+                </td>
+                <td class="author text-muted small">{{ row.author_display }}</td>
+                <td class="title {{ 'fw-bold' if row.is_book else '' }}">{{ row.title_display }}</td>
+                <td class="journal small"><i>{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</i></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% else %}
 <div class="dense-list">
     {% for _, row in results.iterrows() %}
-    <div class="list-item">
-        <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag" target="_blank">{{ row.tag }}</a>
-        <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="me-2 text-muted opacity-50 hover-opacity-100" title="Edit Tag">
-            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" class="bi bi-pencil-square" viewBox="0 0 16 16">
-              <path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/>
-              <path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/>
-            </svg>
-        </a>
-        <span class="year">{{ row.year_display }}</span>
-        <span class="title {{ 'fw-bold' if row.is_book else '' }}">"{{ row.title_display }}"</span>
-        <span class="author">{{ row.author_display }}</span>
-        <span class="journal"><i>{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</i></span>
+    <div class="list-item {{ 'book-row' if row.is_book else '' }}">
+        <span class="tag-container">
+            <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none" target="_blank">{{ row.tag }}</a>
+            <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
+                <i class="bi bi-pencil-square" style="font-size: 0.7rem;"></i>
+            </a>
+        </span>
+        <span class="content-wrapper">
+            <span class="year text-muted small fw-bold me-1">{{ row.year_display }}</span>
+            <span class="title {{ 'fw-bold' if row.is_book else '' }}">"{{ row.title_display }}"</span>
+            <span class="author text-muted small ms-1">{{ row.author_display }}</span>
+            <span class="journal small ms-1"><i>{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</i></span>
+        </span>
     </div>
     {% endfor %}
 </div>

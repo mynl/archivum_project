@@ -2,13 +2,17 @@
 <div class="dense-list">
     {% for item in files %}
     <div class="list-item">
-        <a href="{{ url_for('main.view_hash', h=item.hash) }}" class="tag" target="_blank">{{ item.hash[:12] }}</a>
-        {% if item.tag %}
-            <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag" target="_blank">{{ item.tag }}</a>
-        {% else %}
-            <span class="muted">[No Tag]</span>
-        {% endif %}
-        <span class="title">"{{ item.title }}"</span>
+        <span class="badge-container">
+            <span class="text-muted small fw-bold" style="font-family: monospace;">{{ item.hash[:12] }}</span>
+        </span>
+        <span class="content-wrapper">
+            {% if item.tag %}
+                <a href="{{ url_for('main.view', tag=item.tag) }}" class="tag text-decoration-none fw-bold me-2" target="_blank">{{ item.tag }}</a>
+            {% else %}
+                <span class="text-muted me-2">[No Tag]</span>
+            {% endif %}
+            <span class="title">"{{ item.title }}"</span>
+        </span>
     </div>
     {% endfor %}
 </div>

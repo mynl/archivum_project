@@ -1,10 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="row g-0 border rounded shadow-sm bg-white overflow-hidden author-main-row">
+<div class="row g-0 border rounded shadow-sm bg-white author-main-row">
     <!-- Left Sidebar: Author List -->
-    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100 author-sidebar">
-        <div class="p-3 border-bottom bg-light">
+    <div class="col-md-4 col-lg-3 border-end d-flex flex-column author-sidebar">
+        <div class="p-3 border-bottom bg-light sticky-top" style="top: 60px; z-index: 10;">
             <h6 class="mb-3 text-muted small fw-bold text-uppercase">Author Index</h6>
             <div class="search-wrapper">
                 <input type="text" 
@@ -17,7 +17,7 @@
             </div>
         </div>
         
-        <div id="author-list" class="list-group list-group-flush overflow-auto flex-grow-1 author-list-container">
+        <div id="author-list" class="list-group list-group-flush author-list-container">
             {% for author, count in authors %}
             <button type="button" 
                     class="author-item list-group-item list-group-item-action py-2 border-0 small d-flex justify-content-between align-items-center" 
@@ -34,8 +34,8 @@
     </div>
     
     <!-- Right Panel: Bibliography -->
-    <div class="col-md-8 col-lg-9 d-flex flex-column h-100 bg-light-subtle bibliography-panel">
-        <div id="author-results" class="p-4 flex-grow-1 overflow-auto">
+    <div class="col-md-8 col-lg-9 d-flex flex-column bg-light-subtle bibliography-panel">
+        <div id="author-results" class="p-4 flex-grow-1">
             <div class="text-center py-5 mt-5">
                 <div class="mb-4 text-muted opacity-25">
                     <i class="bi bi-people" style="font-size: 6rem;"></i>
@@ -79,9 +79,6 @@
     window.addEventListener('keydown', (e) => {
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
         
-        // Don't intercept if user is typing in the filter unless they want to move focus
-        // But in this high-density UI, arrows usually mean "navigate the list"
-        
         const active = document.querySelector('.author-item.active');
         const visibleItems = Array.from(document.querySelectorAll('.author-item:not(.d-none)'));
         if (visibleItems.length === 0) return;
@@ -101,6 +98,7 @@
         if (next) {
             e.preventDefault();
             next.click();
+            // Optional: only scroll if it's not visible
             next.scrollIntoView({ behavior: 'instant', block: 'nearest' });
         }
     });
@@ -111,9 +109,7 @@
         if (selectedAuthor) {
             const items = document.querySelectorAll('.author-item');
             for (const item of items) {
-                // Check against the raw text in the span
                 if (item.querySelector('span').innerText.trim() === selectedAuthor) {
-                    // Small delay to ensure HTMX is ready
                     setTimeout(() => {
                         item.click();
                         item.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -130,16 +126,9 @@
     .author-item.active { background-color: var(--primary-color) !important; color: white !important; }
     .author-item.active .badge { background-color: rgba(255,255,255,0.2) !important; color: white !important; border: none !important; }
 
-    /* Desktop View */
-    @media (min-width: 768px) {
-        .author-main-row { height: calc(100vh - 100px); }
-    }
-
     /* Mobile View */
     @media (max-width: 767.98px) {
-        .author-main-row { height: auto; overflow: visible !important; }
-        .author-list-container { height: 12rem !important; border-bottom: 1px solid #dee2e6; }
-        .bibliography-panel { height: calc(100vh - 200px) !important; }
+        .author-list-container { max-height: 15rem; overflow-y: auto; border-bottom: 1px solid #dee2e6; }
     }
 </style>
 {% endblock %}

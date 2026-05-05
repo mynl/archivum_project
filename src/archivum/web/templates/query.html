@@ -19,82 +19,110 @@
     </div>
 </div>
 
-<div class="view-options d-flex align-items-center gap-2">
-    <button class="btn btn-outline-primary btn-sm fw-bold" 
-            onclick="executeRecent()">Recent</button>
+<div class="view-options d-flex flex-wrap align-items-center gap-3 shadow-sm">
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-outline-primary btn-sm fw-bold" 
+                onclick="executeRecent()">
+            Recent
+        </button>
 
-    <div class="btn-group shadow-sm">
-        <button class="btn btn-outline-success btn-sm fw-bold"
-                onclick="generateAbstracts()">
-            <i class="bi bi-file-earmark-pdf-fill me-1"></i> Abstracts
-        </button>
-        <button type="button" class="btn btn-outline-success btn-sm dropdown-toggle dropdown-toggle-split" 
-                data-bs-toggle="dropdown" aria-expanded="false"
-                hx-get="{{ url_for('main.export_list') }}"
-                hx-trigger="click"
-                hx-target="#export-list-container">
-            <span class="visually-hidden">Toggle Dropdown</span>
-        </button>
-        <ul id="export-list-container" class="dropdown-menu dropdown-menu-end shadow-lg border-0" style="min-width: 350px;">
-            <li class="px-3 py-2 text-center">
-                <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-            </li>
-        </ul>
+        <div class="btn-group">
+            <button class="btn btn-outline-success btn-sm fw-bold"
+                    onclick="generateAbstracts()">
+                Abstracts
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm dropdown-toggle dropdown-toggle-split" 
+                    data-bs-toggle="dropdown" aria-expanded="false"
+                    hx-get="{{ url_for('main.export_list') }}"
+                    hx-trigger="click"
+                    hx-target="#export-list-container">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul id="export-list-container" class="dropdown-menu dropdown-menu-end shadow-lg border-0" style="min-width: 350px;">
+                <li class="px-3 py-2 text-center">
+                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
+                </li>
+            </ul>
+        </div>
+
+        <div id="export-indicator" class="htmx-indicator d-flex align-items-center gap-1 text-success small">
+            <div class="spinner-border spinner-border-sm" role="status"></div>
+        </div>
     </div>
 
-    <script>
-        async function generateAbstracts() {
-            const queryInput = document.getElementById('search-input');
-            const indicator = document.getElementById('export-indicator');
-            const query = queryInput ? queryInput.value : '';
-            
-            indicator.classList.add('htmx-request');
-            
-            try {
-                const response = await fetch(`{{ url_for('main.export_abstracts') }}?q=${encodeURIComponent(query)}`, {
-                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.url) {
-                        window.open(data.url, '_blank');
-                    }
-                } else {
-                    const errText = await response.text();
-                    alert("Export failed: " + errText);
-                }
-            } catch (e) {
-                console.error(e);
-                alert("Error: " + e.message);
-            } finally {
-                indicator.classList.remove('htmx-request');
-            }
-        }
-    </script>
+    <div class="ms-auto d-flex align-items-center gap-2">
+        <!-- Desktop View: Radio Buttons -->
+        <div class="btn-group d-none d-md-inline-flex" role="group">
+            <input type="radio" class="btn-check" name="view_mode" id="view_list" value="list" checked 
+                   hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
+            <label class="btn btn-outline-secondary btn-sm" for="view_list">Dense List</label>
 
-    <!-- Hidden sink for the JS trigger -->
-    <div id="export-sink" hx-swap="innerHTML settle:1s" style="display:none;"></div>
-    
-    <div id="export-indicator" class="htmx-indicator d-flex align-items-center gap-2 text-success small ms-2">
-        <div class="spinner-border spinner-border-sm" role="status"></div>
-        <span>Generating Report...</span>
-    </div>
+            <input type="radio" class="btn-check" name="view_mode" id="view_table" value="table" 
+                   hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
+            <label class="btn btn-outline-secondary btn-sm" for="view_table">Table</label>
+        </div>
 
-    <div class="btn-group ms-auto" role="group">
-        <input type="radio" class="btn-check" name="view_mode" id="view_list" value="list" checked 
-               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
-        <label class="btn btn-outline-secondary btn-sm" for="view_list">Dense List</label>
-
-        <input type="radio" class="btn-check" name="view_mode" id="view_table" value="table" 
-               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
-        <label class="btn btn-outline-secondary btn-sm" for="view_table">Table</label>
+        <!-- Mobile View: Tools Dropdown -->
+        <div class="dropdown d-md-none">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                View
+            </button>
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                <li><h6 class="dropdown-header text-uppercase small pb-1">View Mode</h6></li>
+                <li>
+                    <a class="dropdown-item d-flex align-items-center" href="#" onclick="document.getElementById('view_list').click(); return false;">
+                        <i class="bi bi-list-ul me-2"></i> Dense List
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item d-flex align-items-center" href="#" onclick="document.getElementById('view_table').click(); return false;">
+                        <i class="bi bi-table me-2"></i> Table
+                    </a>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
-<div id="results" class="mt-4">
+<script>
+    async function generateAbstracts() {
+        const queryInput = document.getElementById('search-input');
+        const indicator = document.getElementById('export-indicator');
+        const query = queryInput ? queryInput.value : '';
+        
+        indicator.classList.add('htmx-request');
+        
+        try {
+            const response = await fetch(`{{ url_for('main.export_abstracts') }}?q=${encodeURIComponent(query)}`, {
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                if (data.url) {
+                    window.open(data.url, '_blank');
+                }
+            } else {
+                const errText = await response.text();
+                alert("Export failed: " + errText);
+            }
+        } catch (e) {
+            console.error(e);
+            alert("Error: " + e.message);
+        } finally {
+            indicator.classList.remove('htmx-request');
+        }
+    }
+</script>
+
+<!-- Hidden sink for the JS trigger -->
+<div id="export-sink" hx-swap="innerHTML settle:1s" style="display:none;"></div>
+
+<div id="results" class="mt-4 shadow-sm rounded bg-white overflow-hidden">
     <!-- Results will be loaded here via HTMX -->
-    <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
+    <div class="p-4">
+        <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
+    </div>
 </div>
 
 {% include "components/edit_modal.html" %}

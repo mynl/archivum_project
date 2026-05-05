@@ -53,55 +53,74 @@ header img {
     color: var(--primary-color) !important;
 }
 
-/* 4. Dense List Styling (with improved wrapping) */
+/* 5. View Options & Tools Bar */
+.view-options {
+    background-color: #f8f9fa;
+    padding: 0.6rem 1rem;
+    border-radius: 10px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 1.5rem;
+    transition: box-shadow 0.2s;
+}
+
+.view-options .btn {
+    padding-top: 0.35rem;
+    padding-bottom: 0.35rem;
+}
+/* 4. Dense List Styling (Bibliography Hanging Indent) */
 .dense-list {
     font-family: SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 0.85rem;
-    line-height: 1.4;
+    line-height: 1.5;
 }
 
 .list-item {
-    padding: 0.6rem 0.5rem 0.6rem 4.5rem;
-    text-indent: -4.5rem;
-    border-bottom: 1px solid #eee;
+    padding: 0.5rem 1rem 0.5rem 5rem; /* Wrapped lines start at 5rem */
+    text-indent: -4rem; /* First line (the tag) starts at 1rem (5 - 4) */
+    border-bottom: 1px solid #f0f0f0;
+    word-break: break-word;
+}
+
+.list-item:last-child {
+    border-bottom: none;
 }
 
 .list-item:hover {
-    background-color: #f8f9fa;
+    background-color: #fcfcfc;
 }
 
 .list-item.book-row {
     background-color: #fffafa;
 }
 
-.list-item .tag {
+.list-item.book-row:hover {
+    background-color: #fff5f5;
+}
+
+.list-item .tag-container, .list-item .badge-container {
     display: inline-block;
-    width: 140px;
+    width: auto;
+    margin-right: 1rem; /* Small, consistent gap before title/metadata */
+    text-indent: 0;
+    vertical-align: top;
+}
+
+.list-item .tag {
     font-weight: 600;
     color: var(--primary-color);
-    text-decoration: none;
+}
+
+.list-item .content-wrapper {
     text-indent: 0;
 }
 
-.list-item > * {
-    text-indent: 0;
-    margin-right: 0.6rem;
-}
-
-/* 5. Ripgrep Specifics */
-.view-options {
-    background-color: #f8f9fa;
-    padding: 0.75rem 1rem;
-    border-radius: 8px;
-    border: 1px solid #dee2e6;
-    margin-bottom: 1.5rem;
-}
 
 .rg-block {
     margin-bottom: 1.5rem;
     border: 1px solid #dee2e6;
     border-radius: 6px;
     background-color: #fff;
+    overflow: hidden;
 }
 
 .rg-header {
@@ -120,7 +139,7 @@ header img {
 .rg-line {
     display: flex;
     gap: 1rem;
-    padding: 0.15rem 1rem;
+    padding: 0.1rem 1rem;
 }
 
 .rg-line.context {
@@ -128,9 +147,16 @@ header img {
 }
 
 .rg-line .line-number {
-    flex: 0 0 50px;
+    flex: 0 0 55px;
     text-align: right;
-    color: #6c757d;
+    color: #495057;
+    background-color: #e9ecef; /* Slightly darker grey box */
+    padding: 0 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    user-select: none;
+    border: 1px solid #dee2e6;
 }
 
 .rg-line .line-text {
@@ -184,12 +210,13 @@ mark {
 
 @media (max-width: 768px) {
     .list-item {
-        padding-left: 0.5rem;
+        padding-left: 0.75rem;
         text-indent: 0;
     }
-    .list-item .tag {
+    .list-item .tag-container, .list-item .badge-container {
         display: block;
-        width: auto;
+        width: 100%;
+        margin-bottom: 0.25rem;
     }
 }
 
