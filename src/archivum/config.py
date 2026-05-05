@@ -77,6 +77,7 @@ class Configurator(BaseModel):
     max_table_inch_width: int = Field(12, gt=0, description="Maximum width for table display in inches.")
     editor_command: str = Field("subl", description="Command to open the text editor (e.g., 'subl' or path to exe).")
     pdf_viewer_command: Optional[str] = Field(None, description="Command to open PDFs (e.g., 'SumatraPDF'). None uses system default.")
+    ddjvu_command: str = Field("ddjvu", description="Path to the ddjvu executable.")
     tag_name_mapper: dict[str, str] = Field(default_factory=dict,
         description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
 

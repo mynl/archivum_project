@@ -46,7 +46,7 @@ from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 from .library import Library
 from .document import Document  # type: ignore[import-untyped]
 from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, GLOBAL_CONFIG
-from .utilities import make_qd
+from .utilities import make_qd, djvu_convert_file
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
 from .bibtex import dict_to_bibtex, dict_to_bibtex_crossref
@@ -2366,6 +2366,23 @@ def hash(hash_str, open_doc, verbose):
             lib.open_document(p)
 
 
+@entry.command(name="djvu-convert-file")
+@click.argument("in_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("out_path", type=click.Path(path_type=Path))
+@click.option("-v", "--verbose", is_flag=True, help="Show verbose output from subprocesses.")
+def djvu_convert_file_cmd(in_path, out_path, verbose):
+    """Convert a single DjVu file to a searchable PDF."""
+    lib = LibraryContext.get()
+    config = None if lib.is_empty else lib.config
+    
+    click.echo(f"Converting {in_path.name} to {out_path.name}...")
+    success = djvu_convert_file(in_path, out_path, verbose=verbose, config=config)
+    if success:
+        click.secho("Success!", fg="green")
+    else:
+        click.secho("Failed!", fg="red")
+
+
 @entry.command(name="link-tag-hash")
 @click.argument("tag", type=str)
 @click.argument("file_hash", type=str)
@@ -2734,6 +2751,7 @@ def uber(lib_name="", auto_open=True, debug=False):
     completers["stage-enhance"] = PathCompleter(only_directories=False, expanduser=True)
     completers["qmd-bibtex"] = PathCompleter(only_directories=False, expanduser=True)
     completers["qmd-ref-summary"] = PathCompleter(only_directories=False, expanduser=True)
+    completers["djvu-convert-file"] = PathCompleter(only_directories=False, expanduser=True)
 
     # Register QT commands, exclude 'uber' to prevent recursion
     shell.register_click_group(entry, exclude=["uber"], completers=completers)

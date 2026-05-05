@@ -12,10 +12,80 @@ from IPython.display import display as ip_display
 import numpy as np
 import pandas as pd
 
+import subprocess
+from tqdm import tqdm
+
 from greater_tables import GT
 
 
 logger = logging.getLogger(__name__)
+
+
+def djvu_convert_file(in_path: Path, out_path: Path, verbose: bool = False, config=None) -> bool:
+    """
+    Convert a DjVu file to a searchable PDF.
+    
+    Uses ddjvu for initial conversion and ocrmypdf (via WSL) for OCR.
+    """
+    in_path = Path(in_path)
+    out_path = Path(out_path)
+    
+    if not in_path.exists():
+        logger.error(f"Input file not found: {in_path}")
+        return False
+
+    temp_pdf = out_path.with_suffix(".temp.pdf")
+    
+    try:
+        # Get ddjvu command from config or default
+        ddjvu_exe = "ddjvu"
+        if config and hasattr(config, 'ddjvu_command'):
+            ddjvu_exe = config.ddjvu_command
+
+        # 1. Convert DjVu to PDF using ddjvu
+        ddjvu_cmd = [ddjvu_exe, "-format=pdf", str(in_path), str(temp_pdf)]
+        if verbose:
+            print(f"Running: {' '.join(ddjvu_cmd)}")
+        
+        subprocess.run(ddjvu_cmd, check=True, capture_output=not verbose)
+        
+        # 2. Add OCR layer using ocrmypdf via WSL
+        # We need to translate Windows paths to WSL paths
+        def to_wsl_path(p: Path) -> str:
+            # Use as_posix() to get forward slashes, which wslpath handles safely
+            # without double-escaping issues.
+            windows_path = str(p.absolute().as_posix())
+            res = subprocess.run(["wsl", "wslpath", "-a", windows_path], 
+                               capture_output=True, text=True, check=True)
+            return res.stdout.strip()
+
+        wsl_temp_pdf = to_wsl_path(temp_pdf)
+        wsl_out_path = to_wsl_path(out_path)
+
+        ocrmy_cmd = ["wsl", "ocrmypdf", "--skip-text", wsl_temp_pdf, wsl_out_path]
+        if verbose:
+            print(f"Running: {' '.join(ocrmy_cmd)}")
+            
+        subprocess.run(ocrmy_cmd, check=True, capture_output=not verbose)
+        
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Error during conversion of {in_path}: {e}")
+        if e.stderr:
+            err_msg = e.stderr if isinstance(e.stderr, str) else e.stderr.decode(errors="replace")
+            logger.error(f"Subprocess stderr: {err_msg}")
+        return False
+    except FileNotFoundError as e:
+        logger.error(f"Required tool not found: {e}")
+        return False
+    finally:
+        # Cleanup temp file
+        if temp_pdf.exists():
+            try:
+                temp_pdf.unlink()
+            except Exception as e:
+                logger.warning(f"Failed to delete temp file {temp_pdf}: {e}")
 
 
 def safe_int(s):
