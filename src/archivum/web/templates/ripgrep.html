@@ -8,7 +8,7 @@
     }
 </script>
 
-<div class="search-container row g-2">
+<div class="search-container row g-2 mb-2">
     <div class="col">
         <div class="search-wrapper">
             <input type="text" 
@@ -29,67 +29,100 @@
             <i class="bi bi-x-circle clear-input" onclick="clearInput('rg-input')"></i>
         </div>
     </div>
-    <div class="col-auto">
+</div>
+
+<div id="rg-controls" class="view-options">
+    <!-- Cache Warming Trigger (Hidden) -->
+    <div hx-get="{{ url_for('main.rg_warm') }}" hx-trigger="load" hx-swap="none" style="display:none;"></div>
+
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <!-- Main Actions (Separate Buttons) -->
+        <button hx-get="{{ url_for('main.rg_search') }}" 
+                hx-vals='{"summary": "true"}'
+                hx-target="#rg-stream-sink" 
+                hx-swap="innerHTML"
+                hx-include="#rg-input, #rg-controls input"
+                hx-indicator="#rg-indicator"
+                hx-on:click="clearResults()"
+                class="btn btn-success px-4 shadow-sm">
+            Summary
+        </button>
+        <button hx-get="{{ url_for('main.rg_search') }}" 
+                hx-vals='{"counts": "true"}'
+                hx-target="#rg-stream-sink" 
+                hx-swap="innerHTML"
+                hx-include="#rg-input, #rg-controls input"
+                hx-indicator="#rg-indicator"
+                hx-on:click="clearResults()"
+                class="btn btn-warning px-4 shadow-sm text-dark">
+            Counts
+        </button>
         <button hx-get="{{ url_for('main.rg_search') }}" 
                 hx-target="#rg-stream-sink" 
                 hx-swap="innerHTML"
                 hx-include="#rg-input, #rg-controls input"
                 hx-indicator="#rg-indicator"
                 hx-on:click="clearResults()"
-                class="btn btn-primary btn-lg px-4"
-                style="height: 100%;">
-            Execute
+                class="btn btn-primary px-4 shadow-sm">
+            Details
+        </button>
+
+        <button class="btn btn-outline-secondary btn-sm ms-2 shadow-sm" type="button" data-bs-toggle="collapse" data-bs-target="#extra-options" aria-expanded="false">
+            <i class="bi bi-gear-fill me-1"></i> Options
         </button>
     </div>
-</div>
 
-<div id="rg-controls" class="view-options">
-    <div class="d-flex flex-wrap align-items-center gap-3">
-        <!-- Modes -->
-        <div class="d-flex gap-2 pe-3 border-end">
-            <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"counts": "true"}' 
-                    hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
-                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm">Counts</button>
-        </div>
+    <!-- Collapsible Extra Options -->
+    <div class="collapse" id="extra-options">
+        <div class="card card-body p-3 mb-3 border-0 bg-light shadow-sm">
+            <div class="d-flex flex-wrap align-items-center gap-3">
+                <!-- Filter -->
+                <div class="pe-3 border-end">
+                    <span class="small fw-bold text-muted d-block mb-1">FILTER:</span>
+                    <div class="btn-group" role="group">
+                        <input type="radio" class="btn-check" name="filter" id="filter_tagged" value="tagged" checked>
+                        <label class="btn btn-outline-secondary btn-sm" for="filter_tagged">Tagged</label>
+                        <input type="radio" class="btn-check" name="filter" id="filter_all" value="all">
+                        <label class="btn btn-outline-secondary btn-sm" for="filter_all">All</label>
+                    </div>
+                </div>
 
-        <!-- Filter -->
-        <div class="pe-3 border-end">
-            <div class="btn-group" role="group">
-                <input type="radio" class="btn-check" name="filter" id="filter_tagged" value="tagged" checked>
-                <label class="btn btn-outline-secondary btn-sm" for="filter_tagged">Tagged</label>
-                <input type="radio" class="btn-check" name="filter" id="filter_all" value="all">
-                <label class="btn btn-outline-secondary btn-sm" for="filter_all">All</label>
+                <!-- Context -->
+                <div class="pe-3 border-end">
+                    <span class="small fw-bold text-muted d-block mb-1">CONTEXT:</span>
+                    <div class="input-group input-group-sm" style="width: 130px;">
+                        <span class="input-group-text bg-white border-end-0 px-2 small">B:</span>
+                        <input type="number" name="before" value="0" min="0" max="10" class="form-control border-start-0">
+                        <span class="input-group-text bg-white border-end-0 px-2 small">A:</span>
+                        <input type="number" name="after" value="0" min="0" max="10" class="form-control border-start-0">
+                    </div>
+                </div>
+
+                <!-- Case -->
+                <div class="pe-3 border-end">
+                    <span class="small fw-bold text-muted d-block mb-1">CASE:</span>
+                    <div class="btn-group btn-group-sm">
+                        <input type="radio" class="btn-check" name="case" id="case_ignore" value="ignore" checked>
+                        <label class="btn btn-outline-secondary" for="case_ignore">Ignore</label>
+                        <input type="radio" class="btn-check" name="case" id="case_sensitive" value="sensitive">
+                        <label class="btn btn-outline-secondary" for="case_sensitive">Sensitive</label>
+                    </div>
+                </div>
+
+                <!-- Globs -->
+                <div class="d-flex align-items-center gap-2">
+                    <div>
+                        <span class="small fw-bold text-muted d-block mb-1">GLOBS:</span>
+                        <div class="d-flex gap-2">
+                            <input type="text" name="glob1" placeholder="*.md" class="form-control form-control-sm" style="width: 90px;">
+                            <input type="text" name="glob2" placeholder="Pattern" class="form-control form-control-sm" style="width: 90px;">
+                        </div>
+                    </div>
+                    <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"files": "true"}' 
+                            hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
+                            hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm align-self-end" style="height: 31px;">Files</button>
+                </div>
             </div>
-        </div>
-
-        <!-- Context -->
-        <div class="pe-3 border-end d-flex align-items-center gap-2">
-            <div class="input-group input-group-sm" style="width: 130px;">
-                <span class="input-group-text bg-transparent border-0 px-1 small">B:</span>
-                <input type="number" name="before" value="0" min="0" max="10" class="form-control rounded-1">
-                <span class="input-group-text bg-transparent border-0 px-1 small">A:</span>
-                <input type="number" name="after" value="0" min="0" max="10" class="form-control rounded-1">
-            </div>
-        </div>
-
-        <!-- Case -->
-        <div class="pe-3 border-end">
-            <div class="btn-group btn-group-sm">
-                <input type="radio" class="btn-check" name="case" id="case_ignore" value="ignore" checked>
-                <label class="btn btn-outline-secondary" for="case_ignore">Ignore Case</label>
-                <input type="radio" class="btn-check" name="case" id="case_sensitive" value="sensitive">
-                <label class="btn btn-outline-secondary" for="case_sensitive">Sensitive</label>
-            </div>
-        </div>
-
-        <!-- Globs & Files (Right Aligned Group) -->
-        <div class="d-flex align-items-center gap-2 ms-auto">
-            <span class="small fw-bold text-muted d-none d-md-inline">GLOBS:</span>
-            <input type="text" name="glob1" placeholder="*.md" class="form-control form-control-sm" style="width: 100px;">
-            <input type="text" name="glob2" placeholder="Pattern" class="form-control form-control-sm" style="width: 100px;">
-            <button hx-get="{{ url_for('main.rg_search') }}" hx-vals='{"files": "true"}' 
-                    hx-target="#rg-stream-sink" hx-include="#rg-input, #rg-controls input" hx-indicator="#rg-indicator"
-                    hx-on:click="clearResults()" class="btn btn-outline-secondary btn-sm">Files</button>
         </div>
     </div>
 </div>

@@ -1,0 +1,99 @@
+<div class="rg-summary-dashboard mb-5">
+    <div class="row g-4">
+        <!-- Chronological Summary -->
+        <div class="col-xl-6">
+            <h6 class="fw-bold text-muted mb-3"><i class="bi bi-calendar3 me-2"></i>Chronological Summary</h6>
+            <div class="table-responsive border rounded bg-white shadow-sm">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="text-start ps-3">Year</th>
+                            <th class="text-end">Papers</th>
+                            <th class="text-end">Pct</th>
+                            <th class="text-end">Matches</th>
+                            <th class="text-end">Pct</th>
+                            <th class="text-end">Mtc/Pap</th>
+                            <th class="text-end pe-3">Mtc/100KB</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in year_rows %}
+                        <tr>
+                            <td class="text-start ps-3 fw-bold">{{ row.label }}</td>
+                            <td class="text-end">{{ "{:,d}".format(row.papers) }}</td>
+                            <td class="text-end text-muted">{{ "{:.1f}%".format(row.papers_pct) }}</td>
+                            <td class="text-end">{{ "{:,d}".format(row.matches) }}</td>
+                            <td class="text-end text-muted" 
+                                style="background: linear-gradient(90deg, rgba(25, 135, 84, 0.1) {{ row.spark_pct }}%, transparent {{ row.spark_pct }}%);">
+                                {{ "{:.1f}%".format(row.matches_pct) }}
+                            </td>
+                            <td class="text-end">{{ "{:.1f}".format(row.mtc_pap) }}</td>
+                            <td class="text-end pe-3">{{ "{:.2f}".format(row.mtc_100kb) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-light fw-bold">
+                        <tr>
+                            <td class="text-start ps-3">Total</td>
+                            <td class="text-end">{{ "{:,d}".format(totals.papers) }}</td>
+                            <td class="text-end">100.0%</td>
+                            <td class="text-end">{{ "{:,d}".format(totals.matches) }}</td>
+                            <td class="text-end">100.0%</td>
+                            <td class="text-end">{{ "{:.1f}".format(totals.matches / totals.papers if totals.papers else 0) }}</td>
+                            <td class="text-end pe-3">-</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <!-- Intellectual Summary -->
+        <div class="col-xl-6">
+            <h6 class="fw-bold text-muted mb-3"><i class="bi bi-person-lines-fill me-2"></i>Intellectual Summary (Top 100)</h6>
+            <div class="table-responsive border rounded bg-white shadow-sm">
+                <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="text-start ps-3">Author</th>
+                            <th class="text-end">Papers</th>
+                            <th class="text-end">Pct</th>
+                            <th class="text-end">Matches</th>
+                            <th class="text-end">Pct</th>
+                            <th class="text-end">Mtc/Pap</th>
+                            <th class="text-end pe-3">Mtc/100KB</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in author_rows %}
+                        <tr>
+                            <td class="text-start ps-3">
+                                <a href="/?q={{ row.hash_query | urlencode }}" class="text-decoration-none">{{ row.label }}</a>
+                            </td>
+                            <td class="text-end">{{ "{:,d}".format(row.papers) }}</td>
+                            <td class="text-end text-muted">{{ "{:.1f}%".format(row.papers_pct) }}</td>
+                            <td class="text-end">{{ "{:,d}".format(row.matches) }}</td>
+                            <td class="text-end text-muted"
+                                style="background: linear-gradient(90deg, rgba(255, 193, 7, 0.15) {{ row.spark_pct }}%, transparent {{ row.spark_pct }}%);">
+                                {{ "{:.1f}%".format(row.matches_pct) }}
+                            </td>
+                            <td class="text-end">{{ "{:.1f}".format(row.mtc_pap) }}</td>
+                            <td class="text-end pe-3">{{ "{:.2f}".format(row.mtc_100kb) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-light fw-bold">
+                        <tr>
+                            <td class="text-start ps-3">Total ({{ totals.author_count }} Authors)</td>
+                            <td class="text-end">-</td>
+                            <td class="text-end">-</td>
+                            <td class="text-end">{{ "{:,d}".format(totals.matches) }}</td>
+                            <td class="text-end">100.0%</td>
+                            <td class="text-end">-</td>
+                            <td class="text-end pe-3">-</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
