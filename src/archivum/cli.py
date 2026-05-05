@@ -461,7 +461,8 @@ def library_audit(verbose, execute):
 @click.option("-a", "--address", default="127.0.0.1", help="Host address to bind to (e.g. 0.0.0.0 for all interfaces).")
 @click.option("-b", "--browser", "open_browser", is_flag=True, default=False, help="Open browser automatically.")
 @click.option("-d", "--debug", is_flag=True, help="Run in Flask debug mode (includes reloader).")
-def serve(lib_name, port, address, open_browser, debug):
+@click.option("--prod", is_flag=True, help="Use waitress to serve in production mode.")
+def serve(lib_name, port, address, open_browser, debug, prod):
     """Launch the web interface."""
     from .web import create_app
     import webbrowser
@@ -497,12 +498,19 @@ def serve(lib_name, port, address, open_browser, debug):
 
     click.echo(f"Starting Archivum Web at {url} (binding to {address})")
     try:
-        # debug=True enables the auto-reloader
-        app.run(host=address, port=port, debug=debug, use_reloader=debug)
+        if prod:
+            from waitress import serve as waitress_serve
+            click.echo("Using waitress (production server)")
+            waitress_serve(app, host=address, port=port)
+        else:
+            # debug=True enables the auto-reloader
+            app.run(host=address, port=port, debug=debug, use_reloader=debug)
     finally:
 
         # Ensure watcher is stopped on exit
-        if not debug: # Reloader makes this tricky, but for standard run it's good
+        if not debug and not prod: # Reloader makes this tricky, but for standard run it's good
+            lib.stop_watcher()
+        elif prod:
             lib.stop_watcher()
 
 
