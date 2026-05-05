@@ -765,9 +765,12 @@ def rg_search():
     total_docs_in_lib = len(lib.doc_df)
 
     # Unique key for this search configuration
-    is_details = not (show_counts or show_summary)
-    search_key = f"{query}_{filter_mode}_{case_sensitive}_{glob1}_{glob2}"
-    if is_details:
+    mode = 'details'
+    if show_summary: mode = 'summary'
+    elif show_counts: mode = 'counts'
+    
+    search_key = f"{query}_{mode}_{filter_mode}_{case_sensitive}_{glob1}_{glob2}"
+    if mode == 'details':
         search_key += f"_{context_a}_{context_b}"
 
     # --- TOP LEVEL CACHE CHECK ---
@@ -775,10 +778,10 @@ def rg_search():
         cached_html = get_rg_cache_item(lib, search_key, 'html')
         stats_meta = get_rg_cache_item(lib, search_key, 'stats')
         if cached_html and stats_meta:
-            logger.info(f"RG HTML Cache hit for: {query}")
+            logger.info(f"RG HTML Cache hit for: {query} ({mode})")
             m, d = stats_meta.get('matches', 0), stats_meta.get('docs', 0)
-            verb = "Summarized" if (show_summary or show_counts) else "Found"
-            noun = "documents" if (show_summary or show_counts) else "files"
+            verb = "Summarized" if (mode in ['summary', 'counts']) else "Found"
+            noun = "documents" if (mode in ['summary', 'counts']) else "files"
 
             cache_tag = (
                 f"<div id='rg-stats-header' hx-swap-oob='true'>"
@@ -882,11 +885,10 @@ def rg_search():
 
             if show_summary:
                 year_data, author_data = {}, {}
-                total_matches_sum, total_papers_set = 0, set()
+                total_papers_set = set()
                 for h_prefix, count_val in counts.items():
                     meta = hash_prefix_to_meta.get(h_prefix, {})
                     year, size = meta.get('year', '9999'), meta.get('size', 0)
-                    total_matches_sum += count_val
                     total_papers_set.add(h_prefix)
                     
                     if year not in year_data: year_data[year] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
@@ -914,19 +916,19 @@ def rg_search():
                         hash_query = f"hash ~ /{ '|'.join(list(vals.get('hashes', []))[:50]) }/" if 'hashes' in vals else ""
                         rows.append({
                             'label': label, 'papers': vals['papers'], 'papers_pct': (vals['papers'] / total_papers_count * 100),
-                            'matches': vals['matches'], 'matches_pct': (vals['matches'] / total_matches_sum * 100),
+                            'matches': vals['matches'], 'matches_pct': (vals['matches'] / total_m * 100),
                             'spark_pct': (vals['matches'] / max_matches * 100), 'mtc_pap': vals['matches'] / vals['papers'],
                             'mtc_100kb': (vals['matches'] / (vals['size'] / 102400)) if vals['size'] else 0, 'hash_query': hash_query
                         })
                     return rows
                 year_rows = sorted(prepare_rows(year_data), key=lambda x: x['label'], reverse=True)
                 author_rows = sorted(prepare_rows(author_data), key=lambda x: x['matches'], reverse=True)[:100]
-                summary_html = render_template('components/rg_summary.html', year_rows=year_rows, author_rows=author_rows, totals={'papers': total_papers_count, 'matches': total_matches_sum, 'author_count': len(author_data)})
+                summary_html = render_template('components/rg_summary.html', year_rows=year_rows, author_rows=author_rows, totals={'papers': total_papers_count, 'matches': total_m, 'author_count': len(author_data)})
                 yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-5'>{summary_html}</div>")
             else:
                 yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>{render_template('components/rg_counts.html', counts=counts_list)}</div>")
 
-            stats_html = f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_matches_sum}</b> matches in <b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
+            stats_html = f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_m}</b> matches in <b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
             yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
             set_rg_cache_item(search_key, "".join(html_buffer), 'html')
             set_rg_cache_item(search_key, final_stats, 'stats')
