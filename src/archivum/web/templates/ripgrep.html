@@ -5,6 +5,25 @@
     function clearResults() {
         document.getElementById('rg-results').innerHTML = '';
         document.getElementById('rg-status').style.display = 'none';
+        
+        // Reset export button
+        const exportBtn = document.getElementById('rg-export-btn');
+        if (exportBtn) {
+            exportBtn.disabled = true;
+            exportBtn.classList.add('opacity-50');
+            exportBtn.classList.remove('btn-info');
+            exportBtn.classList.add('btn-outline-info');
+            exportBtn.dataset.hashes = '';
+        }
+    }
+
+    function exportTop50() {
+        const btn = document.getElementById('rg-export-btn');
+        const hashes = btn.dataset.hashes;
+        if (!hashes) return;
+        
+        const query = `hash ~ /${hashes}/`;
+        window.location.href = `{{ url_for('main.index') }}?q=${encodeURIComponent(query)}`;
     }
 
     /**
@@ -97,6 +116,14 @@
                 hx-on:click="clearResults()"
                 class="btn btn-primary px-4 shadow-sm">
             Details
+        </button>
+
+        <button id="rg-export-btn" 
+                onclick="exportTop50()"
+                class="btn btn-outline-info px-4 shadow-sm opacity-50" 
+                disabled
+                title="Export top 50 documents by match count to Query screen">
+            Export
         </button>
 
         <button class="btn btn-outline-secondary btn-sm ms-2 shadow-sm" type="button" data-bs-toggle="collapse" data-bs-target="#extra-options" aria-expanded="false">

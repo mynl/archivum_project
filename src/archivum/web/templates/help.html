@@ -5,6 +5,13 @@
     <!-- Sidebar: Table of Contents -->
     <div class="col-md-3 border-end bg-light help-sidebar">
         <div class="p-4 sticky-top" style="top: 0;">
+            <!-- Desktop-only Logo -->
+            <div class="d-none d-md-block text-center mb-4">
+                <img src="{{ url_for('static', filename='img/archivum.png') }}" 
+                     alt="Archivum Logo" 
+                     class="img-fluid help-logo rounded shadow-sm">
+            </div>
+
             <h5 class="fw-bold mb-4 text-primary">Documentation</h5>
             
             <!-- In-page Search -->
@@ -290,6 +297,11 @@
 </script>
 
 <style>
+    .help-logo {
+        max-height: 180px;
+        width: auto;
+        object-fit: contain;
+    }
     .help-content section {
         scroll-margin-top: 100px;
     }

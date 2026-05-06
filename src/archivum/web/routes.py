@@ -803,6 +803,7 @@ def rg_search():
         if cached_html and stats_meta:
             logger.info(f"RG HTML Cache hit for: {query} ({mode})")
             m, d = stats_meta.get('matches', 0), stats_meta.get('docs', 0)
+            hashes = stats_meta.get('hashes', '')
             verb = "Summarized" if (mode in ['summary', 'counts']) else "Found"
             noun = "documents" if (mode in ['summary', 'counts']) else "files"
 
@@ -813,9 +814,18 @@ def rg_search():
                 f"{verb} <b>{m}</b> matches in <b>{d}</b> {noun}. (Retrieved from cache)"
                 f"</div></div>"
             )
+
+            export_oob = ""
+            if hashes:
+                export_oob = (
+                    f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
+                    f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{hashes}' "
+                    f"title='Export top 50 documents by match count to Query screen'>Export</button>"
+                )
+
             # Spacing fix: rg-status margin reduced
             status_fix = f"<div id='rg-status' hx-swap-oob='true' class='rg-info' style='margin-bottom: 0.25rem; display: block;'>Last Command: <code>(Retrieved from Cache)</code></div>"
-            return cached_html + cache_tag + status_fix
+            return cached_html + cache_tag + status_fix + export_oob
 
     def generate_results():
         start_time = time.time()
@@ -951,6 +961,20 @@ def rg_search():
             else:
                 yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>{render_template('components/rg_counts.html', counts=counts_list)}</div>")
 
+            # EXPORT BUTTON OOB SWAP
+            top_50_hashes = "|".join([x['hash'][:6] for x in counts_list[:50]])
+            if top_50_hashes:
+                export_oob = (
+                    f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
+                    f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{top_50_hashes}' "
+                    f"title='Export top 50 documents by match count to Query screen'>Export</button>"
+                )
+                yield yield_and_buffer(export_oob)
+
+            final_stats['matches'] = total_m
+            final_stats['docs'] = len(counts_list)
+            final_stats['hashes'] = top_50_hashes
+
             stats_html = f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_m}</b> matches in <b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
             yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
             set_rg_cache_item(search_key, "".join(html_buffer), 'html')
@@ -1004,11 +1028,23 @@ def rg_search():
         rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
         final_stats['matches'] = total_matches
         final_stats['docs'] = len(seen_hashes)
+        
+        # EXPORT BUTTON OOB SWAP
+        top_50_hashes = "|".join(list(seen_hashes)[:50])
+        if top_50_hashes:
+            export_oob = (
+                f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
+                f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{top_50_hashes}' "
+                f"title='Export top 50 documents by match count to Query screen'>Export</button>"
+            )
+            yield yield_and_buffer(export_oob)
+            final_stats['hashes'] = top_50_hashes
+
         stats_html = f"<div class='text-muted small mt-n3 mb-3'>Found <b>{total_matches}</b> matches in <b>{len(seen_hashes)}</b> files. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
         yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
         set_rg_cache_item(search_key, "".join(html_buffer), 'html')
         set_rg_cache_item(search_key, final_stats, 'stats')
-
+    
     return Response(stream_with_context(generate_results()), mimetype='text/html')
 
 def get_path_for_hash(lib, h):
