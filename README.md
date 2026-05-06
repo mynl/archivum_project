@@ -93,7 +93,8 @@ Archivum includes a powerful web interface built with Flask, Bootstrap 5, and HT
 ### Key Features
 - **Real-time Search**: Instant filtering of references using fuzzy matching and `querex` expressions.
 - **Streaming Ripgrep**: Blazing fast full-text search that streams results to the browser as they are found. Supports complex filters like context lines, case sensitivity, and glob patterns.
-- **BibTeX Editor**: A dedicated master-detail interface for managing metadata. Includes live tag filtering and keyboard-driven navigation (Up/Down to select, Enter to load).
+- **Report Studio**: A powerful environment for synthesizing research. Transform search results into persistent, professional journals with custom introductions and Markdown notes. Supports integrated HTML viewing and archival PDF generation (via Quarto/Tectonic).
+- **Smart Caching**: High-performance rendering pipeline. Automatically caches HTML and PDF versions of reports to provide near-instant retrieval on subsequent views.
 - **Split-Horizon Security**: Intelligent IP-based access control. Automatically grants full **Admin** rights to local/VPN traffic while restricting external/VPS traffic to a **Read-Only** mode (indicated by a header badge).
 - **High-Density UI**: Specialized "split-pane" layouts for Authors and Editor pages with independent scroll containers for sidebars and content.
 - **Responsive Design**: Fully mobile-ready with a collapsible navbar and reflowing control bars.

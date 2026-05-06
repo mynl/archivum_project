@@ -125,7 +125,8 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
                 abs_txt = quick_abstract(txt)
                 if abs_txt:
                     abs_txt = sanitize_for_latex(abs_txt)
-                    line += f"\n\n    > {abs_txt}"
+                    # No leading 4 spaces (which triggers code blocks)
+                    line += f"\n\n> {abs_txt}"
             except Exception as e:
                 logger.debug(f"Failed to read/extract abstract for {tag}: {e}")
     

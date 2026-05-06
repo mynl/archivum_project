@@ -31,6 +31,7 @@
                 <a class="nav-link py-1 px-0 text-dark" href="#screens">Screen Guide</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-query">Query Page</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-ripgrep">Ripgrep (Full-Text)</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-reports">Report Studio</a>
                 {% if is_admin %}
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-ingest">Ingest (Admin)</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-edit">Editor (Admin)</a>
@@ -156,6 +157,19 @@
                     <li><strong>Streaming Results</strong>: Matches are streamed to the browser in real-time.</li>
                     <li><strong>Context Control</strong>: Specify how many lines of context to show before and after matches.</li>
                     <li><strong>Summary Mode</strong>: Groups matches by year and author to provide statistical insights into your library's content.</li>
+                    <li><strong>Export Top 50</strong>: Quickly export the most relevant papers from your Ripgrep results back to the Query screen for further analysis or report generation.</li>
+                </ul>
+            </div>
+
+            <div id="screen-reports" class="mb-4">
+                <h5 class="fw-bold"><i class="bi bi-journal-richtext me-2"></i>Report Studio</h5>
+                <p>A specialized workflow for synthesizing research findings into persistent journals.</p>
+                <ul>
+                    <li><strong>Integrated View</strong>: Research reports are rendered as HTML fragments using <strong>Pandoc</strong> and embedded directly within the Archivum interface.</li>
+                    <li><strong>Archival PDFs</strong>: (Admin only) Generate professional-grade PDFs using <strong>Quarto + Tectonic</strong> with <code>scrartcl</code> styling (A4, 10pt font).</li>
+                    <li><strong>Markdown Support</strong>: Add introductions and research notes to your reports using standard Markdown syntax.</li>
+                    <li><strong>Smart Caching</strong>: Rendered HTML and PDF artifacts are cached in the library's <code>exports/</code> directory. If a report is viewed or downloaded again, Archivum serves the cached version instantly unless the source <code>.qmd</code> file has been modified.</li>
+                    <li><strong>Raw Source</strong>: Access the raw <code>.qmd</code> file for manual editing or custom publication workflows.</li>
                 </ul>
             </div>
 

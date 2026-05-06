@@ -160,7 +160,15 @@ The web interface (`archivum serve`) has been significantly enhanced to provide 
 - **Read-Only Access**: Applied to traffic routed through the VPS bridge (`10.8.0.1`). Restricted users see a "READ ONLY" badge and are blocked from all modification routes via the `@admin_required` decorator and conditional UI rendering.
 - **Implementation**: The privilege level is established in `src/archivum/web/app.py` via a `before_request` hook that populates `g.is_admin`.
 
-### 4. Web UI Design Standards
+### 4. Report Studio & Caching
+- **Workflow**: The Report Studio allows synthesizing search results into persistent `.qmd` journals. These are stored in the library's `exports/` directory.
+- **Rendering Pipeline**:
+    - **Web View**: Uses `pandoc` with `--citeproc` to generate naked HTML fragments for integration into the site layout.
+    - **PDF Generation**: Uses `quarto render` with the `tectonic` engine to produce professional `scrartcl` documents.
+- **Smart Caching**: To minimize redundant subprocess calls (Pandoc/Quarto), rendered HTML and PDF artifacts are cached. The system serves cached files if they are newer than the source `.qmd` file (based on `st_mtime`).
+- **Source of Truth**: The `.qmd` file is the primary source; artifacts are ephemeral but persistent for performance.
+
+### 5. Web UI Design Standards
 - **High-Density Split Panes**: Pages with sidebars (e.g., Authors, Editor) MUST use independent scroll containers for the sidebar and the main content area. This is implemented via CSS `height: calc(100vh - 120px)` on the main row and `overflow-y: auto` on the columns.
 - **Responsive Behavior**: Ensure high-density layouts reflow to stacked views on mobile (max-width: 767.98px).
 - **HTMX Streaming**: The search and ripgrep engines use HTMX for streaming OOB updates to provide immediate feedback.

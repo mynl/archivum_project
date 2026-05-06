@@ -1262,7 +1262,17 @@ def reports_generate():
 def reports_view(report_id):
     lib = LibraryContext.get()
     qmd_path = lib.exports_dir_path / f"{report_id}.qmd"
+    html_path = lib.exports_dir_path / f"{report_id}.html"
     if not qmd_path.exists(): abort(404)
+
+    # Cache check: if .html exists and is newer than .qmd, serve it
+    if html_path.exists() and html_path.stat().st_mtime >= qmd_path.stat().st_mtime:
+        try:
+            html_content = html_path.read_text(encoding='utf-8')
+            title = report_id.replace('-', ' ').title()
+            return render_template('reports.html', lib=lib, view_mode=True, report_html=html_content, report_title=title)
+        except Exception as e:
+            logger.warning(f"Failed to read cached HTML for {report_id}: {e}")
 
     try:
         # --citeproc for citations, -t html for fragment.
@@ -1270,6 +1280,13 @@ def reports_view(report_id):
         cmd = ['pandoc', str(qmd_path), '--citeproc', '-t', 'html']
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
         html_content = res.stdout
+        
+        # Save to cache
+        try:
+            html_path.write_text(html_content, encoding='utf-8')
+        except Exception as e:
+            logger.warning(f"Failed to cache HTML for {report_id}: {e}")
+
         title = report_id.replace('-', ' ').title()
         return render_template('reports.html', lib=lib, view_mode=True, report_html=html_content, report_title=title)
     except Exception as e:
@@ -1290,6 +1307,10 @@ def reports_pdf(report_id):
     qmd_path = lib.exports_dir_path / f"{report_id}.qmd"
     pdf_path = lib.exports_dir_path / f"{report_id}.pdf"
     if not qmd_path.exists(): abort(404)
+
+    # Cache check: if .pdf exists and is newer than .qmd, serve it
+    if pdf_path.exists() and pdf_path.stat().st_mtime >= qmd_path.stat().st_mtime:
+        return send_file(str(pdf_path), mimetype='application/pdf', as_attachment=True)
 
     try:
         cmd = ['quarto', 'render', str(qmd_path), '--to', 'pdf']
