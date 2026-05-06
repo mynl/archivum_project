@@ -26,24 +26,12 @@
             Recent
         </button>
 
-        <div class="btn-group">
-            <button class="btn btn-outline-success btn-sm fw-bold"
-                    onclick="generateAbstracts()">
-                Abstracts
-            </button>
-            <button type="button" class="btn btn-outline-success btn-sm dropdown-toggle dropdown-toggle-split" 
-                    data-bs-toggle="dropdown" aria-expanded="false"
-                    hx-get="{{ url_for('main.export_list') }}"
-                    hx-trigger="click"
-                    hx-target="#export-list-container">
-                <span class="visually-hidden">Toggle Dropdown</span>
-            </button>
-            <ul id="export-list-container" class="dropdown-menu dropdown-menu-end shadow-lg border-0" style="min-width: 350px;">
-                <li class="px-3 py-2 text-center">
-                    <div class="spinner-border spinner-border-sm text-primary" role="status"></div>
-                </li>
-            </ul>
-        </div>
+        {% if is_admin %}
+        <button class="btn btn-outline-success btn-sm fw-bold shadow-sm"
+                onclick="openReportStudio()">
+            <i class="bi bi-journal-plus me-1"></i> Report
+        </button>
+        {% endif %}
 
         <div id="export-indicator" class="htmx-indicator d-flex align-items-center gap-1 text-success small">
             <div class="spinner-border spinner-border-sm" role="status"></div>
@@ -85,56 +73,30 @@
 </div>
 
 <script>
-    async function generateAbstracts() {
+    function openReportStudio() {
         const queryInput = document.getElementById('search-input');
-        const indicator = document.getElementById('export-indicator');
-        const query = queryInput ? queryInput.value : '';
-        
-        indicator.classList.add('htmx-request');
-        
-        try {
-            const response = await fetch(`{{ url_for('main.export_abstracts') }}?q=${encodeURIComponent(query)}`, {
-                headers: { 'X-Requested-With': 'XMLHttpRequest' }
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                if (data.url) {
-                    window.open(data.url, '_blank');
-                }
-            } else {
-                const errText = await response.text();
-                alert("Export failed: " + errText);
-            }
-        } catch (e) {
-            console.error(e);
-            alert("Error: " + e.message);
-        } finally {
-            indicator.classList.remove('htmx-request');
+        const query = queryInput ? queryInput.value.trim() : '';
+        window.location.href = `{{ url_for('main.reports_page') }}?q=${encodeURIComponent(query)}`;
+    }
+
+    function clearInput(id) {
+        const input = document.getElementById(id);
+        if (input) {
+            input.value = '';
+            input.focus();
+            htmx.trigger(input, 'keyup');
         }
     }
-</script>
 
-<!-- Hidden sink for the JS trigger -->
-<div id="export-sink" hx-swap="innerHTML settle:1s" style="display:none;"></div>
-
-<div id="results" class="mt-4 shadow-sm rounded bg-white overflow-hidden">
-    <!-- Results will be loaded here via HTMX -->
-    <div class="p-4">
-        <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
-    </div>
-</div>
-
-{% include "components/edit_modal.html" %}
-
-<script>
     function executeRecent() {
         const input = document.getElementById('search-input');
-        input.value = 'q top 10 recent';
-        htmx.trigger(input, 'keyup');
+        if (input) {
+            input.value = 'q top 20 recent';
+            htmx.trigger(input, 'keyup');
+        }
     }
 
-    // Deep-linking from Insights
+    // Deep-linking support
     window.addEventListener('load', () => {
         const urlParams = new URLSearchParams(window.location.search);
         const query = urlParams.get('q');
@@ -148,4 +110,13 @@
         }
     });
 </script>
+
+<div id="results" class="mt-4 shadow-sm rounded bg-white overflow-hidden">
+    <!-- Results will be loaded here via HTMX -->
+    <div class="p-4">
+        <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
+    </div>
+</div>
+
+{% include "components/edit_modal.html" %}
 {% endblock %}

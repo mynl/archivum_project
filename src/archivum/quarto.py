@@ -16,14 +16,7 @@ DEFAULT_CSL = '/s/TELOS/Biblio/journal-of-risk-and-uncertainty.csl'
 def quick_abstract(text: str) -> str:
     """
     Try and find the abstract or summary in a text extract.
-    
-    Args:
-        text: The full text content of the document.
-        
-    Returns:
-        The extracted abstract text, or empty string if not found.
     """
-    # Look for abstract case-insensitively
     text_lower = text.lower()
     st = -1
     for kw in ['abstract', 'summary']:
@@ -36,37 +29,29 @@ def quick_abstract(text: str) -> str:
         return ""
     
     ans = []
-    # 4000 chars is usually enough for an abstract
     lines = text[st:(st+4000)].split('\n')
     for i in lines:
         line = i.strip()
         if not line: 
-            if ans: # End of abstract block on empty line
-                break
+            if ans: break
             continue
-        if len(line) > 30: # Minimum meaningful line length
+        if len(line) > 30:
             ans.append(line)
         else:
-            # subsequent short line usually means end of abstract block
-            if ans: 
-                break
+            if ans: break
 
     out = ' '.join(ans)
-    # Clean up common artifacts
     out = re.sub(r'Further reproduction prohibited without permission\. ?|Reproduced with permission of the copyright owner\. ?', '', out)
     return out.strip()
 
 
 def sanitize_for_latex(text: str) -> str:
     """
-    Sanitize text for LaTeX/Tectonic consumption:
-    1. Swaps common math symbols for ASCII equivalents.
-    2. Strips control characters that cause 'Invalid character' errors.
+    Sanitize text for LaTeX/Tectonic consumption.
     """
     if not isinstance(text, str):
         return ""
 
-    # 1. Swap math symbols that Latin Modern often lacks
     swaps = {
         '≤': '<=', '≥': '>=', '∈': 'in', '∉': 'not in',
         '≠': '!=', '≈': '~', '±': '+/-', '∞': 'inf',
@@ -75,25 +60,12 @@ def sanitize_for_latex(text: str) -> str:
     for char, replacement in swaps.items():
         text = text.replace(char, replacement)
 
-    # 2. Strip control characters (0x00-0x08, 0x0B, 0x0C, 0x0E-0x1F, 0x7F)
-    # These are the "Invalid character" culprits in XeLaTeX.
-    # We keep \n (10), \r (13), and \t (9).
     return "".join(ch for ch in text if ord(ch) >= 32 or ch in '\n\r\t')
 
 
 def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | None = None, abstract: bool = True, web_links: bool = False) -> str:
     """
-    Format a single reference line for QMD output, optionally including an abstract.
-    
-    Args:
-        lib: The Library object.
-        row: A Series containing bibliographic and document info.
-        paras: Optional list of paragraph indices where the tag is cited.
-        abstract: Whether to include an abstract if available.
-        web_links: If True, use web-friendly /view/<tag> links.
-        
-    Returns:
-        A formatted Markdown string.
+    Format a single reference line for QMD output.
     """
     tag = row.get("tag", "Unknown")
     title = sanitize_for_latex(str(row.get("title", ""))).strip("{}")
@@ -101,7 +73,6 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
     year = str(row.get("year", ""))
 
     paras_str = f" (paras: {', '.join(str(i) for i in paras)})" if paras else ""
-
     title_part = f"*{title}*" if title else ""
 
     meta_parts = []
@@ -110,53 +81,43 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
     meta = ", ".join(meta_parts).strip()
     if meta: meta = f", {meta}"
 
-    # Document link
-    doc_path = None
+    # Document link - the Tag is now the link
     if web_links:
-        doc_link = f', <a target="_blank" href="/view/{tag}">file</a>.'
+        tag_link = f'**<a target="_blank" href="/view/{tag}">{tag}</a>**'
     else:
+        doc_path = None
         if hasattr(row, "path") and pd.notna(row.path):
             doc_path = lib.abspath(row.path)
         
-        doc_link = f', <a target="_blank" href="{doc_path}">file</a>.' if doc_path and doc_path.exists() else "."
+        if doc_path and doc_path.exists():
+            tag_link = f'**<a target="_blank" href="{doc_path}">{tag}</a>**'
+        else:
+            tag_link = f'**{tag}**'
 
-    line = f"* {tag} [@{tag}], {title_part}{meta}{paras_str}{doc_link}"
+    # No bullets, just a paragraph starting with bold tag
+    line = f"{tag_link} [@{tag}], {title_part}{meta}{paras_str}."
     
     if abstract:
         text_file = None
-        # Use full path if available to find text extract
         p_str = str(row.get('path', ''))
         
         if p_str and p_str != 'nan':
-            # 1. Direct resolution
             tf = lib.textpath(p_str)
             if tf.exists():
                 text_file = tf
             else:
-                # 2. Try removing leading slash
                 if p_str.startswith(('/', '\\')):
                     tf = lib.textpath(p_str[1:])
-                    if tf.exists():
-                        text_file = tf
-
-                # 3. If hash is truncated in 'row', look up the full hash in lib.doc_df
+                    if tf.exists(): text_file = tf
+                
                 if not text_file and 'hash' in row:
                     h_small = str(row['hash'])
                     if len(h_small) < 64:
-                        # Try to find full hash in doc_df
                         matches = lib.doc_df[lib.doc_df.hash.str.startswith(h_small)]
                         if not matches.empty:
                             full_path = matches.iloc[0].path
                             tf = lib.textpath(full_path)
-                            if tf.exists():
-                                text_file = tf
-
-                # 4. Fallback: search by filename in text dir
-                if not text_file:
-                    name = Path(p_str).name
-                    tf = lib.textpath(name)
-                    if tf.exists():
-                        text_file = tf
+                            if tf.exists(): text_file = tf
 
         if text_file and row.get('type') != "book":
             try:
@@ -175,10 +136,6 @@ def build_qmd_header(title: str, bibtex_file: str, csl_file: str = DEFAULT_CSL) 
     """
     Build the YAML header for a QMD file.
     """
-    # Path to favicon - assuming it's in the standard location relative to this file
-    # or we can just use a hardcoded link if we assume the server is up.
-    # For a self-contained file, we'll try to use a local path if we can find it.
-    
     lines = [
         "---",
         f"title: \"{title}\"",
@@ -203,9 +160,39 @@ def build_qmd_header(title: str, bibtex_file: str, csl_file: str = DEFAULT_CSL) 
     return "\n".join(lines)
 
 
-def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_abstract: bool = True, query: str = "", web_links: bool = False):
+def build_studio_header(title: str, bibtex_file: str, csl_file: str = DEFAULT_CSL) -> str:
     """
-    Generate a standalone QMD report from a DataFrame.
+    Build the YAML header for a Studio Report QMD file.
+    """
+    lines = [
+        "---",
+        f"title: \"{title}\"",
+        "author: \"archivum.report\"",
+        "date: last-modified",
+        f"bibliography: \"{Path(bibtex_file).as_posix()}\"",
+        f"csl: \"{Path(csl_file).as_posix()}\"",
+        "link-citations: true",
+        "format:",
+        "  pdf:",
+        "    pdf-engine: tectonic",
+        "    documentclass: scrartcl",
+        "    papersize: a4",
+        "    fontsize: 10pt",
+        "    citeproc: true",
+        "---",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, 
+                        title: str = "Archivum Query Extract",
+                        intro_text: str = "",
+                        include_abstract: bool = True, 
+                        query: str = "", 
+                        web_links: bool = False):
+    """
+    Generate a Studio-compatible QMD report from a DataFrame.
     """
     if df.empty:
         out_path.write_text("No results found.", encoding="utf-8")
@@ -215,7 +202,6 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_a
     if 'tag' not in pdf.columns:
         pdf['tag'] = "Unknown"
 
-    # Ensure we have path for abstracts/links if possible
     if 'path' not in pdf.columns and 'tag' in pdf.columns:
         try:
             extra_info = lib.ref_doc_df.merge(lib.doc_df, on=["hash", "version"], how="inner")
@@ -223,7 +209,6 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_a
         except Exception as e:
             logger.warning(f"Failed to merge file info for report: {e}")
 
-    # Sorting
     sort_cols = []
     if 'author' in pdf.columns:
         def get_sort_author(s):
@@ -232,20 +217,30 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_a
         pdf['_sort_author'] = pdf['author'].apply(get_sort_author)
         sort_cols.append('_sort_author')
     
-    if 'year' in pdf.columns:
-        sort_cols.append('year')
+    if 'year' in pdf.columns: sort_cols.append('year')
+    if 'tag' in pdf.columns: sort_cols.append('tag')
+    if sort_cols: pdf = pdf.sort_values(sort_cols)
+
+    bib_file = lib.config.bibtex_file
+    csl_file = getattr(lib.config, 'csl_file', DEFAULT_CSL)
+
+    header = build_studio_header(title, bib_file, csl_file)
+    lines = [header]
     
-    if 'tag' in pdf.columns:
-        sort_cols.append('tag')
-
-    if sort_cols:
-        pdf = pdf.sort_values(sort_cols)
-
-    header = build_qmd_header("Archivum Query Extract", lib.config.bibtex_file)
-    lines = [header, "## Abstracts", ""]
-    if query:
-        lines.append(f"Query: `{query}`")
+    if intro_text:
+        lines.append("# Introduction")
+        lines.append(intro_text)
         lines.append("")
+
+    if query:
+        lines.append("## Query")
+        lines.append(f"`{query}`")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("## References")
+    lines.append("")
 
     for _, row in pdf.iterrows():
         lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract, web_links=web_links))
@@ -264,7 +259,7 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path, include_a
 @dataclass(slots=True)
 class QmdParser:
     """
-    Parse a Quarto .qmd file (UTF-8), expanding nested {{< include ... >}} clauses.
+    Parse a Quarto .qmd file (UTF-8).
     """
     path: Path
 
@@ -300,7 +295,6 @@ class QmdParser:
     )
 
     def __post_init__(self) -> None:
-        """Read, expand includes, and populate all parsed parts."""
         self.path = Path(self.path)
         self.all_text = self._expand_includes(self.path, seen=set())
         no_code = self._strip_code_blocks(self.all_text)
@@ -364,8 +358,7 @@ class QmdParser:
             para = "\n".join(buf).strip()
             if para: paras.append(para)
             buf.clear()
-        i = 0
-        n = len(lines)
+        i, n = 0, len(lines)
         while i < n:
             line = lines[i]
             if line.lstrip().startswith(":::"):
@@ -397,9 +390,6 @@ class QmdParser:
     def ref_summary(self, out_path: Path, lib: object, *,
                     csl_value: str = DEFAULT_CSL, execute: bool = False,
                     abstract: bool = True) -> list[str]:
-        """
-        Create a reference-summary directory based on citations in the QMD.
-        """
         src = self.path.resolve()
         out_path = Path(out_path).resolve()
         actions: list[str] = []
@@ -431,20 +421,10 @@ class QmdParser:
         for tag, paras in tags_sorted_dict.items():
             row = df[df["tag"] == tag]
             if row.empty:
-                lines.append(f"* {tag} [@{tag}]: **Missing in database**")
+                lines.append(f"**{tag}** [@{tag}]: **Missing in database**")
                 continue
-
-            r0 = row.iloc[0]
-            lines.append(format_qmd_reference_line(lib, r0, paras=paras, abstract=abstract))
+            lines.append(format_qmd_reference_line(lib, row.iloc[0], paras=paras, abstract=abstract))
             lines.append("")
-
-            src_path = lib.abspath(r0["path"])
-            if src_path.exists():
-                link_path = (out_path / src_path.name)
-                actions.append(f"symlink {link_path} -> {src_path}")
-                if execute:
-                    if link_path.exists() or link_path.is_symlink(): link_path.unlink()
-                    link_path.symlink_to(src_path)
 
         if execute:
             out_qmd.write_text("\n".join(lines), encoding="utf-8")

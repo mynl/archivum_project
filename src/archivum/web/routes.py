@@ -1180,118 +1180,134 @@ def help_page():
     lib = LibraryContext.get()
     return render_template('help.html', lib=lib)
 
-@bp.route('/export/abstracts')
-def export_abstracts():
+@bp.route('/reports')
+def reports_page():
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
     
-    raw_query = request.args.get('q', '').strip()
-    if not raw_query:
-        raw_query = "top 50 recent"
+    query = request.args.get('q', '').strip()
     
-    # Determine search type and actual query string (matches search() logic)
-    lower_query = raw_query.lower()
-    if lower_query.startswith('q '):
-        search_type = 'q'
-        query = raw_query[2:].strip()
-    elif lower_query.startswith('f '):
-        search_type = 'f'
-        query = raw_query[2:].strip()
-    else:
-        search_type = 'f'
-        query = raw_query
-
-    if not query:
-        return "Empty query.", 400
-
-    # Standardize query for querex
+    # Get existing reports
+    reports = []
     try:
-        if search_type == 'f':
-            if query[0] != "!" and query.find("~") == -1:
-                query_expr = f"recent top 50 select path, hash, type, * tag ~ {query}"
-            else:
-                query_expr = query
-                if "select" not in query_expr.lower():
-                    query_expr = "select path, hash, type, * " + query_expr
-                if "top" not in query_expr.lower():
-                    query_expr = "top 50 " + query_expr
-                if "recent" not in query_expr.lower():
-                    query_expr = "recent " + query_expr
-        else:
-            query_expr = query
-            if "select" not in query_expr.lower():
-                query_expr = "select path, hash, type, * " + query_expr
-
-        df = lib.database
-        result = df.querex(query_expr)
-        
-        if not isinstance(result, pd.DataFrame) or result.empty:
-            return "No results found for report generation.", 400
-
-        # Generate unique filename based on MM_DD and short hash of query
-        import hashlib
-        now = datetime.now()
-        q_hash = hashlib.md5(raw_query.encode()).hexdigest()[:4].upper()
-        base_name = f"abstracts_{now.strftime('%m_%d')}_{q_hash}"
-        qmd_path = lib.exports_dir_path / f"{base_name}.qmd"
-        html_path = lib.exports_dir_path / f"{base_name}.html"
-        
-        # 1. Generate QMD
-        generate_qmd_report(lib, result, qmd_path, include_abstract=True, query=raw_query, web_links=True)
-        
-        # 2. Render to HTML via native Quarto CLI
-        try:
-            render_cmd = [
-                'quarto', 'render', str(qmd_path),
-                '--to', 'html',
-                '--embed-resources'
-            ]
-            subprocess.run(render_cmd, check=True, capture_output=True, text=True, cwd=str(lib.exports_dir_path))
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Quarto render failed: {e.stderr}")
-            return f"Error rendering report: {e.stderr}", 500
-            
-        # 3. Return JSON with the URL for the frontend fetch
-        file_url = url_for('main.serve_export', filename=html_path.name)
-        return {"url": file_url}
-        
-    except Exception as e:
-        logger.error(f"Export error: {e}")
-        return f"Error generating report: {str(e)}", 500
-
-@bp.route('/export/list')
-def export_list():
-    lib = LibraryContext.get()
-    if lib.is_empty: return ""
-    
-    # Get all HTML files in exports dir, sorted by newest first
-    exports = []
-    try:
-        for p in lib.exports_dir_path.glob("*.html"):
-            qmd_p = p.with_suffix(".qmd")
-            exports.append({
+        # We look for .qmd files as the source of truth
+        for p in lib.exports_dir_path.glob("*.qmd"):
+            reports.append({
+                'id': p.stem,
                 'name': p.name,
-                'path': url_for('main.serve_export', filename=p.name),
-                'qmd_path': url_for('main.serve_export', filename=qmd_p.name) if qmd_p.exists() else None,
                 'mtime': p.stat().st_mtime,
                 'date': datetime.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
             })
-        exports.sort(key=lambda x: x['mtime'], reverse=True)
+        reports.sort(key=lambda x: x['mtime'], reverse=True)
     except Exception as e:
-        logger.error(f"Error listing exports: {e}")
-        
-    return render_template('components/export_list.html', exports=exports[:15])
+        logger.error(f"Error listing reports: {e}")
 
-@bp.route('/export/view/<filename>')
-def serve_export(filename):
+    return render_template('reports.html', lib=lib, query=query, reports=reports)
+
+@bp.route('/reports/generate', methods=['POST'])
+@admin_required
+def reports_generate():
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
-    
-    file_path = lib.exports_dir_path / filename
-    if not file_path.exists(): abort(404)
-    
-    mimetype = 'text/html'
-    if filename.endswith('.qmd'):
-        mimetype = 'text/plain'
+
+    title = request.form.get('title', 'New Research Extract').strip()
+    filename = request.form.get('filename', '').strip()
+    intro = request.form.get('intro', '').strip()
+    raw_query = request.form.get('query', '').strip()
+
+    if not filename:
+        filename = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+    if not filename.endswith('.qmd'):
+        filename += '.qmd'
+
+    out_path = lib.exports_dir_path / filename
+
+    # Standardize query
+    lower_query = raw_query.lower()
+    if lower_query.startswith('q '):
+        search_type = 'q'; query = raw_query[2:].strip()
+    elif lower_query.startswith('f '):
+        search_type = 'f'; query = raw_query[2:].strip()
+    else:
+        search_type = 'f'; query = raw_query
+
+    try:
+        if search_type == 'f':
+            if not query or (query[0] != "!" and query.find("~") == -1):
+                query_expr = f"recent top 50 select path, hash, type, * tag ~ {query or '.'}"
+            else:
+                query_expr = query
+                if "select" not in query_expr.lower(): query_expr = "select path, hash, type, * " + query_expr
+                if "top" not in query_expr.lower(): query_expr = "top 50 " + query_expr
+                if "recent" not in query_expr.lower(): query_expr = "recent " + query_expr
+        else:
+            query_expr = query
+            if "select" not in query_expr.lower(): query_expr = "select path, hash, type, * " + query_expr
+
+        df = lib.database
+        result = df.querex(query_expr)
+        if not isinstance(result, pd.DataFrame) or result.empty:
+            return "No results found for report generation.", 400
+
+        # Generate QMD
+        from ..quarto import generate_qmd_report
+        generate_qmd_report(lib, result, out_path, title=title, intro_text=intro, query=raw_query, web_links=True)
         
-    return send_file(str(file_path), mimetype=mimetype)
+        return {"status": "success", "id": out_path.stem}
+    except Exception as e:
+        logger.error(f"Generate error: {e}")
+        return str(e), 500
+
+@bp.route('/reports/view/<report_id>')
+def reports_view(report_id):
+    lib = LibraryContext.get()
+    qmd_path = lib.exports_dir_path / f"{report_id}.qmd"
+    if not qmd_path.exists(): abort(404)
+
+    try:
+        # --citeproc for citations, -t html for fragment.
+        # Explicitly set encoding='utf-8' for Windows compatibility.
+        cmd = ['pandoc', str(qmd_path), '--citeproc', '-t', 'html']
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
+        html_content = res.stdout
+        title = report_id.replace('-', ' ').title()
+        return render_template('reports.html', lib=lib, view_mode=True, report_html=html_content, report_title=title)
+    except Exception as e:
+        logger.error(f"Pandoc render failed: {e}")
+        return f"Error rendering report: {str(e)}", 500
+
+@bp.route('/reports/raw/<report_id>')
+def reports_raw(report_id):
+    lib = LibraryContext.get()
+    qmd_path = lib.exports_dir_path / f"{report_id}.qmd"
+    if not qmd_path.exists(): abort(404)
+    return send_file(str(qmd_path), mimetype='text/plain', as_attachment=False)
+
+@bp.route('/reports/pdf/<report_id>')
+@admin_required
+def reports_pdf(report_id):
+    lib = LibraryContext.get()
+    qmd_path = lib.exports_dir_path / f"{report_id}.qmd"
+    pdf_path = lib.exports_dir_path / f"{report_id}.pdf"
+    if not qmd_path.exists(): abort(404)
+
+    try:
+        cmd = ['quarto', 'render', str(qmd_path), '--to', 'pdf']
+        subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=str(lib.exports_dir_path), encoding='utf-8')
+        if not pdf_path.exists(): return "PDF generation failed", 500
+        return send_file(str(pdf_path), mimetype='application/pdf', as_attachment=True)
+    except Exception as e:
+        logger.error(f"PDF build error: {e}")
+        return str(e), 500
+
+@bp.route('/reports/delete/<report_id>', methods=['POST'])
+@admin_required
+def reports_delete(report_id):
+    lib = LibraryContext.get()
+    count = 0
+    for ext in ['.qmd', '.pdf', '.html']:
+        p = lib.exports_dir_path / f"{report_id}{ext}"
+        if p.exists():
+            p.unlink()
+            count += 1
+    return {"status": "deleted", "files": count}
