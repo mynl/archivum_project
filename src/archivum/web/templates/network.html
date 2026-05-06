@@ -2,33 +2,41 @@
 
 {% block content %}
 <div class="container-fluid py-3">
-    <!-- Header: Unified Search -->
-    <div class="card shadow-sm border-0 mb-3">
-        <div class="card-body p-3">
-            <div class="row g-3 align-items-center">
-                <div class="col-md-7">
-                    <div class="input-group">
-                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search"></i></span>
-                        <input type="text" 
-                               id="network-search" 
-                               class="form-control border-start-0" 
-                               placeholder="e.g., q tag ~ /Wang/ rg risk"
-                               onkeyup="handleSearchKey(event)">
-                        <button class="btn btn-primary px-4 fw-bold" onclick="executeNetworkSearch()">
-                            Analyze
-                        </button>
-                    </div>
-                    <div class="form-text small mt-1">
-                        Use <code>q</code> for Querex, <code>rg</code> for Ripgrep, or both to filter text by metadata.
-                    </div>
-                </div>
-                <div class="col-md-5 d-flex justify-content-end gap-2 align-items-center">
-                    <div class="small text-muted me-2" id="network-stats"></div>
-                    {% set id_prefix = 'net' %}
-                    {% set input_id = 'network-search' %}
-                    {% include "components/export_button.html" with context %}
-                </div>
+    <!-- Header: Unified Search Redesign -->
+    <div class="search-container row g-2 mb-3">
+        <div class="col">
+            <div class="search-wrapper shadow-sm">
+                <input type="text" 
+                       id="network-search" 
+                       placeholder="Unified Search: e.g., q author ~ /Wang/ rg risk"
+                       onkeyup="handleSearchKey(event)"
+                       autocapitalize="none"
+                       autocorrect="off"
+                       spellcheck="false"
+                       autofocus>
+                <i class="bi bi-x-circle clear-input" onclick="clearNetworkInput()"></i>
             </div>
+        </div>
+    </div>
+
+    <!-- Controls Row -->
+    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
+        <div class="d-flex align-items-center gap-2">
+            <button id="analyze-btn" class="btn btn-primary px-5 fw-bold shadow-sm" onclick="executeNetworkSearch()">
+                Analyze
+            </button>
+            
+            {% set id_prefix = 'net' %}
+            {% set input_id = 'network-search' %}
+            {% include "components/export_button.html" with context %}
+            
+            <div class="form-text small ms-3 text-muted d-none d-md-block">
+                Use <code>q</code> for Querex, <code>rg</code> for Ripgrep, or both.
+            </div>
+        </div>
+
+        <div id="network-stats" class="text-end text-secondary small fw-medium">
+            <!-- Stats will be injected here -->
         </div>
     </div>
 
@@ -36,11 +44,11 @@
     <div class="row g-3">
         <!-- Graph Area -->
         <div class="col-lg-9">
-            <div class="card shadow-sm border-0 overflow-hidden" style="height: calc(100vh - 210px);">
+            <div class="card shadow-sm border-0 overflow-hidden" style="height: calc(100vh - 250px);">
                 <div id="cy" style="width: 100%; height: 100%; background-color: #f8f9fa;"></div>
                 
                 <!-- Overlay Legend/Controls -->
-                <div class="position-absolute top-0 end-0 m-3 p-3 bg-white bg-opacity-75 rounded shadow-sm border" style="z-index: 10;">
+                <div class="position-absolute top-0 end-0 m-3 p-3 bg-white bg-opacity-75 rounded shadow-sm border" style="z-index: 100;">
                     <h6 class="fw-bold small mb-2">Graph Controls</h6>
                     <div class="mb-2">
                         <label class="form-label small mb-1">Min Papers: <span id="min-papers-val">1</span></label>
@@ -50,13 +58,17 @@
                         <input class="form-check-input" type="checkbox" id="toggle-labels" checked onchange="updateFilters()">
                         <label class="form-check-label small" for="toggle-labels">Show Labels</label>
                     </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="toggle-lcc" onchange="updateFilters()">
+                        <label class="form-check-label small" for="toggle-lcc">Largest Island Only</label>
+                    </div>
                     <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetLayout()">
                         <i class="bi bi-arrows-fullscreen me-1"></i> Reset View
                     </button>
                 </div>
 
                 <!-- Loading Spinner -->
-                <div id="graph-loader" class="position-absolute top-50 start-50 translate-middle d-none">
+                <div id="graph-loader" class="position-absolute top-50 start-50 translate-middle d-none" style="z-index: 200;">
                     <div class="spinner-border text-primary" role="status">
                         <span class="visually-hidden">Loading...</span>
                     </div>
@@ -66,14 +78,14 @@
 
         <!-- Right Panel: Info and Clusters -->
         <div class="col-lg-3">
-            <div class="card shadow-sm border-0 d-flex flex-column" style="height: calc(100vh - 210px);">
+            <div class="card shadow-sm border-0 d-flex flex-column" style="height: calc(100vh - 250px);">
                 <div class="card-header bg-white py-3 border-bottom-0">
                     <h6 class="fw-bold mb-0">Analysis Details</h6>
                 </div>
                 <div class="card-body p-0 overflow-auto flex-grow-1" id="network-info">
                     <div class="p-4 text-center text-muted mt-5">
                         <i class="bi bi-graph-up fs-1 opacity-25 d-block mb-3"></i>
-                        Select an author or cluster in the graph to see details.
+                        Select an author or edge in the graph to see details.
                     </div>
                 </div>
             </div>
@@ -91,11 +103,21 @@
         if (e.key === 'Enter') executeNetworkSearch();
     }
 
+    function clearNetworkInput() {
+        const input = document.getElementById('network-search');
+        input.value = '';
+        input.focus();
+        // Reset state if needed
+    }
+
     async function executeNetworkSearch() {
         const query = document.getElementById('network-search').value.trim();
         if (!query) return;
 
+        const btn = document.getElementById('analyze-btn');
         const loader = document.getElementById('graph-loader');
+        
+        btn.disabled = true;
         loader.classList.remove('d-none');
 
         try {
@@ -103,31 +125,40 @@
             const data = await response.json();
             currentData = data;
             
-            renderGraph(data);
-            
-            // Update stats
-            document.getElementById('network-stats').innerHTML = 
-                `<b>${data.papers}</b> papers, <b>${data.nodes.length}</b> authors`;
-            
-            // Update export button
-            const exportBtn = document.getElementById('net-export-btn');
-            const exportToggle = document.getElementById('net-export-toggle');
-            if (exportBtn && data.hashes) {
-                exportBtn.disabled = false;
-                exportBtn.classList.remove('opacity-50', 'btn-outline-info');
-                exportBtn.classList.add('btn-info');
-                exportBtn.dataset.hashes = data.hashes;
-            }
-            if (exportToggle) {
-                exportToggle.disabled = false;
-                exportToggle.classList.remove('opacity-50', 'btn-outline-info');
-                exportToggle.classList.add('btn-info');
+            if (data.error) {
+                alert("Error: " + data.error);
+            } else if (data.papers === 0) {
+                document.getElementById('network-stats').innerHTML = '<span class="text-danger">No matches found.</span>';
+                if (cy) cy.elements().remove();
+            } else {
+                renderGraph(data);
+                
+                // Update stats (Right aligned)
+                document.getElementById('network-stats').innerHTML = 
+                    `<span class="badge bg-light text-dark border me-2">${data.papers} papers</span>` +
+                    `<span class="badge bg-light text-dark border">${data.nodes.length} authors</span>`;
+                
+                // Update export button
+                const exportBtn = document.getElementById('net-export-btn');
+                const exportToggle = document.getElementById('net-export-toggle');
+                if (exportBtn && data.hashes) {
+                    exportBtn.disabled = false;
+                    exportBtn.classList.remove('opacity-50', 'btn-outline-info');
+                    exportBtn.classList.add('btn-info');
+                    exportBtn.dataset.hashes = data.hashes;
+                }
+                if (exportToggle) {
+                    exportToggle.disabled = false;
+                    exportToggle.classList.remove('opacity-50', 'btn-outline-info');
+                    exportToggle.classList.add('btn-info');
+                }
             }
 
         } catch (err) {
             console.error(err);
             alert("Analysis failed. See console for details.");
         } finally {
+            btn.disabled = false;
             loader.classList.add('d-none');
         }
     }
@@ -143,7 +174,6 @@
                         'label': 'data(label)',
                         'width': 'mapData(weight, 1, 20, 20, 70)',
                         'height': 'mapData(weight, 1, 20, 20, 70)',
-                        // Tame Bootstrap Gradient: Light Blue (#cfe2ff) to Deep Primary (#084298)
                         'background-color': 'mapData(weight, 1, 15, #cfe2ff, #0d6efd)',
                         'color': '#212529',
                         'font-size': '9px',
@@ -151,6 +181,9 @@
                         'text-valign': 'bottom',
                         'text-halign': 'center',
                         'text-margin-y': '6px',
+                        'text-wrap': 'wrap',
+                        'text-max-width': '80px',
+                        'z-index': 10,
                         'border-width': function(node) {
                             return node.data('is_central') ? 3 : 1;
                         },
@@ -174,14 +207,15 @@
                         'text-background-opacity': 0.8,
                         'text-background-color': '#ffffff',
                         'text-background-padding': '2px',
-                        'text-background-shape': 'roundrectangle'
+                        'text-background-shape': 'roundrectangle',
+                        'z-index': 5
                     }
                 },
                 {
                     selector: ':selected',
                     style: {
-                        'background-color': '#6c757d',
-                        'line-color': '#6c757d',
+                        'background-color': '#dc3545',
+                        'line-color': '#dc3545',
                         'opacity': 1,
                         'color': '#000',
                         'border-width': 2,
@@ -219,23 +253,44 @@
         if (!cy) return;
         const minPapers = parseInt(document.getElementById('min-papers').value);
         const showLabels = document.getElementById('toggle-labels').checked;
+        const lccOnly = document.getElementById('toggle-lcc').checked;
+        
         document.getElementById('min-papers-val').innerText = minPapers;
 
+        // Reset visibility first
+        cy.elements().show();
+
+        // 1. Filter by Minimum Papers
         cy.nodes().forEach(node => {
             if (node.data('weight') < minPapers) {
                 node.hide();
             } else {
-                node.show();
                 node.style('label', showLabels ? node.data('label') : '');
             }
         });
+
+        // 2. Filter by Largest Connected Component (LCC)
+        if (lccOnly) {
+            const visibleElements = cy.elements(':visible');
+            const components = visibleElements.components();
+            
+            if (components.length > 1) {
+                let largest = components[0];
+                components.forEach(c => {
+                    if (c.length > largest.length) largest = c;
+                });
+                
+                // Hide everything not in the largest component
+                visibleElements.difference(largest).hide();
+            }
+        }
     }
 
     function resetLayout() {
         if (cy) cy.layout({ 
             name: 'cose', 
             animate: true,
-            nodeRepulsion: 12000,
+            nodeRepulsion: 15000,
             idealEdgeLength: 100
         }).run();
     }
@@ -276,7 +331,12 @@
             html += `
                 <div class="list-group-item px-0 py-2 border-0 small">
                     <div class="fw-bold mb-1">${p.title}</div>
-                    <div class="text-muted">${p.year} • ${p.tag}</div>
+                    <div class="text-muted d-flex justify-content-between align-items-center">
+                        <span>${p.year}</span>
+                        <a href="/view/${p.tag}" target="_blank" class="badge bg-light text-primary border text-decoration-none">
+                            <i class="bi bi-file-pdf me-1"></i>${p.tag}
+                        </a>
+                    </div>
                 </div>
             `;
         });
@@ -284,6 +344,12 @@
         html += `</div></div>`;
         info.innerHTML = html;
     }
+
+    window.addEventListener('load', () => {
+        if (typeof initSearchInput === 'function') {
+            initSearchInput('network-search');
+        }
+    });
 </script>
 
 <style>
@@ -291,5 +357,33 @@
     .list-group-item { font-size: 0.85rem; }
     .author-link { cursor: pointer; color: var(--bs-primary); text-decoration: none; }
     .author-link:hover { text-decoration: underline; }
+    
+    /* Input UI consistency */
+    .search-container { position: relative; }
+    .search-wrapper { position: relative; width: 100%; }
+    .search-wrapper input {
+        width: 100%;
+        padding: 1rem 3rem 1rem 1.5rem;
+        font-size: 1.25rem;
+        border: 1px solid #dee2e6;
+        border-radius: 0.75rem;
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .search-wrapper input:focus {
+        border-color: #0d6efd;
+        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.1);
+    }
+    .clear-input {
+        position: absolute;
+        right: 1.25rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #adb5bd;
+        cursor: pointer;
+        font-size: 1.25rem;
+        transition: color 0.2s;
+    }
+    .clear-input:hover { color: #6c757d; }
 </style>
 {% endblock %}

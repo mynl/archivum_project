@@ -1329,8 +1329,10 @@ def network_data():
         # Phase 2: Ripgrep Filtering (if requested)
         if ripgrep_part:
             is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
-            args = ["-l"] 
+            # Use same args as rg_search summary mode for consistency
+            args = ["-n", "-H"] 
             if not is_regex: args.append('-F')
+            elif any(p in ripgrep_part for p in ['(?=', '(?!', '(?<=', '(?!']): args.append('--pcre2')
             
             clean_rg = ripgrep_part
             if ' -g ' in ripgrep_part:
@@ -1338,30 +1340,37 @@ def network_data():
                 clean_rg = rg_bits[0].strip()
                 for g in rg_bits[1:]:
                     args.extend(['-g', g.strip()])
+            else:
+                # Default to .md if no glob specified
+                args.extend(['-g', '*.md'])
             
             rc, proc = lib.run_ripgrep(clean_rg, args)
             matched_prefixes = set()
-            is_stats = False
+            is_stats_section = False
+            
             for line in proc.stdout:
                 line = line.strip()
                 if not line: continue
-                # Skip stats lines that rg adds at the end
-                if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line) or 'seconds' in line:
-                    is_stats = True
+                # Skip stats lines
+                if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line):
+                    is_stats_section = True
                     continue
-                if is_stats: continue
+                if is_stats_section: continue
                 
-                # Only take lines that look like our sharded filenames (Hash_...)
-                fname = Path(line).name
-                if len(fname) >= 10 and all(c in '0123456789ABCDEFabcdef' for c in fname[:10]):
-                    matched_prefixes.add(fname[:10])
+                # Parse like rg_search: path:line:text
+                parts = line.split(':', 2)
+                if len(parts) < 3: continue
+                
+                h_prefix = Path(parts[0]).name[:10].upper()
+                matched_prefixes.add(h_prefix)
             
-            # Map result_df hashes to prefixes and filter
-            result_df['hash_prefix'] = result_df['hash'].astype(str).str[:10]
-            result_df = result_df[result_df['hash_prefix'].isin(matched_prefixes)]
+            # Map result_df hashes to prefixes and filter (case-insensitive)
+            result_df['hash_prefix_upper'] = result_df['hash'].astype(str).str[:10].str.upper()
+            result_df = result_df[result_df['hash_prefix_upper'].isin(matched_prefixes)]
             
         if result_df.empty:
-            return {"nodes": [], "edges": [], "elements": [], "papers": 0}
+            logger.info(f"Network analysis: result_df is empty after filtering for query '{raw_query}'")
+            return {"nodes": [], "elements": [], "papers": 0, "hashes": ""}
 
         # Phase 3: Social Graph Construction
         paper_to_authors = {}
