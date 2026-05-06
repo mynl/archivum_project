@@ -849,7 +849,11 @@ def rg_search():
 
         is_regex = any(c in query for c in r".*+?^$|()[]{}")
         common_args = []
-        if not is_regex: common_args.append('-F')
+        if not is_regex: 
+            common_args.append('-F')
+        elif any(p in query for p in ['(?=', '(?!', '(?<=', '(?<!']):
+            # PCRE2 is required for look-around assertions
+            common_args.append('--pcre2')
 
         g1 = format_glob(glob1)
         if g1: common_args.extend(['--iglob', g1])
