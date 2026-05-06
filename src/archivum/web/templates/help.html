@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row g-0 help-container border rounded shadow-sm bg-white overflow-hidden">
+    <!-- Sidebar: Table of Contents -->
+    <div class="col-md-3 border-end bg-light help-sidebar">
+        <div class="p-4 sticky-top" style="top: 0;">
+            <h5 class="fw-bold mb-4 text-primary">Documentation</h5>
+            
+            <!-- In-page Search -->
+            <div class="mb-4">
+                <div class="search-wrapper">
+                    <input type="text" id="help-search" class="form-control form-control-sm border-2" placeholder="Search help..." onkeyup="searchHelp()">
+                    <i class="bi bi-x-circle clear-input" onclick="document.getElementById('help-search').value=''; searchHelp();"></i>
+                </div>
+            </div>
+
+            <nav id="help-toc" class="nav flex-column small fw-medium">
+                <a class="nav-link py-1 px-0 text-dark active" href="#intro">Introduction</a>
+                <a class="nav-link py-1 px-0 text-dark" href="#architecture">Architecture</a>
+                <a class="nav-link py-1 px-0 text-dark" href="#query">Query Syntax</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-simple">Simple Filters</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-advanced">Advanced Querexfuzz</a>
+                <a class="nav-link py-1 px-0 text-dark" href="#screens">Screen Guide</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-query">Query Page</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-ripgrep">Ripgrep (Full-Text)</a>
+                {% if is_admin %}
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-ingest">Ingest (Admin)</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-edit">Editor (Admin)</a>
+                {% endif %}
+                <a class="nav-link py-1 px-0 text-dark" href="#regex">Regular Expressions</a>
+            </nav>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div class="col-md-9 help-content p-5 overflow-auto">
+        <section id="intro" class="mb-5">
+            <h2 class="fw-bold mb-3">Introduction</h2>
+            <p class="lead text-muted">Archivum is a personal document and reference management system designed for high-performance indexing and retrieval of academic papers, books, and technical documents.</p>
+            <p>Unlike traditional managers, Archivum prioritizes <strong>identity over location</strong>. Documents are tracked by their cryptographic content hash, ensuring that your library remains intact even if files are moved, renamed, or synced across different devices.</p>
+        </section>
+
+        <section id="architecture" class="mb-5">
+            <h3 class="fw-bold mb-3">Architecture</h3>
+            <p>The library is built on a three-tier database structure stored as high-performance <code>.feather</code> files:</p>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="p-3 border rounded bg-light h-100">
+                        <h6 class="fw-bold text-primary"><i class="bi bi-journal-text me-2"></i>Ref</h6>
+                        <p class="small mb-0"><strong>Bibliographic Metadata</strong><br>Tags, authors, titles, journals, and years. Synchronized with an external BibTeX file.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="p-3 border rounded bg-light h-100">
+                        <h6 class="fw-bold text-success"><i class="bi bi-file-earmark-pdf me-2"></i>Doc</h6>
+                        <p class="small mb-0"><strong>Physical Files</strong><br>Path, size, creation date, and content hash. Managed in a sharded directory structure.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="p-3 border rounded bg-light h-100">
+                        <h6 class="fw-bold text-warning"><i class="bi bi-link-45deg me-2"></i>Ref-Doc</h6>
+                        <p class="small mb-0"><strong>Junction Table</strong><br>The bridge that links high-level tags to physical content hashes.</p>
+                    </div>
+                </div>
+            </div>
+            <h5 class="fw-bold">Full-Text Extraction</h5>
+            <p>When documents are imported, Archivum automatically extracts their text content. This text is sharded into a separate directory, enabling blazing-fast full-text searches across thousands of documents using the integrated <a href="https://github.com/BurntSushi/ripgrep" target="_blank"><strong>Ripgrep</strong></a> engine.</p>
+        </section>
+
+        <section id="query" class="mb-5">
+            <h3 class="fw-bold mb-3">Query Syntax</h3>
+            <p>The primary search bar on the <strong>Query</strong> page is powered by <code>querexfuzz</code>. It supports three distinct modes of interaction.</p>
+            
+            <div id="query-simple" class="mb-4">
+                <h5 class="fw-bold text-primary">1. Simple Filters & Shortcuts</h5>
+                <p>For quick lookups, you can use these intuitive patterns:</p>
+                <table class="table table-sm table-bordered bg-white small mb-3">
+                    <thead class="bg-light">
+                        <tr>
+                            <th style="width: 30%;">Syntax</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>keyword</code></td>
+                            <td>Matches a word or regex against the <strong>tag</strong> field.</td>
+                        </tr>
+                        <tr>
+                            <td><code>/pattern with spaces/</code></td>
+                            <td>Use slashes for patterns containing spaces or complex characters. This follows <strong>Perl-style</strong> regular expression syntax.</td>
+                        </tr>
+                        <tr>
+                            <td><code>!AuthorName</code></td>
+                            <td>Prefix with <code>!</code> to quickly search for an <strong>author</strong>.</td>
+                        </tr>
+                        <tr>
+                            <td><code>field ~ pattern</code></td>
+                            <td>Generic field filter. Patterns are regex by default. Case insensitive.</td>
+                        </tr>
+                        <tr>
+                            <td><code>year ~ 2024</code></td>
+                            <td>Matches papers from the year 2024.</td>
+                        </tr>
+                        <tr>
+                            <td><code>journal ~ Nature</code></td>
+                            <td>Matches papers published in Nature.</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p class="small text-muted"><i class="bi bi-info-circle me-1"></i> You can combine filters with <code>and</code>, <code>or</code>, and <code>!</code> (NOT). For example: <code>!Smith and year ~ 2023</code></p>
+            </div>
+
+            <div id="query-advanced" class="mb-4">
+                <h5 class="fw-bold text-primary">2. Full Querexfuzz (Prefix: <code>q</code>)</h5>
+                <p>Prefix your query with <code>q</code> to access the full power of the engine, including projection and fuzzy scoring.</p>
+                <div class="bg-dark text-light p-3 rounded font-monospace small mb-3">
+                    q select year, author, title author ~ /Wang, R/ and year > 2019 order by -year
+                </div>
+                <ul class="small">
+                    <li><strong>Fuzzy Search</strong>: Use <code>#</code> for fast, Rust-powered fuzzy matching. <code>q # machine learning</code></li>
+                    <li><strong>Projection</strong>: Control which columns are returned using <code>select col1, col2</code>.</li>
+                    <li><strong>Sorting</strong>: Use <code>order by field</code> or <code>order by -field</code> for descending.</li>
+                    <li><strong>Limits</strong>: Append <code>top 50</code> to restrict result size.</li>
+                </ul>
+                <p class="small">For the complete grammar, visit the <a href="https://github.com/mynl/querexfuzz_project" target="_blank">Querexfuzz Project</a>.</p>
+            </div>
+        </section>
+
+        <section id="screens" class="mb-5">
+            <h3 class="fw-bold mb-3">Screen Guide</h3>
+            
+            <div id="screen-query" class="mb-4">
+                <h5 class="fw-bold"><i class="bi bi-search me-2"></i>Query Page</h5>
+                <p>The default landing page for searching your library.</p>
+                <ul>
+                    <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type.</li>
+                    <li><strong>View Modes</strong>: Toggle between <strong>List</strong> (rich snippets) and <strong>Table</strong> (high density).</li>
+                    <li><strong>Abstracts</strong>: Click the tag to open the PDF. Hover to see the abstract if available.</li>
+                    <li><strong>Export</strong>: (Admin only) Generate standalone HTML reports of your search results using Quarto.</li>
+                </ul>
+            </div>
+
+            <div id="screen-ripgrep" class="mb-4">
+                <h5 class="fw-bold"><i class="bi bi-terminal me-2"></i>Ripgrep (Full-Text)</h5>
+                <p>Search inside the actual text of your PDF collection.</p>
+                <ul>
+                    <li><strong>Streaming Results</strong>: Matches are streamed to the browser in real-time.</li>
+                    <li><strong>Context Control</strong>: Specify how many lines of context to show before and after matches.</li>
+                    <li><strong>Summary Mode</strong>: Groups matches by year and author to provide statistical insights into your library's content.</li>
+                </ul>
+            </div>
+
+            {% if is_admin %}
+            <div id="screen-ingest" class="mb-4">
+                <h5 class="fw-bold text-danger"><i class="bi bi-plus-circle me-2"></i>Ingest (Admin Mode)</h5>
+                <p>Import new documents or BibTeX entries into the library.</p>
+                <ul>
+                    <li><strong>Source</strong>: Paste BibTeX, provide a local path, or enter a URL (including Arxiv/DOI support).</li>
+                    <li><strong>Workbench</strong>: Verify metadata discovery, hash matching, and tag allocation before committing.</li>
+                    <li><strong>Duplicate Detection</strong>: Archivum will warn you if the content hash already exists in the library.</li>
+                </ul>
+            </div>
+
+            <div id="screen-edit" class="mb-4">
+                <h5 class="fw-bold text-danger"><i class="bi bi-pencil-square me-2"></i>Editor (Admin Mode)</h5>
+                <p>A high-density interface for bulk metadata management.</p>
+                <ul>
+                    <li><strong>Tag Sidebar</strong>: Live-filterable list of every tag in your library.</li>
+                    <li><strong>Direct Edit</strong>: Edit the underlying BibTeX source directly and save with <code>Ctrl+S</code> or the Save button.</li>
+                </ul>
+            </div>
+            {% endif %}
+        </section>
+
+        <section id="regex" class="mb-5">
+            <h3 class="fw-bold mb-3">Regular Expressions</h3>
+            <p>Most search fields in Archivum support standard regular expressions. Here are common patterns:</p>
+            <table class="table table-sm table-bordered bg-white small">
+                <thead class="bg-light">
+                    <tr>
+                        <th style="width: 20%;">Symbol</th>
+                        <th>Meaning</th>
+                        <th>Example</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>.</code></td>
+                        <td>Any single character</td>
+                        <td><code>n.t.re</code> matches Nature</td>
+                    </tr>
+                    <tr>
+                        <td><code>^</code></td>
+                        <td>Start of string</td>
+                        <td><code>^Smith</code> matches Smith but not Goldsmith</td>
+                    </tr>
+                    <tr>
+                        <td><code>$</code></td>
+                        <td>End of string</td>
+                        <td><code>2023$</code> matches only tags ending in 2023</td>
+                    </tr>
+                    <tr>
+                        <td><code>*</code></td>
+                        <td>Zero or more of previous</td>
+                        <td><code>ba*n</code> matches bn, ban, baan</td>
+                    </tr>
+                    <tr>
+                        <td><code>+</code></td>
+                        <td>One or more of previous</td>
+                        <td><code>ba+n</code> matches ban, baan, etc.</td>
+                    </tr>
+                    <tr>
+                        <td><code>?</code></td>
+                        <td>Zero or one of previous (optional)</td>
+                        <td><code>cats?</code> matches cat or cats</td>
+                    </tr>
+                    <tr>
+                        <td><code>|</code></td>
+                        <td>Logical OR</td>
+                        <td><code>Nature|Science</code> matches either journal</td>
+                    </tr>
+                    <tr>
+                        <td><code>\d</code></td>
+                        <td>Any digit</td>
+                        <td><code>\d{4}</code> matches a 4-digit year</td>
+                    </tr>
+                    <tr>
+                        <td><code>\w</code></td>
+                        <td>Any word character (alnum + underscore)</td>
+                        <td><code>\w+</code> matches a whole word</td>
+                    </tr>
+                    <tr>
+                        <td><code>\s</code></td>
+                        <td>Any whitespace (space, tab)</td>
+                        <td><code>Wang\s+R</code> matches "Wang, R" if space exists</td>
+                    </tr>
+                    <tr>
+                        <td><code>[ ]</code></td>
+                        <td>Character class / set</td>
+                        <td><code>[aeiou]</code> matches any vowel</td>
+                    </tr>
+                    <tr>
+                        <td><code>( )</code></td>
+                        <td>Capturing group</td>
+                        <td><code>(Auto|Machine)</code> groups for priority or repetition</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </div>
+</div>
+
+<script>
+    // In-page search for help content
+    function searchHelp() {
+        const query = document.getElementById('help-search').value.toLowerCase();
+        const sections = document.querySelectorAll('.help-content section');
+        
+        sections.forEach(section => {
+            const text = section.innerText.toLowerCase();
+            if (text.includes(query)) {
+                section.style.display = 'block';
+            } else {
+                section.style.display = 'none';
+            }
+        });
+    }
+
+    // TOC Highlight on Scroll
+    window.addEventListener('scroll', () => {
+        let current = "";
+        const sections = document.querySelectorAll('.help-content section, .help-content div[id]');
+        
+        sections.forEach(section => {
+            const sectionTop = section.offsetTop;
+            if (pageYOffset >= sectionTop - 150) {
+                current = section.getAttribute('id');
+            }
+        });
+
+        document.querySelectorAll('#help-toc .nav-link').forEach(link => {
+            link.classList.remove('active', 'text-primary', 'fw-bold');
+            if (link.getAttribute('href').includes(current)) {
+                link.classList.add('active', 'text-primary', 'fw-bold');
+            }
+        });
+    });
+</script>
+
+<style>
+    .help-content section {
+        scroll-margin-top: 100px;
+    }
+    .help-content div[id] {
+        scroll-margin-top: 100px;
+    }
+    .help-container {
+        height: calc(100vh - 120px);
+    }
+    .help-sidebar {
+        height: 100%;
+        overflow-y: auto;
+    }
+    .help-content {
+        height: 100%;
+        line-height: 1.6;
+        color: #333;
+    }
+    .help-content h2, .help-content h3 {
+        color: #2c3e50;
+        border-bottom: 2px solid #eee;
+        padding-bottom: 0.5rem;
+    }
+    .help-content h5 {
+        margin-top: 1.5rem;
+    }
+    .nav-link {
+        transition: all 0.2s ease;
+    }
+    .nav-link:hover {
+        padding-left: 0.5rem !important;
+        color: var(--primary-color) !important;
+    }
+    mark {
+        padding: 0;
+        background-color: #fff3cd;
+    }
+    
+    @media (max-width: 767.98px) {
+        .help-container { height: auto; }
+        .help-sidebar { height: auto; border-bottom: 1px solid #dee2e6; }
+        .help-content { height: auto; padding: 2rem !important; }
+    }
+</style>
+{% endblock %}

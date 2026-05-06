@@ -1139,6 +1139,11 @@ def edit_tag(tag):
         logger.error(f"Error updating reference {tag}: {e}")
         return f"Error: {str(e)}", 500
 
+@bp.route('/help')
+def help_page():
+    lib = LibraryContext.get()
+    return render_template('help.html', lib=lib)
+
 @bp.route('/export/abstracts')
 def export_abstracts():
     lib = LibraryContext.get()

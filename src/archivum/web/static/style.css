@@ -43,6 +43,36 @@ header img {
     margin-bottom: 2rem;
 }
 
+/* 2b. Search Wrapper & Clear Icon */
+.search-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+}
+
+.search-wrapper input {
+    padding-right: 2.5rem !important; /* Make room for the clear icon */
+}
+
+.clear-input {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: pointer;
+    color: #adb5bd;
+    z-index: 5;
+    transition: color 0.15s ease-in-out, opacity 0.15s;
+    font-size: 1.1rem;
+    opacity: 0.6;
+}
+
+.clear-input:hover {
+    color: #6c757d;
+    opacity: 1;
+}
+
 /* 3. Navigation Styling */
 .nav-pills .nav-link {
     transition: all 0.2s;
