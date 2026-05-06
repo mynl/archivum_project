@@ -1328,15 +1328,33 @@ def network_data():
 
         # Phase 2: Ripgrep Filtering (if requested)
         if ripgrep_part:
-            # We filter the result_df by running ripgrep and keeping only matching hashes
             is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
-            args = ["-l"] # Only need filenames (hashes)
+            args = ["-l"] 
             if not is_regex: args.append('-F')
             
-            rc, proc = lib.run_ripgrep(ripgrep_part, args)
+            clean_rg = ripgrep_part
+            if ' -g ' in ripgrep_part:
+                rg_bits = ripgrep_part.split(' -g ')
+                clean_rg = rg_bits[0].strip()
+                for g in rg_bits[1:]:
+                    args.extend(['-g', g.strip()])
+            
+            rc, proc = lib.run_ripgrep(clean_rg, args)
             matched_prefixes = set()
+            is_stats = False
             for line in proc.stdout:
-                matched_prefixes.add(Path(line.strip()).name[:10])
+                line = line.strip()
+                if not line: continue
+                # Skip stats lines that rg adds at the end
+                if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line) or 'seconds' in line:
+                    is_stats = True
+                    continue
+                if is_stats: continue
+                
+                # Only take lines that look like our sharded filenames (Hash_...)
+                fname = Path(line).name
+                if len(fname) >= 10 and all(c in '0123456789ABCDEFabcdef' for c in fname[:10]):
+                    matched_prefixes.add(fname[:10])
             
             # Map result_df hashes to prefixes and filter
             result_df['hash_prefix'] = result_df['hash'].astype(str).str[:10]
@@ -1346,60 +1364,80 @@ def network_data():
             return {"nodes": [], "edges": [], "elements": [], "papers": 0}
 
         # Phase 3: Social Graph Construction
-        # Extract authors and co-authorships
-        # paper_id -> [authors]
         paper_to_authors = {}
         author_to_papers = {} # author -> [ {title, year, tag} ]
         
+        def normalize_name(name):
+            if pd.isna(name): return "Unknown"
+            s = str(name).strip()
+            if not s or s.lower() == 'nan' or s.lower() == 'unknown': return "Unknown"
+            return s.rstrip('.').strip()
+
         for _, row in result_df.iterrows():
-            authors_str = str(row.get('author', 'Unknown'))
-            author_list = [a.strip() for a in authors_str.split(' and ') if a.strip() and a.strip() != 'Unknown']
+            authors_raw = row.get('author')
+            if pd.isna(authors_raw): continue
+            
+            author_list = [normalize_name(a) for a in str(authors_raw).split(' and ') if a.strip()]
+            author_list = [a for a in author_list if a != "Unknown"]
             if not author_list: continue
             
             paper_info = {
                 'title': clean_latex(str(row.get('title', 'Unknown'))),
                 'year': str(row.get('year', '9999')).split('.')[0],
-                'tag': row.tag
+                'tag': str(row.tag)
             }
             
             for auth in author_list:
                 author_to_papers.setdefault(auth, []).append(paper_info)
             
-            paper_to_authors[row.tag] = author_list
+            paper_to_authors[str(row.tag)] = (author_list, paper_info)
 
-        # Nodes and Edges
+        if not author_to_papers:
+            return {"nodes": [], "edges": [], "elements": [], "papers": len(result_df)}
+
+        # Identify central author
+        max_p = 0; central_author = None
+        for auth, papers in author_to_papers.items():
+            if len(papers) > max_p:
+                max_p = len(papers); central_author = auth
+
         nodes = []
         for auth, papers in author_to_papers.items():
             nodes.append({
                 'data': {
-                    'id': auth,
-                    'label': auth,
-                    'weight': len(papers),
-                    'papers': papers[:20] # Limit info pane data
+                    'id': str(auth), 'label': str(auth), 'weight': int(len(papers)),
+                    'is_central': auth == central_author, 'papers': papers[:50] 
                 }
             })
 
-        edges = {} # (auth1, auth2) -> weight
-        for tag, author_list in paper_to_authors.items():
+        edges = {} # (auth1, auth2) -> {weight, papers}
+        for tag, (author_list, paper_info) in paper_to_authors.items():
             if len(author_list) < 2: continue
-            # Sort to ensure consistent key (A, B) where A < B
             sorted_authors = sorted(author_list)
             import itertools
             for a1, a2 in itertools.combinations(sorted_authors, 2):
-                key = (a1, a2)
-                edges[key] = edges.get(key, 0) + 1
+                key = (str(a1), str(a2))
+                if key not in edges:
+                    edges[key] = {'weight': 0, 'papers': []}
+                edges[key]['weight'] += 1
+                edges[key]['papers'].append(paper_info)
 
         elements = nodes + [
-            {'data': {'source': k[0], 'target': k[1], 'weight': v}}
+            {'data': {
+                'source': k[0], 'target': k[1], 
+                'weight': int(v['weight']), 
+                'papers': v['papers'],
+                'label': f"{k[0]} & {k[1]}"
+            }}
             for k, v in edges.items()
         ]
 
         # Top hashes for export
-        top_hashes = "|".join(result_df['hash'].astype(str).str[:6].unique()[:500])
+        hash_list = result_df['hash'].dropna().astype(str).str[:6].unique()[:500]
+        top_hashes = "|".join([str(h) for h in hash_list])
 
         return {
             "nodes": nodes,
-            "edges": list(edges.keys()),
             "elements": elements,
             "papers": len(result_df),
             "hashes": top_hashes

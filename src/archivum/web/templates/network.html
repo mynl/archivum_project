@@ -141,33 +141,51 @@
                     selector: 'node',
                     style: {
                         'label': 'data(label)',
-                        'width': 'mapData(weight, 1, 10, 20, 60)',
-                        'height': 'mapData(weight, 1, 10, 20, 60)',
-                        'background-color': '#0d6efd',
-                        'color': '#333',
-                        'font-size': '10px',
+                        'width': 'mapData(weight, 1, 20, 20, 70)',
+                        'height': 'mapData(weight, 1, 20, 20, 70)',
+                        // Tame Bootstrap Gradient: Light Blue (#cfe2ff) to Deep Primary (#084298)
+                        'background-color': 'mapData(weight, 1, 15, #cfe2ff, #0d6efd)',
+                        'color': '#212529',
+                        'font-size': '9px',
+                        'font-weight': 'normal',
                         'text-valign': 'bottom',
                         'text-halign': 'center',
-                        'text-margin-y': '5px'
+                        'text-margin-y': '6px',
+                        'border-width': function(node) {
+                            return node.data('is_central') ? 3 : 1;
+                        },
+                        'border-color': function(node) {
+                            return node.data('is_central') ? '#ffc107' : '#dee2e6';
+                        }
                     }
                 },
                 {
                     selector: 'edge',
                     style: {
-                        'width': 'data(weight)',
+                        'width': 'mapData(weight, 1, 5, 1, 8)',
                         'line-color': '#adb5bd',
-                        'opacity': 0.5,
-                        'curve-style': 'bezier'
+                        'opacity': 0.3,
+                        'curve-style': 'bezier',
+                        'label': function(edge) {
+                            return edge.data('weight') > 1 ? String(edge.data('weight')) : '';
+                        },
+                        'font-size': '8px',
+                        'color': '#6c757d',
+                        'text-background-opacity': 0.8,
+                        'text-background-color': '#ffffff',
+                        'text-background-padding': '2px',
+                        'text-background-shape': 'roundrectangle'
                     }
                 },
                 {
                     selector: ':selected',
                     style: {
-                        'background-color': '#dc3545',
-                        'line-color': '#dc3545',
-                        'target-arrow-color': '#dc3545',
-                        'source-arrow-color': '#dc3545',
-                        'opacity': 1
+                        'background-color': '#6c757d',
+                        'line-color': '#6c757d',
+                        'opacity': 1,
+                        'color': '#000',
+                        'border-width': 2,
+                        'border-color': '#343a40'
                     }
                 }
             ],
@@ -175,16 +193,23 @@
                 name: 'cose',
                 animate: true,
                 padding: 50,
-                componentSpacing: 100,
-                nodeRepulsion: function( node ){ return 400000; },
-                idealEdgeLength: function( edge ){ return 100; },
-                edgeElasticity: function( edge ){ return 100; }
+                componentSpacing: 80,
+                nodeRepulsion: 15000,
+                idealEdgeLength: 100,
+                edgeElasticity: 100,
+                nestingFactor: 5,
+                gravity: 80
             }
         });
 
         cy.on('tap', 'node', function(evt){
             const node = evt.target;
-            showAuthorInfo(node.data());
+            showAuthorInfo(node.data(), 'Author');
+        });
+
+        cy.on('tap', 'edge', function(evt){
+            const edge = evt.target;
+            showAuthorInfo(edge.data(), 'Shared Papers');
         });
 
         updateFilters();
@@ -207,15 +232,42 @@
     }
 
     function resetLayout() {
-        if (cy) cy.layout({ name: 'cose', animate: true }).run();
+        if (cy) cy.layout({ 
+            name: 'cose', 
+            animate: true,
+            nodeRepulsion: 12000,
+            idealEdgeLength: 100
+        }).run();
     }
 
-    function showAuthorInfo(data) {
+    function rebaseSearch(author) {
+        const input = document.getElementById('network-search');
+        input.value = `! /${author}/`;
+        executeNetworkSearch();
+    }
+
+    function showAuthorInfo(data, type) {
         const info = document.getElementById('network-info');
+        const title = type === 'Author' ? data.label : data.label;
+        const sub = type === 'Author' ? `${data.weight} papers in this set` : `Co-authored ${data.weight} papers together`;
+        
         let html = `
             <div class="p-4">
-                <h5 class="fw-bold mb-1">${data.label}</h5>
-                <p class="text-muted small mb-4">${data.weight} papers in this set</p>
+                <h5 class="fw-bold mb-1">${title}</h5>
+                <p class="text-muted small mb-3">${sub}</p>
+        `;
+
+        if (type === 'Author') {
+            html += `
+                <div class="d-grid mb-4">
+                    <button class="btn btn-sm btn-outline-primary" onclick="rebaseSearch('${data.id}')">
+                        <i class="bi bi-geo-fill me-1"></i> Rebase Graph on Author
+                    </button>
+                </div>
+            `;
+        }
+
+        html += `
                 <h6 class="small fw-bold text-uppercase mb-3">Papers</h6>
                 <div class="list-group list-group-flush">
         `;
