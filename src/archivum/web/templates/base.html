@@ -30,7 +30,7 @@
         <nav class="navbar navbar-expand-lg navbar-light py-2">
             <div class="container-fluid px-4">
                 <!-- Logo and Title Group -->
-                <div class="d-flex align-items-center me-auto">
+                <a href="{{ url_for('main.index') }}" class="d-flex align-items-center me-auto text-decoration-none">
                     <img src="{{ url_for('static', filename='icon/android-chrome-192x192.png') }}" 
                          alt="Archivum Logo" 
                          class="me-2" 
@@ -47,9 +47,9 @@
                             {% endif %}
                         </div>
                     </div>
+                </a>
 
-                    <div class="d-none d-md-block" style="border-left: 1px solid #eee; height: 25px; margin: 0 0.5rem;"></div>
-                </div>
+                <div class="d-none d-md-block" style="border-left: 1px solid #eee; height: 25px; margin: 0 0.5rem;"></div>
 
                 <!-- Hamburger Toggle -->
                 <button class="navbar-toggler ms-auto" type="button" data-bs-toggle="collapse" data-bs-target="#mainNavbar" aria-controls="mainNavbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -76,11 +76,18 @@
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.authors_page' else 'text-dark fw-medium' }}">Authors</a>
                         </li>
                         
+                        <li class="nav-item">
+                            <a href="{{ url_for('main.qmd_page') }}"
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.qmd_page' else 'text-dark fw-medium' }}">Qmd</a>
+                        </li>
+
                         {% if is_admin %}
                         <li class="nav-item">
-                            <a href="{{ url_for('main.ingest_page') }}" 
+                            <a href="{{ url_for('main.ingest_page') }}"
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.ingest_page' else 'text-dark fw-medium' }}">Ingest</a>
                         </li>
+                        {% endif %}
+                        {% if is_admin %}
                         <li class="nav-item">
                             <a href="{{ url_for('main.editor_page') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.editor_page' else 'text-dark fw-medium' }}">Edit</a>

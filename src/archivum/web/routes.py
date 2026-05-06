@@ -568,7 +568,17 @@ def author_search(author):
         if not isinstance(result, pd.DataFrame):
             return f"Query error: {result}"
         
-        return _render_search_results(result, view_mode='list')
+        # Add header with Author name and Export button
+        header_oob = (
+            f"<div id='author-results-header' hx-swap-oob='true' class='d-flex justify-content-between align-items-center mb-4'>"
+            f"  <h4 class='mb-0 fw-bold'><i class='bi bi-person-fill me-2'></i>{author}</h4>"
+            f"  <button class='btn btn-info px-4 fw-bold shadow-sm' onclick=\"exportAuthorToQuery('{author}')\">"
+            f"    <i class='bi bi-box-arrow-up-right me-2'></i>Export"
+            f"  </button>"
+            f"</div>"
+        )
+        
+        return header_oob + _render_search_results(result, view_mode='list')
         
     except Exception as e:
         logger.error(f"Author search error: {e}")
@@ -966,12 +976,15 @@ def rg_search():
                 yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>{render_template('components/rg_counts.html', counts=counts_list)}</div>")
 
             # EXPORT BUTTON OOB SWAP
-            top_50_hashes = "|".join([x['hash'][:6] for x in counts_list[:50]])
-            if top_50_hashes:
+            top_hashes = "|".join([x['hash'][:6] for x in counts_list[:500]])
+            if top_hashes:
                 export_oob = (
-                    f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
-                    f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{top_50_hashes}' "
-                    f"title='Export top 50 documents by match count to Query screen'>Export</button>"
+                    f"<div id='rg-export-btn' hx-swap-oob='true' onclick='exportToQuery()' "
+                    f"class='btn btn-info px-4 fw-bold' data-hashes='{top_hashes}' "
+                    f"title='Export documents to Query screen'>Export</div>"
+                    f"<button id='rg-export-toggle' hx-swap-oob='true' "
+                    f"class='btn btn-info dropdown-toggle dropdown-toggle-split' "
+                    f"data-bs-toggle='dropdown' aria-expanded='false'></button>"
                 )
                 yield yield_and_buffer(export_oob)
 
@@ -1261,6 +1274,144 @@ def reports_generate():
     except Exception as e:
         logger.error(f"Generate error: {e}")
         return str(e), 500
+
+@bp.route('/rg-export-csv')
+def rg_export_csv():
+    query = request.args.get('q', '').strip()
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+
+    # Use current mode to find cache key
+    # CSV export always uses current search's counts data
+    mode = 'counts' # Default to counts for data extraction
+    
+    # We need to find the data cache key. Since we don't know the exact 
+    # filters the user had (unless we pass them all), we'll try to reconstruct 
+    # or rely on the query if passed.
+    # For now, let's look for any 'data' cache item for this query.
+    # Or better: just re-run the counts logic if not cached (it's fast).
+    
+    # Note: We'll need a simplified version of the search logic to get matches
+    hash_prefix_to_meta = get_hash_meta_cache(lib)
+    is_regex = any(c in query for c in r".*+?^$|()[]{}")
+    args = ["-n", "-H"]
+    if not is_regex: args.append('-F')
+    elif any(p in query for p in ['(?=', '(?!', '(?<=', '(?<!']): args.append('--pcre2')
+    
+    # Run RG to get hashes and match counts
+    rc, proc = lib.run_ripgrep(query, args)
+    counts = {}
+    for line in proc.stdout:
+        parts = line.split(':', 2)
+        if len(parts) < 3: continue
+        h_prefix = Path(parts[0]).name[:10]
+        counts[h_prefix] = counts.get(h_prefix, 0) + 1
+
+    if not counts:
+        return "No matches found to export.", 400
+
+    # Map prefixes to full hashes using database.name as the source of truth
+    # prefix -> full_hash
+    prefix_to_full = {}
+    if not lib.database.empty:
+        # We use the 'name' column which starts with the 10-char hash prefix
+        # and map it to the 'hash' column
+        for _, row in lib.database[['name', 'hash']].iterrows():
+            if pd.isna(row['name']): continue
+            prefix_to_full[str(row['name'])[:10]] = row['hash']
+
+    data_rows = []
+    df = lib.database
+    
+    for h_prefix, count in counts.items():
+        full_hash = prefix_to_full.get(h_prefix)
+        if not full_hash:
+            # Fallback: try direct lookup in case the prefix is actually the hash
+            match = df[df['hash'].astype(str).str.startswith(h_prefix)]
+        else:
+            match = df[df['hash'] == full_hash]
+            
+        if match.empty: continue
+        
+        row = match.iloc[0].to_dict()
+        row['matches'] = count
+        data_rows.append(row)
+
+    if not data_rows:
+        return "Failed to map matches to database.", 500
+
+    export_df = pd.DataFrame(data_rows)
+    
+    # Reorder columns for sanity
+    cols = ['tag', 'author', 'title', 'year', 'publisher', 'journal', 'type', 'matches', 'path', 'hash']
+    existing_cols = [c for c in cols if c in export_df.columns]
+    remaining = [c for c in export_df.columns if c not in existing_cols]
+    export_df = export_df[existing_cols + remaining]
+
+    # Filename generation: arc-MM-DD-shortened-query.csv
+    date_str = datetime.now().strftime("%m-%d")
+    clean_q = re.sub(r'[^a-zA-Z0-9]+', '-', query).strip('-')[:30]
+    filename = f"arc-{date_str}-{clean_q}.csv"
+
+    # Save to temp and send
+    temp_path = Path("temp") / filename
+    export_df.to_csv(temp_path, index=False, encoding='utf-8-sig') # BOM for Excel
+    
+    return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+
+@bp.route('/qmd')
+def qmd_page():
+    lib = LibraryContext.get()
+    return render_template('qmd.html', lib=lib)
+
+@bp.route('/qmd/extract', methods=['POST'])
+def qmd_extract():
+    lib = LibraryContext.get()
+    text = request.form.get('text', '').strip()
+    uploaded_file = request.files.get('file')
+
+    if uploaded_file and uploaded_file.filename:
+        text = uploaded_file.read().decode('utf-8', errors='ignore')
+    
+    if not text:
+        return "No text or file provided.", 400
+
+    # Write to a temporary file for QmdParser
+    temp_file = Path("temp/qmd_extract.qmd")
+    temp_file.parent.mkdir(parents=True, exist_ok=True)
+    temp_file.write_text(text, encoding='utf-8')
+
+    from ..quarto import QmdParser
+    from ..bibtex import dict_to_bibtex
+    
+    parser = QmdParser(temp_file)
+    # Use a more permissive regex for citations if the default one is too strict
+    # The default is: r"(?<!@)@(?!REF)([A-Z][A-Za-z0-9]+)"
+    # We'll allow lowercase starting tags too: r"(?<!@)@(?!REF)([A-Za-z0-9]+)"
+    import re
+    cite_rex = re.compile(r"(?<!@)@(?!REF)([A-Za-z][A-Za-z0-9]+)")
+    tags = sorted(set([m.group(1) for m in cite_rex.finditer(text)]))
+    
+    logger.info(f"QMD Extraction found tags: {tags}")
+    
+    if not tags:
+        return "<div class='alert alert-warning'>No citations found (e.g. @Tag2023).</div>"
+
+    # Match against library (case-insensitive if needed, but Archivum tags are usually case-sensitive)
+    matches = lib.ref_df[lib.ref_df['tag'].isin(tags)]
+    
+    if matches.empty:
+        # Try case-insensitive fallback for tags
+        tags_lower = [t.lower() for t in tags]
+        matches = lib.ref_df[lib.ref_df['tag'].str.lower().isin(tags_lower)]
+        
+    if matches.empty:
+        return f"<div class='alert alert-warning'>Found {len(tags)} citations but none matched the library. Tags: {', '.join(tags)}</div>"
+
+    bib_entries = [dict_to_bibtex(row) for _, row in matches.sort_values("tag").iterrows()]
+    bib_text = "\n\n".join(bib_entries)
+    
+    return render_template('components/qmd_result.html', bib_text=bib_text, count=len(matches))
 
 @bp.route('/reports/view/<report_id>')
 def reports_view(report_id):

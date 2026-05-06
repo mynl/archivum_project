@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="row g-4">
+        <!-- Input Column -->
+        <div class="col-md-6 d-flex flex-column" style="height: calc(100vh - 120px);">
+            <div class="card shadow-sm border-0 flex-grow-1">
+                <div class="card-header bg-white border-bottom-0 py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0">QMD BibTeX Extractor</h5>
+                    <div class="d-flex gap-2">
+                        <label for="qmd-file" class="btn btn-outline-primary btn-sm mb-0">
+                            <i class="bi bi-file-earmark-arrow-up me-1"></i> Browse
+                        </label>
+                        <input type="file" id="qmd-file" name="file" class="d-none" onchange="handleFileUpload(this)">
+                        <button class="btn btn-outline-danger btn-sm" onclick="clearInput()">
+                            <i class="bi bi-trash me-1"></i> Clear
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-0 d-flex flex-column">
+                    <div id="drop-zone" class="flex-grow-1 d-flex flex-column p-3 bg-light border-dashed m-3 rounded position-relative">
+                        <textarea id="qmd-text" 
+                                  class="form-control border-0 bg-transparent flex-grow-1 shadow-none" 
+                                  placeholder="Paste QMD text here, or drag and drop a file..."
+                                  style="resize: none; font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.9rem;"></textarea>
+                        
+                        <div id="drop-overlay" class="position-absolute top-0 start-0 w-100 h-100 bg-primary bg-opacity-10 d-none d-flex align-items-center justify-content-center rounded">
+                            <div class="text-primary fw-bold"><i class="bi bi-cloud-arrow-up-fill me-2 fs-3"></i> Drop QMD file to extract</div>
+                        </div>
+                    </div>
+                    <div class="px-3 pb-3">
+                        <button id="extract-btn" 
+                                class="btn btn-primary w-100 fw-bold py-2 shadow-sm"
+                                onclick="performExtraction()">
+                            Extract Citations
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Output Column -->
+        <div class="col-md-6 d-flex flex-column" style="height: calc(100vh - 120px);">
+            <div class="card shadow-sm border-0 flex-grow-1">
+                <div class="card-header bg-white border-bottom-0 py-3 d-flex justify-content-between align-items-center">
+                    <h5 class="fw-bold mb-0">Resulting BibTeX</h5>
+                    <div id="result-actions" class="d-none">
+                        <button class="btn btn-success btn-sm" onclick="downloadBib()">
+                            <i class="bi bi-download me-1"></i> Download .bib
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body p-3 d-flex flex-column">
+                    <div id="result-container" class="flex-grow-1 bg-dark text-light p-3 rounded overflow-auto" style="font-family: 'Cascadia Code', 'Fira Code', monospace; font-size: 0.85rem;">
+                        <span class="text-muted">Extraction results will appear here...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .border-dashed {
+        border: 2px dashed #dee2e6;
+        transition: border-color 0.2s;
+    }
+    .border-dashed:hover {
+        border-color: #0d6efd;
+    }
+    #result-container pre {
+        margin-bottom: 0;
+        color: #e9ecef;
+    }
+</style>
+
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const dropOverlay = document.getElementById('drop-overlay');
+    const qmdText = document.getElementById('qmd-text');
+
+    // Drag and Drop
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropOverlay.classList.remove('d-none');
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropOverlay.classList.add('d-none');
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropOverlay.classList.add('d-none');
+        const file = e.dataTransfer.files[0];
+        if (file) handleFile(file);
+    });
+
+    function handleFileUpload(input) {
+        if (input.files && input.files[0]) handleFile(input.files[0]);
+    }
+
+    function handleFile(file) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            qmdText.value = e.target.result;
+        };
+        reader.readAsText(file);
+    }
+
+    function clearInput() {
+        qmdText.value = '';
+        document.getElementById('result-container').innerHTML = '<span class="text-muted">Extraction results will appear here...</span>';
+        document.getElementById('result-actions').classList.add('d-none');
+    }
+
+    async function performExtraction() {
+        console.log("Extraction started...");
+        const text = qmdText.value.trim();
+        if (!text) {
+            console.warn("No text to extract");
+            return;
+        }
+
+        const btn = document.getElementById('extract-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Extracting...';
+
+        const formData = new FormData();
+        formData.append('text', text);
+
+        try {
+            console.log("Fetching extraction results...");
+            const response = await fetch('{{ url_for("main.qmd_extract") }}', {
+                method: 'POST',
+                body: formData
+            });
+            const html = await response.text();
+            console.log("Response received", response.status);
+            document.getElementById('result-container').innerHTML = html;
+            
+            if (response.ok && !html.includes('alert-warning')) {
+                document.getElementById('result-actions').classList.remove('d-none');
+            } else {
+                document.getElementById('result-actions').classList.add('d-none');
+            }
+        } catch (err) {
+            document.getElementById('result-container').innerHTML = `<div class='alert alert-danger'>Error: ${err}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = 'Extract Citations';
+        }
+    }
+
+    function downloadBib() {
+        const pre = document.querySelector('#result-container pre');
+        if (!pre) return;
+        const text = pre.innerText;
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'extract.bib';
+        a.click();
+        window.URL.revokeObjectURL(url);
+    }
+</script>
+{% endblock %}

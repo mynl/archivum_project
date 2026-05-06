@@ -8,6 +8,7 @@
         
         // Reset export button
         const exportBtn = document.getElementById('rg-export-btn');
+        const exportToggle = document.getElementById('rg-export-toggle');
         if (exportBtn) {
             exportBtn.disabled = true;
             exportBtn.classList.add('opacity-50');
@@ -15,15 +16,31 @@
             exportBtn.classList.add('btn-outline-info');
             exportBtn.dataset.hashes = '';
         }
+        if (exportToggle) {
+            exportToggle.disabled = true;
+            exportToggle.classList.add('opacity-50');
+            exportToggle.classList.remove('btn-info');
+            exportToggle.classList.add('btn-outline-info');
+        }
     }
 
-    function exportTop50() {
+    function exportToQuery() {
         const btn = document.getElementById('rg-export-btn');
         const hashes = btn.dataset.hashes;
         if (!hashes) return;
         
-        const query = `hash ~ /${hashes}/`;
+        const query = `top 500 hash ~ /${hashes}/`;
         window.location.href = `{{ url_for('main.index') }}?q=${encodeURIComponent(query)}`;
+    }
+
+    function exportToCSV() {
+        const btn = document.getElementById('rg-export-btn');
+        const hashes = btn.dataset.hashes;
+        if (!hashes) return;
+
+        const query = document.getElementById('rg-input').value;
+        const url = `{{ url_for('main.rg_export_csv') }}?q=${encodeURIComponent(query)}`;
+        window.location.href = url;
     }
 
     /**
@@ -70,6 +87,7 @@
                    hx-trigger="keyup[key=='Enter']" 
                    hx-target="#rg-stream-sink" 
                    hx-swap="innerHTML"
+                   hx-vals='{"summary": "true"}'
                    hx-include="#rg-controls input"
                    hx-indicator="#rg-indicator"
                    hx-on:click="clearResults()"
@@ -118,13 +136,27 @@
             Details
         </button>
 
-        <button id="rg-export-btn" 
-                onclick="exportTop50()"
-                class="btn btn-outline-info px-4 shadow-sm opacity-50" 
-                disabled
-                title="Export top 50 documents by match count to Query screen">
-            Export
-        </button>
+        <div class="btn-group shadow-sm">
+            <button id="rg-export-btn" 
+                    onclick="exportToQuery()"
+                    class="btn btn-outline-info px-4 opacity-50" 
+                    disabled
+                    title="Export documents to Query screen">
+                Export
+            </button>
+            <button id="rg-export-toggle"
+                    type="button" 
+                    class="btn btn-outline-info dropdown-toggle dropdown-toggle-split opacity-50" 
+                    data-bs-toggle="dropdown" 
+                    aria-expanded="false" 
+                    disabled>
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu">
+                <li><a class="dropdown-item" href="#" onclick="exportToQuery()">To Query (Max 500)</a></li>
+                <li><a class="dropdown-item" href="#" onclick="exportToCSV()">To CSV (All matches)</a></li>
+            </ul>
+        </div>
 
         <button class="btn btn-outline-secondary btn-sm ms-2 shadow-sm" type="button" data-bs-toggle="collapse" data-bs-target="#extra-options" aria-expanded="false">
             <i class="bi bi-gear-fill me-1"></i> Options

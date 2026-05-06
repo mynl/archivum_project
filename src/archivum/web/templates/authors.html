@@ -34,8 +34,9 @@
     </div>
     
     <!-- Right Panel: Bibliography -->
-    <div class="col-md-8 col-lg-9 d-flex flex-column bg-light-subtle bibliography-panel">
-        <div id="author-results" class="p-4 flex-grow-1">
+    <div class="col-md-8 col-lg-9 d-flex flex-column bg-light-subtle bibliography-panel p-4">
+        <div id="author-results-header"></div>
+        <div id="author-results" class="flex-grow-1">
             <div class="text-center py-5 mt-5">
                 <div class="mb-4 text-muted opacity-25">
                     <i class="bi bi-people" style="font-size: 6rem;"></i>
@@ -73,6 +74,11 @@
     function setActiveAuthor(element) {
         document.querySelectorAll('.author-item').forEach(el => el.classList.remove('active', 'fw-bold'));
         element.classList.add('active', 'fw-bold');
+    }
+
+    function exportAuthorToQuery(author) {
+        const query = `q top 100 select year, * ! /${author}/ order by -year`;
+        window.location.href = `{{ url_for('main.index') }}?q=${encodeURIComponent(query)}`;
     }
 
     // Keyboard Navigation
