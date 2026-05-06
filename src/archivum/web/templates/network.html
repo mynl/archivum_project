@@ -22,16 +22,40 @@
     <!-- Controls Row -->
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
         <div class="d-flex align-items-center gap-2">
-            <button id="analyze-btn" class="btn btn-primary px-5 fw-bold shadow-sm" onclick="executeNetworkSearch()">
-                Analyze
-            </button>
+            <!-- Action Buttons -->
+            <div class="btn-group shadow-sm">
+                <button id="social-btn" class="btn btn-primary px-4 fw-bold" onclick="executeSearch('social')">
+                    <i class="bi bi-people-fill me-2"></i>Social
+                </button>
+                <button id="semantic-btn" class="btn btn-success px-4 fw-bold" onclick="executeSearch('semantic')">
+                    <i class="bi bi-stars me-2"></i>Semantic
+                </button>
+            </div>
             
             {% set id_prefix = 'net' %}
             {% set input_id = 'network-search' %}
             {% include "components/export_button.html" with context %}
             
-            <div class="form-text small ms-3 text-muted d-none d-md-block">
-                Use <code>q</code> for Querex, <code>rg</code> for Ripgrep, or both.
+            <!-- Options Dropdown -->
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle ms-2 shadow-sm" type="button" data-bs-toggle="dropdown">
+                    <i class="bi bi-gear-fill me-1"></i> Options
+                </button>
+                <ul class="dropdown-menu shadow-sm">
+                    <li><h6 class="dropdown-header">Semantic Source</h6></li>
+                    <li>
+                        <div class="form-check mx-3 my-1">
+                            <input class="form-check-input" type="radio" name="semantic-source" id="src-title" value="title" checked>
+                            <label class="form-check-label small" for="src-title">Title Only</label>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="form-check mx-3 my-1">
+                            <input class="form-check-input" type="radio" name="semantic-source" id="src-text" value="text">
+                            <label class="form-check-label small" for="src-text">Full Text (2k chars)</label>
+                        </div>
+                    </li>
+                </ul>
             </div>
         </div>
 
@@ -44,23 +68,25 @@
     <div class="row g-3">
         <!-- Graph Area -->
         <div class="col-lg-9">
-            <div class="card shadow-sm border-0 overflow-hidden" style="height: calc(100vh - 250px);">
+            <div id="cy-container" class="card shadow-sm border-0 overflow-hidden" style="height: calc(100vh - 250px); transition: height 0.3s ease;">
                 <div id="cy" style="width: 100%; height: 100%; background-color: #f8f9fa;"></div>
                 
                 <!-- Overlay Legend/Controls -->
                 <div class="position-absolute top-0 end-0 m-3 p-3 bg-white bg-opacity-75 rounded shadow-sm border" style="z-index: 100;">
                     <h6 class="fw-bold small mb-2">Graph Controls</h6>
-                    <div class="mb-2">
-                        <label class="form-label small mb-1">Min Papers: <span id="min-papers-val">1</span></label>
-                        <input type="range" class="form-range" id="min-papers" min="1" max="10" value="1" oninput="updateFilters()">
+                    <div id="social-controls">
+                        <div class="mb-2">
+                            <label class="form-label small mb-1">Min Papers: <span id="min-papers-val">1</span></label>
+                            <input type="range" class="form-range" id="min-papers" min="1" max="10" value="1" oninput="updateFilters()">
+                        </div>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="toggle-lcc" onchange="updateFilters()">
+                            <label class="form-check-label small" for="toggle-lcc">Largest Island Only</label>
+                        </div>
                     </div>
                     <div class="form-check form-switch mb-2">
                         <input class="form-check-input" type="checkbox" id="toggle-labels" checked onchange="updateFilters()">
                         <label class="form-check-label small" for="toggle-labels">Show Labels</label>
-                    </div>
-                    <div class="form-check form-switch mb-2">
-                        <input class="form-check-input" type="checkbox" id="toggle-lcc" onchange="updateFilters()">
-                        <label class="form-check-label small" for="toggle-lcc">Largest Island Only</label>
                     </div>
                     <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetLayout()">
                         <i class="bi bi-arrows-fullscreen me-1"></i> Reset View
@@ -76,18 +102,42 @@
             </div>
         </div>
 
-        <!-- Right Panel: Info and Clusters -->
+        <!-- Right Panel: Info -->
         <div class="col-lg-3">
-            <div class="card shadow-sm border-0 d-flex flex-column" style="height: calc(100vh - 250px);">
+            <div id="info-container" class="card shadow-sm border-0 d-flex flex-column" style="height: calc(100vh - 250px); transition: height 0.3s ease;">
                 <div class="card-header bg-white py-3 border-bottom-0">
                     <h6 class="fw-bold mb-0">Analysis Details</h6>
                 </div>
                 <div class="card-body p-0 overflow-auto flex-grow-1" id="network-info">
                     <div class="p-4 text-center text-muted mt-5">
                         <i class="bi bi-graph-up fs-1 opacity-25 d-block mb-3"></i>
-                        Select an author or edge in the graph to see details.
+                        Select an author, paper, or edge in the graph to see details.
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Details Table (Visible in Semantic Mode) -->
+    <div id="semantic-details" class="mt-4 d-none">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <h6 class="fw-bold mb-0">Galaxy Map Data</h6>
+                <div class="small text-muted">Sorted by Constellation</div>
+            </div>
+            <div class="card-body p-0 overflow-auto" style="max-height: 400px;">
+                <table class="table table-hover table-sm mb-0 align-middle" id="galaxy-table">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th class="ps-3" style="width: 100px;">Tag</th>
+                            <th style="width: 150px;">Constellation</th>
+                            <th>Author</th>
+                            <th>Title</th>
+                            <th class="text-center" style="width: 60px;">Year</th>
+                        </tr>
+                    </thead>
+                    <tbody id="galaxy-table-body"></tbody>
+                </table>
             </div>
         </div>
     </div>
@@ -100,30 +150,55 @@
     let currentData = null;
 
     function handleSearchKey(e) {
-        if (e.key === 'Enter') executeNetworkSearch();
+        if (e.key === 'Enter') {
+            const lastMode = (currentData && currentData.mode) ? currentData.mode : 'social';
+            executeSearch(lastMode);
+        }
     }
 
     function clearNetworkInput() {
         const input = document.getElementById('network-search');
         input.value = '';
         input.focus();
-        // Reset state if needed
     }
 
-    async function executeNetworkSearch() {
+    async function executeSearch(mode) {
         const query = document.getElementById('network-search').value.trim();
         if (!query) return;
 
-        const btn = document.getElementById('analyze-btn');
+        const btn = mode === 'social' ? document.getElementById('social-btn') : document.getElementById('semantic-btn');
         const loader = document.getElementById('graph-loader');
+        const sourceInput = document.querySelector('input[name="semantic-source"]:checked');
+        const source = sourceInput ? sourceInput.value : 'title';
+        const semanticTable = document.getElementById('semantic-details');
+        const socialControls = document.getElementById('social-controls');
+        const cyContainer = document.getElementById('cy-container');
+        const infoContainer = document.getElementById('info-container');
         
         btn.disabled = true;
         loader.classList.remove('d-none');
 
+        // Toggle UI elements based on mode
+        if (mode === 'semantic') {
+            semanticTable.classList.remove('d-none');
+            socialControls.classList.add('d-none');
+            cyContainer.style.height = '50vh';
+            infoContainer.style.height = '50vh';
+        } else {
+            semanticTable.classList.add('d-none');
+            socialControls.classList.remove('d-none');
+            cyContainer.style.height = 'calc(100vh - 250px)';
+            infoContainer.style.height = 'calc(100vh - 250px)';
+        }
+
         try {
-            const response = await fetch(`{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}`);
+            const url = mode === 'social' 
+                ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}`
+                : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}`;
+            
+            const response = await fetch(url);
             const data = await response.json();
-            currentData = data;
+            currentData = { ...data, mode: mode };
             
             if (data.error) {
                 alert("Error: " + data.error);
@@ -131,12 +206,18 @@
                 document.getElementById('network-stats').innerHTML = '<span class="text-danger">No matches found.</span>';
                 if (cy) cy.elements().remove();
             } else {
-                renderGraph(data);
+                if (mode === 'social') {
+                    renderSocialGraph(data);
+                } else {
+                    renderSemanticGalaxy(data);
+                    populateGalaxyTable(data.elements);
+                }
                 
-                // Update stats (Right aligned)
+                // Update stats
+                const authorCount = data.nodes ? data.nodes.length : (data.authors || 0);
                 document.getElementById('network-stats').innerHTML = 
                     `<span class="badge bg-light text-dark border me-2">${data.papers} papers</span>` +
-                    `<span class="badge bg-light text-dark border">${data.nodes.length} authors</span>`;
+                    `<span class="badge bg-light text-dark border">${authorCount} authors</span>`;
                 
                 // Update export button
                 const exportBtn = document.getElementById('net-export-btn');
@@ -163,7 +244,7 @@
         }
     }
 
-    function renderGraph(data) {
+    function renderSocialGraph(data) {
         cy = cytoscape({
             container: document.getElementById('cy'),
             elements: data.elements,
@@ -249,18 +330,106 @@
         updateFilters();
     }
 
+    function renderSemanticGalaxy(data) {
+        const showLabels = document.getElementById('toggle-labels').checked;
+
+        cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: data.elements,
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'width': 12,
+                        'height': 12,
+                        'background-color': 'data(color)',
+                        'opacity': 'data(opacity)',
+                        'z-index': 10,
+                        'label': showLabels ? 'data(tag)' : '',
+                        'font-size': '7px',
+                        'color': '#666',
+                        'text-valign': 'bottom',
+                        'text-margin-y': '4px'
+                    }
+                },
+                {
+                    selector: ':selected',
+                    style: {
+                        'width': 22,
+                        'height': 22,
+                        'border-width': 2,
+                        'border-color': '#000',
+                        'opacity': 1,
+                        'label': 'data(tag)',
+                        'font-weight': 'bold',
+                        'color': '#000'
+                    }
+                }
+            ],
+            layout: {
+                name: 'preset', 
+                padding: 60
+            }
+        });
+
+        cy.on('tap', 'node', function(evt){
+            const node = evt.target;
+            showPaperInfo(node.data());
+        });
+    }
+
+    function populateGalaxyTable(elements) {
+        const tbody = document.getElementById('galaxy-table-body');
+        const sorted = [...elements].sort((a, b) => a.data.cluster_id - b.data.cluster_id);
+        
+        let html = '';
+        sorted.forEach(el => {
+            const d = el.data;
+            const rowClass = d.cluster_id < 0 ? 'table-light opacity-75' : '';
+            html += `
+                <tr id="row-${d.id}" class="${rowClass}" onclick="focusPaper('${d.id}')" style="cursor: pointer;">
+                    <td class="ps-3"><code class="small">${d.tag}</code></td>
+                    <td>
+                        <span class="badge" style="background-color: ${d.color}; color: ${d.cluster_id >= 0 ? '#fff' : '#333'}">
+                            ${d.cluster_name}
+                        </span>
+                    </td>
+                    <td class="small text-truncate" style="max-width: 150px;">${d.authors}</td>
+                    <td class="small text-truncate" style="max-width: 300px;">${d.title}</td>
+                    <td class="text-center small">${d.year}</td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+    }
+
+    function focusPaper(nodeId) {
+        const node = cy.getElementById(nodeId);
+        if (node) {
+            cy.elements().unselect();
+            node.select();
+            cy.animate({ center: { elef: node }, zoom: 2 }, { duration: 500 });
+            showPaperInfo(node.data());
+        }
+    }
+
     function updateFilters() {
         if (!cy) return;
-        const minPapers = parseInt(document.getElementById('min-papers').value);
+        
         const showLabels = document.getElementById('toggle-labels').checked;
+        
+        if (currentData && currentData.mode === 'semantic') {
+            cy.nodes().style('label', showLabels ? 'data(tag)' : '');
+            return;
+        }
+        
+        const minPapers = parseInt(document.getElementById('min-papers').value);
         const lccOnly = document.getElementById('toggle-lcc').checked;
         
         document.getElementById('min-papers-val').innerText = minPapers;
 
-        // Reset visibility first
         cy.elements().show();
 
-        // 1. Filter by Minimum Papers
         cy.nodes().forEach(node => {
             if (node.data('weight') < minPapers) {
                 node.hide();
@@ -269,41 +438,38 @@
             }
         });
 
-        // 2. Filter by Largest Connected Component (LCC)
         if (lccOnly) {
             const visibleElements = cy.elements(':visible');
             const components = visibleElements.components();
-            
             if (components.length > 1) {
                 let largest = components[0];
                 components.forEach(c => {
                     if (c.length > largest.length) largest = c;
                 });
-                
-                // Hide everything not in the largest component
                 visibleElements.difference(largest).hide();
             }
         }
     }
 
     function resetLayout() {
-        if (cy) cy.layout({ 
-            name: 'cose', 
-            animate: true,
-            nodeRepulsion: 15000,
-            idealEdgeLength: 100
-        }).run();
+        if (cy) {
+            if (currentData.mode === 'social') {
+                cy.layout({ name: 'cose', animate: true, nodeRepulsion: 15000, idealEdgeLength: 100 }).run();
+            } else {
+                cy.fit(60);
+            }
+        }
     }
 
     function rebaseSearch(author) {
         const input = document.getElementById('network-search');
         input.value = `! /${author}/`;
-        executeNetworkSearch();
+        executeSearch('social');
     }
 
     function showAuthorInfo(data, type) {
         const info = document.getElementById('network-info');
-        const title = type === 'Author' ? data.label : data.label;
+        const title = data.label;
         const sub = type === 'Author' ? `${data.weight} papers in this set` : `Co-authored ${data.weight} papers together`;
         
         let html = `
@@ -345,6 +511,36 @@
         info.innerHTML = html;
     }
 
+    function showPaperInfo(data) {
+        const info = document.getElementById('network-info');
+        let html = `
+            <div class="p-4">
+                <h5 class="fw-bold mb-1">${data.title}</h5>
+                <p class="text-muted small mb-3">${data.authors}</p>
+                <div class="mb-4">
+                    <span class="badge" style="background-color: ${data.color}; color: ${data.cluster_id >= 0 ? '#fff' : '#333'}">
+                        ${data.cluster_name}
+                    </span>
+                    <span class="badge bg-light text-dark border">${data.year}</span>
+                </div>
+                <div class="d-grid mb-4">
+                    <a href="/view/${data.tag}" target="_blank" class="btn btn-sm btn-outline-primary">
+                        <i class="bi bi-file-pdf me-1"></i> Open PDF
+                    </a>
+                </div>
+            </div>
+        `;
+        info.innerHTML = html;
+        
+        // Highlight row in table if it exists
+        const row = document.getElementById(`row-${data.id}`);
+        if (row) {
+            document.querySelectorAll('#galaxy-table tr').forEach(r => r.classList.remove('table-primary'));
+            row.classList.add('table-primary');
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+
     window.addEventListener('load', () => {
         if (typeof initSearchInput === 'function') {
             initSearchInput('network-search');
@@ -357,6 +553,10 @@
     .list-group-item { font-size: 0.85rem; }
     .author-link { cursor: pointer; color: var(--bs-primary); text-decoration: none; }
     .author-link:hover { text-decoration: underline; }
+    
+    #galaxy-table { font-size: 0.85rem; table-layout: fixed; }
+    #galaxy-table th { background-color: #f8f9fa; border-bottom: 2px solid #dee2e6; }
+    #galaxy-table tr:hover { background-color: rgba(13, 110, 253, 0.05) !important; }
     
     /* Input UI consistency */
     .search-container { position: relative; }

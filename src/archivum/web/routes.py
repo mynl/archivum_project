@@ -1456,6 +1456,221 @@ def network_data():
         logger.error(f"Network analysis error: {e}")
         return {"error": str(e)}, 500
 
+@bp.route('/semantic-data')
+def semantic_data():
+    raw_query = request.args.get('q', '').strip()
+    source_type = request.args.get('source', 'title') # 'title' or 'text'
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query: return {"elements": [], "papers": 0}
+
+    # 1. Reuse Unified Search Logic to get the Universe
+    querex_part = ""; ripgrep_part = ""
+    if ' rg ' in raw_query.lower():
+        parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
+        querex_part = parts[0].strip(); ripgrep_part = parts[1].strip()
+        if querex_part.lower().startswith('q '): querex_part = querex_part[2:].strip()
+    elif raw_query.lower().startswith('q '): querex_part = raw_query[2:].strip()
+    elif raw_query.lower().startswith('rg '): ripgrep_part = raw_query[3:].strip()
+    else: querex_part = raw_query
+
+    try:
+        df = lib.database
+        logger.info(f"Semantic Search: Starting Querex Phase with '{querex_part}'")
+        if querex_part:
+            if 'select' not in querex_part.lower(): querex_part = "select tag, author, title, year, hash, * " + querex_part
+            result_df = df.querex(querex_part)
+        else:
+            result_df = df.copy()
+        
+        logger.info(f"Semantic Search: Querex returned {len(result_df)} papers")
+
+        if ripgrep_part:
+            logger.info(f"Semantic Search: Starting Ripgrep Phase with '{ripgrep_part}'")
+            is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
+            args = ["-n", "-H"]
+            if not is_regex: args.append('-F')
+            elif any(p in ripgrep_part for p in ['(?=', '(?!', '(?<=', '(?!']): args.append('--pcre2')
+            
+            clean_rg = ripgrep_part
+            if ' -g ' in ripgrep_part:
+                rg_bits = ripgrep_part.split(' -g ')
+                clean_rg = rg_bits[0].strip()
+                for g in rg_bits[1:]: args.extend(['-g', g.strip()])
+            else: args.extend(['-g', '*.md'])
+            
+            rc, proc = lib.run_ripgrep(clean_rg, args)
+            matched_prefixes = set()
+            is_stats = False
+            for line in proc.stdout:
+                line = line.strip()
+                if not line: continue
+                if 'matches' in line or 'matched lines' in line: is_stats = True; continue
+                if is_stats: continue
+                parts = line.split(':', 2)
+                if len(parts) < 3: continue
+                matched_prefixes.add(Path(parts[0]).name[:10].upper())
+            
+            result_df['hash_prefix_upper'] = result_df['hash'].astype(str).str[:10].str.upper()
+            result_df = result_df[result_df['hash_prefix_upper'].isin(matched_prefixes)]
+            logger.info(f"Semantic Search: Ripgrep Filtered down to {len(result_df)} papers")
+
+        if result_df.empty: return {"elements": [], "papers": 0}
+
+        # 2. Semantic Index Management
+        idx_path = lib.config_path / "semantic-embeddings.feather"
+        logger.info(f"Semantic Search: Checking index at {idx_path}")
+        if idx_path.exists():
+            idx_df = pd.read_feather(idx_path)
+            logger.info(f"Semantic Search: Loaded index with {len(idx_df)} existing embeddings")
+        else:
+            idx_df = pd.DataFrame(columns=['hash', 'tag', 'source', 'embedding', 'mtime'])
+            logger.info("Semantic Search: Index not found, creating new one")
+
+        # Identify papers needing embedding
+        to_embed = []
+        for _, row in result_df.iterrows():
+            h = str(row.hash)
+            match = idx_df[(idx_df.hash == h) & (idx_df.source == source_type)]
+            if match.empty:
+                to_embed.append(row)
+
+        if to_embed:
+            logger.info(f"Semantic Search: Need to embed {len(to_embed)} new papers")
+            from sentence_transformers import SentenceTransformer
+            logger.info("Semantic Search: Loading SentenceTransformer model...")
+            model = SentenceTransformer('all-MiniLM-L6-v2')
+            
+            new_rows = []
+            for i, row in enumerate(to_embed):
+                if i % 10 == 0: logger.info(f"Semantic Search: Embedding batch {i}/{len(to_embed)}...")
+                text_to_encode = ""
+                if source_type == 'text':
+                    try:
+                        from ..document import Document
+                        # Row is a Series, so dict access works
+                        rel_p = row['path']
+                        doc_p = lib.abspath(rel_p)
+                        doc = Document(doc_p)
+                        doc.hash = str(row['hash'])
+                        # Resolve to the sharded .md/.txt extract
+                        txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
+                        if txt_p.exists():
+                            text_to_encode = txt_p.read_text(encoding='utf-8', errors='ignore')[:2000]
+                    except Exception as path_err:
+                        logger.warning(f"Failed to load text for {row.get('tag')}: {path_err}")
+                
+                if not text_to_encode:
+                    text_to_encode = f"{row['title']}. {row['author']}. {row.get('journal', '')}"
+
+                emb = model.encode(text_to_encode).tolist()
+                new_rows.append({
+                    'hash': str(row['hash']),
+                    'tag': str(row['tag']),
+                    'source': source_type,
+                    'mtime': time.time(),
+                    'embedding': emb
+                })
+            
+            new_idx_df = pd.DataFrame(new_rows)
+            idx_df = pd.concat([idx_df, new_idx_df]).drop_duplicates(['hash', 'source'], keep='last')
+            idx_df.reset_index(drop=True).to_feather(idx_path)
+            logger.info("Semantic Search: Updated embedding index on disk")
+
+        # 3. Clustering and Projection
+        universe_hashes = result_df['hash'].astype(str).tolist()
+        relevant_idx = idx_df[(idx_df.hash.isin(universe_hashes)) & (idx_df.source == source_type)]
+        
+        import numpy as np
+        import umap
+        import hdbscan
+        
+        embeddings = np.array(relevant_idx['embedding'].tolist())
+        logger.info(f"Semantic Search: Ready for Math Phase with {len(embeddings)} vectors")
+        
+        # Projection (UMAP)
+        n_neighbors = min(len(embeddings) - 1, 15)
+        if n_neighbors < 2:
+            logger.info("Semantic Search: Set too small for UMAP, using random projection")
+            coords = np.random.rand(len(embeddings), 2) * 100
+        else:
+            logger.info(f"Semantic Search: Running UMAP (n_neighbors={n_neighbors})...")
+            reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=0.1, n_components=2, random_state=42)
+            coords = reducer.fit_transform(embeddings)
+            logger.info("Semantic Search: UMAP completed")
+
+        # Clustering (HDBSCAN)
+        min_cluster_size = min(len(embeddings), 5)
+        if len(embeddings) < 5:
+            logger.info("Semantic Search: Set too small for HDBSCAN, labeling as single cluster")
+            cluster_labels = np.zeros(len(embeddings))
+        else:
+            logger.info(f"Semantic Search: Running HDBSCAN (min_cluster={min_cluster_size})...")
+            clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, gen_min_span_tree=True)
+            cluster_labels = clusterer.fit_predict(coords)
+            logger.info("Semantic Search: HDBSCAN completed")
+
+        # 4. Result Formatting
+        logger.info("Semantic Search: Formatting final elements...")
+        elements = []
+        current_year = datetime.now().year
+        palette = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#0dcaf0', '#6610f2', '#fd7e14', '#20c997']
+        
+        for i, (_, row_idx) in enumerate(relevant_idx.iterrows()):
+            h = row_idx.hash
+            meta_match = result_df[result_df.hash.astype(str) == h]
+            if meta_match.empty: continue
+            meta = meta_match.iloc[0]
+            
+            cluster_id = int(cluster_labels[i])
+            color = palette[cluster_id % len(palette)] if cluster_id >= 0 else '#adb5bd'
+            
+            try: year = int(str(meta.year).split('.')[0])
+            except: year = 2000
+            
+            age_diff = max(0, current_year - year)
+            opacity = max(0.2, 1.0 - (age_diff / 25.0))
+            
+            elements.append({
+                'data': {
+                    'id': f"paper-{h}",
+                    'tag': str(meta.tag),
+                    'title': clean_latex(str(meta.title)),
+                    'authors': trim_author(str(meta.author)),
+                    'year': year,
+                    'cluster_id': cluster_id,
+                    'cluster_name': f"Constellation {cluster_id}" if cluster_id >= 0 else "Lone Star",
+                    'color': color,
+                    'opacity': opacity
+                },
+                'position': {'x': float(coords[i][0] * 50), 'y': float(coords[i][1] * 50)}
+            })
+
+        # Top hashes for export - force to strings and drop NaNs to avoid join errors
+        hash_list = result_df['hash'].dropna().astype(str).str[:6].unique()[:500]
+        top_hashes = "|".join([str(h) for h in hash_list])
+
+        logger.info(f"Semantic Search: Success! Returning {len(elements)} elements")
+
+        return {
+            "elements": elements,
+            "papers": len(result_df),
+            "authors": int(len(result_df['author'].unique())),
+            "hashes": top_hashes
+        }
+
+    except Exception as e:
+        logger.error(f"Semantic analysis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"error": str(e)}, 500
+
+    except Exception as e:
+        logger.error(f"Semantic analysis error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"error": str(e)}, 500
+
 @bp.route('/rg-export-csv')
 def rg_export_csv():
     query = request.args.get('q', '').strip()
