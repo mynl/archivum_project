@@ -3,8 +3,8 @@
 {% block content %}
 <div class="row g-0 border rounded shadow-sm bg-white author-main-row">
     <!-- Left Sidebar: Author List -->
-    <div class="col-md-4 col-lg-3 border-end d-flex flex-column author-sidebar">
-        <div class="p-3 border-bottom bg-light sticky-top" style="top: 60px; z-index: 10;">
+    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100 author-sidebar">
+        <div class="p-3 border-bottom bg-light">
             <h6 class="mb-3 text-muted small fw-bold text-uppercase">Author Index</h6>
             <div class="search-wrapper">
                 <input type="text" 
@@ -17,7 +17,7 @@
             </div>
         </div>
         
-        <div id="author-list" class="list-group list-group-flush author-list-container">
+        <div id="author-list" class="list-group list-group-flush overflow-auto flex-grow-1 author-list-container">
             {% for author, count in authors %}
             <button type="button" 
                     class="author-item list-group-item list-group-item-action py-2 border-0 small d-flex justify-content-between align-items-center" 
@@ -123,17 +123,23 @@
 
 <style>
     /* Independent scrolling for split-pane layout */
-    .author-main-row {
-        height: calc(100vh - 120px); /* Adjust based on navbar height */
-        overflow: hidden;
-    }
-    .author-sidebar {
-        height: 100%;
-        overflow-y: auto;
-    }
-    .bibliography-panel {
-        height: 100%;
-        overflow-y: auto;
+    @media (min-width: 768px) {
+        .author-main-row {
+            height: calc(100vh - 120px);
+            overflow: hidden;
+        }
+        .author-sidebar {
+            height: 100% !important;
+            overflow: hidden;
+        }
+        .author-list-container {
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+        .bibliography-panel {
+            height: 100% !important;
+            overflow-y: auto;
+        }
     }
 
     .author-item { transition: background-color 0.05s ease; font-size: 0.82rem; }
