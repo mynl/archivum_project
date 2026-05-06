@@ -1275,6 +1275,140 @@ def reports_generate():
         logger.error(f"Generate error: {e}")
         return str(e), 500
 
+@bp.route('/network')
+def network_page():
+    lib = LibraryContext.get()
+    return render_template('network.html', lib=lib)
+
+@bp.route('/network-data')
+def network_data():
+    raw_query = request.args.get('q', '').strip()
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query: return {"nodes": [], "edges": [], "elements": [], "papers": 0}
+
+    # Unified Search Parser
+    # Examples:
+    # 1. q tag ~ /Wang/ rg risk
+    # 2. q author ~ /Wang/
+    # 3. rg risk
+    
+    querex_part = ""
+    ripgrep_part = ""
+    
+    # Try to find 'rg ' as a separator
+    if ' rg ' in raw_query.lower():
+        parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
+        querex_part = parts[0].strip()
+        ripgrep_part = parts[1].strip()
+        if querex_part.lower().startswith('q '):
+            querex_part = querex_part[2:].strip()
+    elif raw_query.lower().startswith('q '):
+        querex_part = raw_query[2:].strip()
+    elif raw_query.lower().startswith('rg '):
+        ripgrep_part = raw_query[3:].strip()
+    else:
+        # Default to querex if no marker
+        querex_part = raw_query
+
+    try:
+        df = lib.database
+        
+        # Phase 1: Querex Filtering
+        if querex_part:
+            # Ensure we have essential columns for analysis
+            if 'select' not in querex_part.lower():
+                querex_part = "select tag, author, title, year, hash, * " + querex_part
+            result_df = df.querex(querex_part)
+        else:
+            result_df = df.copy()
+
+        if not isinstance(result_df, pd.DataFrame) or result_df.empty:
+            return {"nodes": [], "edges": [], "elements": [], "papers": 0}
+
+        # Phase 2: Ripgrep Filtering (if requested)
+        if ripgrep_part:
+            # We filter the result_df by running ripgrep and keeping only matching hashes
+            is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
+            args = ["-l"] # Only need filenames (hashes)
+            if not is_regex: args.append('-F')
+            
+            rc, proc = lib.run_ripgrep(ripgrep_part, args)
+            matched_prefixes = set()
+            for line in proc.stdout:
+                matched_prefixes.add(Path(line.strip()).name[:10])
+            
+            # Map result_df hashes to prefixes and filter
+            result_df['hash_prefix'] = result_df['hash'].astype(str).str[:10]
+            result_df = result_df[result_df['hash_prefix'].isin(matched_prefixes)]
+            
+        if result_df.empty:
+            return {"nodes": [], "edges": [], "elements": [], "papers": 0}
+
+        # Phase 3: Social Graph Construction
+        # Extract authors and co-authorships
+        # paper_id -> [authors]
+        paper_to_authors = {}
+        author_to_papers = {} # author -> [ {title, year, tag} ]
+        
+        for _, row in result_df.iterrows():
+            authors_str = str(row.get('author', 'Unknown'))
+            author_list = [a.strip() for a in authors_str.split(' and ') if a.strip() and a.strip() != 'Unknown']
+            if not author_list: continue
+            
+            paper_info = {
+                'title': clean_latex(str(row.get('title', 'Unknown'))),
+                'year': str(row.get('year', '9999')).split('.')[0],
+                'tag': row.tag
+            }
+            
+            for auth in author_list:
+                author_to_papers.setdefault(auth, []).append(paper_info)
+            
+            paper_to_authors[row.tag] = author_list
+
+        # Nodes and Edges
+        nodes = []
+        for auth, papers in author_to_papers.items():
+            nodes.append({
+                'data': {
+                    'id': auth,
+                    'label': auth,
+                    'weight': len(papers),
+                    'papers': papers[:20] # Limit info pane data
+                }
+            })
+
+        edges = {} # (auth1, auth2) -> weight
+        for tag, author_list in paper_to_authors.items():
+            if len(author_list) < 2: continue
+            # Sort to ensure consistent key (A, B) where A < B
+            sorted_authors = sorted(author_list)
+            import itertools
+            for a1, a2 in itertools.combinations(sorted_authors, 2):
+                key = (a1, a2)
+                edges[key] = edges.get(key, 0) + 1
+
+        elements = nodes + [
+            {'data': {'source': k[0], 'target': k[1], 'weight': v}}
+            for k, v in edges.items()
+        ]
+
+        # Top hashes for export
+        top_hashes = "|".join(result_df['hash'].astype(str).str[:6].unique()[:500])
+
+        return {
+            "nodes": nodes,
+            "edges": list(edges.keys()),
+            "elements": elements,
+            "papers": len(result_df),
+            "hashes": top_hashes
+        }
+
+    except Exception as e:
+        logger.error(f"Network analysis error: {e}")
+        return {"error": str(e)}, 500
+
 @bp.route('/rg-export-csv')
 def rg_export_csv():
     query = request.args.get('q', '').strip()

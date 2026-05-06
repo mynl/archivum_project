@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <!-- Header: Unified Search -->
+    <div class="card shadow-sm border-0 mb-3">
+        <div class="card-body p-3">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-7">
+                    <div class="input-group">
+                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search"></i></span>
+                        <input type="text" 
+                               id="network-search" 
+                               class="form-control border-start-0" 
+                               placeholder="e.g., q tag ~ /Wang/ rg risk"
+                               onkeyup="handleSearchKey(event)">
+                        <button class="btn btn-primary px-4 fw-bold" onclick="executeNetworkSearch()">
+                            Analyze
+                        </button>
+                    </div>
+                    <div class="form-text small mt-1">
+                        Use <code>q</code> for Querex, <code>rg</code> for Ripgrep, or both to filter text by metadata.
+                    </div>
+                </div>
+                <div class="col-md-5 d-flex justify-content-end gap-2 align-items-center">
+                    <div class="small text-muted me-2" id="network-stats"></div>
+                    {% set id_prefix = 'net' %}
+                    {% set input_id = 'network-search' %}
+                    {% include "components/export_button.html" with context %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content: Graph and Controls -->
+    <div class="row g-3">
+        <!-- Graph Area -->
+        <div class="col-lg-9">
+            <div class="card shadow-sm border-0 overflow-hidden" style="height: calc(100vh - 210px);">
+                <div id="cy" style="width: 100%; height: 100%; background-color: #f8f9fa;"></div>
+                
+                <!-- Overlay Legend/Controls -->
+                <div class="position-absolute top-0 end-0 m-3 p-3 bg-white bg-opacity-75 rounded shadow-sm border" style="z-index: 10;">
+                    <h6 class="fw-bold small mb-2">Graph Controls</h6>
+                    <div class="mb-2">
+                        <label class="form-label small mb-1">Min Papers: <span id="min-papers-val">1</span></label>
+                        <input type="range" class="form-range" id="min-papers" min="1" max="10" value="1" oninput="updateFilters()">
+                    </div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="toggle-labels" checked onchange="updateFilters()">
+                        <label class="form-check-label small" for="toggle-labels">Show Labels</label>
+                    </div>
+                    <button class="btn btn-outline-secondary btn-sm w-100" onclick="resetLayout()">
+                        <i class="bi bi-arrows-fullscreen me-1"></i> Reset View
+                    </button>
+                </div>
+
+                <!-- Loading Spinner -->
+                <div id="graph-loader" class="position-absolute top-50 start-50 translate-middle d-none">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Info and Clusters -->
+        <div class="col-lg-3">
+            <div class="card shadow-sm border-0 d-flex flex-column" style="height: calc(100vh - 210px);">
+                <div class="card-header bg-white py-3 border-bottom-0">
+                    <h6 class="fw-bold mb-0">Analysis Details</h6>
+                </div>
+                <div class="card-body p-0 overflow-auto flex-grow-1" id="network-info">
+                    <div class="p-4 text-center text-muted mt-5">
+                        <i class="bi bi-graph-up fs-1 opacity-25 d-block mb-3"></i>
+                        Select an author or cluster in the graph to see details.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+<script>
+    let cy;
+    let currentData = null;
+
+    function handleSearchKey(e) {
+        if (e.key === 'Enter') executeNetworkSearch();
+    }
+
+    async function executeNetworkSearch() {
+        const query = document.getElementById('network-search').value.trim();
+        if (!query) return;
+
+        const loader = document.getElementById('graph-loader');
+        loader.classList.remove('d-none');
+
+        try {
+            const response = await fetch(`{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}`);
+            const data = await response.json();
+            currentData = data;
+            
+            renderGraph(data);
+            
+            // Update stats
+            document.getElementById('network-stats').innerHTML = 
+                `<b>${data.papers}</b> papers, <b>${data.nodes.length}</b> authors`;
+            
+            // Update export button
+            const exportBtn = document.getElementById('net-export-btn');
+            const exportToggle = document.getElementById('net-export-toggle');
+            if (exportBtn && data.hashes) {
+                exportBtn.disabled = false;
+                exportBtn.classList.remove('opacity-50', 'btn-outline-info');
+                exportBtn.classList.add('btn-info');
+                exportBtn.dataset.hashes = data.hashes;
+            }
+            if (exportToggle) {
+                exportToggle.disabled = false;
+                exportToggle.classList.remove('opacity-50', 'btn-outline-info');
+                exportToggle.classList.add('btn-info');
+            }
+
+        } catch (err) {
+            console.error(err);
+            alert("Analysis failed. See console for details.");
+        } finally {
+            loader.classList.add('d-none');
+        }
+    }
+
+    function renderGraph(data) {
+        cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: data.elements,
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'label': 'data(label)',
+                        'width': 'mapData(weight, 1, 10, 20, 60)',
+                        'height': 'mapData(weight, 1, 10, 20, 60)',
+                        'background-color': '#0d6efd',
+                        'color': '#333',
+                        'font-size': '10px',
+                        'text-valign': 'bottom',
+                        'text-halign': 'center',
+                        'text-margin-y': '5px'
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 'data(weight)',
+                        'line-color': '#adb5bd',
+                        'opacity': 0.5,
+                        'curve-style': 'bezier'
+                    }
+                },
+                {
+                    selector: ':selected',
+                    style: {
+                        'background-color': '#dc3545',
+                        'line-color': '#dc3545',
+                        'target-arrow-color': '#dc3545',
+                        'source-arrow-color': '#dc3545',
+                        'opacity': 1
+                    }
+                }
+            ],
+            layout: {
+                name: 'cose',
+                animate: true,
+                padding: 50,
+                componentSpacing: 100,
+                nodeRepulsion: function( node ){ return 400000; },
+                idealEdgeLength: function( edge ){ return 100; },
+                edgeElasticity: function( edge ){ return 100; }
+            }
+        });
+
+        cy.on('tap', 'node', function(evt){
+            const node = evt.target;
+            showAuthorInfo(node.data());
+        });
+
+        updateFilters();
+    }
+
+    function updateFilters() {
+        if (!cy) return;
+        const minPapers = parseInt(document.getElementById('min-papers').value);
+        const showLabels = document.getElementById('toggle-labels').checked;
+        document.getElementById('min-papers-val').innerText = minPapers;
+
+        cy.nodes().forEach(node => {
+            if (node.data('weight') < minPapers) {
+                node.hide();
+            } else {
+                node.show();
+                node.style('label', showLabels ? node.data('label') : '');
+            }
+        });
+    }
+
+    function resetLayout() {
+        if (cy) cy.layout({ name: 'cose', animate: true }).run();
+    }
+
+    function showAuthorInfo(data) {
+        const info = document.getElementById('network-info');
+        let html = `
+            <div class="p-4">
+                <h5 class="fw-bold mb-1">${data.label}</h5>
+                <p class="text-muted small mb-4">${data.weight} papers in this set</p>
+                <h6 class="small fw-bold text-uppercase mb-3">Papers</h6>
+                <div class="list-group list-group-flush">
+        `;
+        
+        data.papers.forEach(p => {
+            html += `
+                <div class="list-group-item px-0 py-2 border-0 small">
+                    <div class="fw-bold mb-1">${p.title}</div>
+                    <div class="text-muted">${p.year} • ${p.tag}</div>
+                </div>
+            `;
+        });
+
+        html += `</div></div>`;
+        info.innerHTML = html;
+    }
+</script>
+
+<style>
+    #cy:active { cursor: grabbing; }
+    .list-group-item { font-size: 0.85rem; }
+    .author-link { cursor: pointer; color: var(--bs-primary); text-decoration: none; }
+    .author-link:hover { text-decoration: underline; }
+</style>
+{% endblock %}
