@@ -1,11 +1,15 @@
 <div class="rg-block">
-    <div class="rg-header">
+    <div class="rg-header d-flex flex-wrap align-items-center gap-2">
         {% if block.tag %}
         <a href="{{ url_for('main.view', tag=block.tag) }}" class="tag" target="_blank">{{ block.tag }}</a>
         <span class="title">{{ block.title }}</span>
-        <span class="authors">{{ block.authors }}</span>
+        <span class="authors text-muted small">{{ block.authors }}</span>
+        {% if block.publisher %}
+        <span class="publisher text-muted small"><i class="bi bi-journal-text mx-1"></i>{{ block.publisher }}</span>
+        {% endif %}
+        <span class="hash text-muted small"><i class="bi bi-hash ms-1"></i><code>{{ block.hash[:8] }}</code></span>
         {% else %}
-        <a href="{{ url_for('main.view_hash', h=block.hash) }}" class="tag" target="_blank">{{ block.hash }}</a>
+        <a href="{{ url_for('main.view_hash', h=block.hash) }}" class="tag" target="_blank">{{ block.hash[:8] }}</a>
         <span class="title muted">[No Reference Tag]</span>
         {% endif %}
     </div>

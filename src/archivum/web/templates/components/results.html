@@ -31,6 +31,32 @@
         </tbody>
     </table>
 </div>
+{% elif view_mode == 'verbose' %}
+<div class="verbose-list">
+    {% for _, row in results.iterrows() %}
+    <div class="list-item mb-3 p-3 bg-white rounded shadow-sm border-start border-4 {{ 'border-primary' if row.is_book else 'border-secondary' }}">
+        <div class="d-flex justify-content-between align-items-start mb-1">
+            <span class="tag-container">
+                <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none fw-bold" target="_blank">{{ row.tag }}</a>
+                {% if is_admin %}
+                <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
+                    <i class="bi bi-pencil-square" style="font-size: 0.8rem;"></i>
+                </a>
+                {% endif %}
+            </span>
+            <span class="year badge bg-light text-dark border">{{ row.year_display }}</span>
+        </div>
+        <div class="title mb-1 {{ 'fw-bold fs-5' if row.is_book else 'fs-6' }}">"{{ row.title_display }}"</div>
+        <div class="author text-muted small mb-2">{{ row.author_display }}</div>
+        <div class="footer-meta d-flex gap-3 small text-muted border-top pt-2 mt-2">
+            {% if row.get('journal') or row.get('publisher') %}
+            <span><i class="bi bi-journal-text me-1"></i>{{ row.journal if row.get('journal') else row.publisher }}</span>
+            {% endif %}
+            <span><i class="bi bi-hash me-1"></i><code>{{ row.hash_display if row.hash_display else 'N/A' }}</code></span>
+        </div>
+    </div>
+    {% endfor %}
+</div>
 {% else %}
 <div class="dense-list">
     {% for _, row in results.iterrows() %}

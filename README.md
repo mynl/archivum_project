@@ -92,7 +92,11 @@ Archivum includes a powerful web interface built with Flask, Bootstrap 5, and HT
 
 ### Key Features
 - **Real-time Search**: Instant filtering of references using fuzzy matching and `querex` expressions.
-- **Streaming Ripgrep**: Blazing fast full-text search that streams results to the browser as they are found. Supports complex filters like context lines, case sensitivity, and glob patterns.
+- **Unified UI Layout**: Standardized search controls across Query, Ripgrep, and Network views. Features full-width inputs and consistent button rows (Execute, Export, Options) to maximize horizontal efficiency.
+- **Multi-Modal Results**: Toggle between **Dense List**, **Table**, and the new **Verbose** mode. Verbose mode provides a card-based layout with Year, Publisher, and standardized 8-character hashes.
+- **Streaming Ripgrep**: Blazing fast full-text search that streams results to the browser as they are found. Includes robust error handling and real-time feedback for malformed regex or ripgrep failures.
+- **Standardized Exports**: Uniform export controls across all search views. Support for "To Query" (using 8-char hashes) and "To CSV" (full matches) with consistent behavior.
+- **Author Bibliography**: Deep integration with the author index, supporting all unified view modes and standard export options.
 - **Report Studio**: A powerful environment for synthesizing research. Transform search results into persistent, professional journals with custom introductions and Markdown notes. Supports integrated HTML viewing and archival PDF generation (via Quarto/Tectonic).
 - **Smart Caching**: High-performance rendering pipeline. Automatically caches HTML and PDF versions of reports to provide near-instant retrieval on subsequent views.
 - **Split-Horizon Security**: Intelligent IP-based access control. Automatically grants full **Admin** rights to local/VPN traffic while restricting external/VPS traffic to a **Read-Only** mode (indicated by a header badge).

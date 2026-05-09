@@ -519,9 +519,9 @@ def parse_rg_json(proc, lib):
             hash_prefix_to_meta[prefix] = {
                 'tag': row.tag,
                 'title': str(row.get('title', '')).replace('{', '').replace('}', ''),
-                'authors': trim_author(row.get('author', ''))
+                'authors': trim_author(row.get('author', '')),
+                'publisher': str(row.get('publisher', '')) if pd.notna(row.get('publisher')) else ''
             }
-
     for line in proc.stdout:
         try:
             event = json.loads(line)
@@ -584,6 +584,8 @@ def author_search(author):
     lib = LibraryContext.get()
     if lib.is_empty: return "No library"
 
+    view_mode = request.args.get('view_mode', 'list')
+
     # Use native querex sorting: order by -year
     # We explicitly select year to ensure it's available for sorting
     query_expr = f"select year, path, hash, type, * ! /{author}/ order by -year"
@@ -594,17 +596,37 @@ def author_search(author):
         if not isinstance(result, pd.DataFrame):
             return f"Query error: {result}"
         
-        # Add header with Author name and Export button
+        # Options dropdown items
+        def opt_link(mode, label):
+            active = "active" if view_mode == mode else ""
+            return (
+                f"<li><a class='dropdown-item small {active}' href='#' "
+                f"hx-get=\"{url_for('main.author_search', author=author, view_mode=mode)}\" "
+                f"hx-target='#author-results'>{label}</a></li>"
+            )
+
+        # Add header with Author name, Export, and Options
         header_oob = (
-            f"<div id='author-results-header' hx-swap-oob='true' class='d-flex justify-content-between align-items-center mb-4'>"
-            f"  <h4 class='mb-0 fw-bold'><i class='bi bi-person-fill me-2'></i>{author}</h4>"
+            f"<div id='author-results-header' hx-swap-oob='true' class='d-flex flex-wrap align-items-center gap-2 mb-4'>"
+            f"  <h4 class='mb-0 fw-bold me-auto'><i class='bi bi-person-fill me-2'></i>{author}</h4>"
             f"  <button class='btn btn-info px-4 fw-bold shadow-sm' onclick=\"exportAuthorToQuery('{author}')\">"
-            f"    <i class='bi bi-box-arrow-up-right me-2'></i>Export"
+            f"    Export"
             f"  </button>"
+            f"  <div class='dropdown'>"
+            f"    <button class='btn btn-outline-secondary px-3 shadow-sm dropdown-toggle' type='button' data-bs-toggle='dropdown'>"
+            f"      <i class='bi bi-gear-fill me-1'></i> Options"
+            f"    </button>"
+            f"    <ul class='dropdown-menu dropdown-menu-end shadow-sm'>"
+            f"      <li><h6 class='dropdown-header text-uppercase small pb-1'>View Mode</h6></li>"
+            f"      {opt_link('list', 'Dense List')}"
+            f"      {opt_link('verbose', 'Verbose')}"
+            f"      {opt_link('table', 'Table')}"
+            f"    </ul>"
+            f"  </div>"
             f"</div>"
         )
         
-        return header_oob + _render_search_results(result, view_mode='list')
+        return header_oob + _render_search_results(result, view_mode=view_mode)
         
     except Exception as e:
         logger.error(f"Author search error: {e}")
@@ -652,6 +674,13 @@ def _prepare_search_results(df):
         display_results['title_display'] = display_results[title_col]
     else:
         display_results['title_display'] = "[No Title]"
+
+    # Safely handle hash for display
+    hash_col = find_col(display_results, 'hash')
+    if hash_col:
+        display_results['hash_display'] = display_results[hash_col].fillna('').astype(str).str[:8]
+    else:
+        display_results['hash_display'] = ""
 
     return display_results
 
@@ -758,6 +787,7 @@ def get_hash_meta_cache(lib):
                     'title': str(row.get('title', '')).replace('{', '').replace('}', ''),
                     'authors': str(row.get('author', '')), # Keep raw for splitting
                     'year': str(row.get('year', '9999')).split('.')[0],
+                    'publisher': str(row.get('publisher', '')) if pd.notna(row.get('publisher')) else '',
                     'size': int(row.get('size', 0)) if pd.notna(row.get('size')) else 0
                 }
         _META_CACHE_GLOBAL['lib_name'] = lib.name
@@ -1669,7 +1699,7 @@ def semantic_data():
             })
 
         # Top hashes for export - force to strings and drop NaNs to avoid join errors
-        hash_list = result_df['hash'].dropna().astype(str).str[:6].unique()[:500]
+        hash_list = result_df['hash'].dropna().astype(str).str[:8].unique()[:500]
         top_hashes = "|".join([str(h) for h in hash_list])
 
         logger.info(f"Semantic Search: Success! Returning {len(elements)} elements")

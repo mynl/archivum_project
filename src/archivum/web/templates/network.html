@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="container-fluid py-3">
-    <!-- Header: Unified Search Redesign -->
+    <!-- Standardized Search Input -->
     <div class="search-container row g-2 mb-3">
         <div class="col">
             <div class="search-wrapper shadow-sm">
@@ -19,45 +19,46 @@
         </div>
     </div>
 
-    <!-- Controls Row -->
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
-        <div class="d-flex align-items-center gap-2">
-            <!-- Action Buttons -->
-            <div class="btn-group shadow-sm">
-                <button id="social-btn" class="btn btn-primary px-4 fw-bold" onclick="executeSearch('social')">
-                    <i class="bi bi-people-fill me-2"></i>Social
-                </button>
-                <button id="semantic-btn" class="btn btn-success px-4 fw-bold" onclick="executeSearch('semantic')">
-                    <i class="bi bi-stars me-2"></i>Semantic
-                </button>
-            </div>
-            
-            {% set id_prefix = 'net' %}
-            {% set input_id = 'network-search' %}
-            {% include "components/export_button.html" with context %}
-            
-            <!-- Options Dropdown -->
-            <div class="dropdown">
-                <button class="btn btn-outline-secondary btn-sm dropdown-toggle ms-2 shadow-sm" type="button" data-bs-toggle="dropdown">
-                    <i class="bi bi-gear-fill me-1"></i> Options
-                </button>
-                <ul class="dropdown-menu shadow-sm">
-                    <li><h6 class="dropdown-header">Semantic Source</h6></li>
-                    <li>
-                        <div class="form-check mx-3 my-1">
-                            <input class="form-check-input" type="radio" name="semantic-source" id="src-title" value="title" checked>
-                            <label class="form-check-label small" for="src-title">Title Only</label>
-                        </div>
-                    </li>
-                    <li>
-                        <div class="form-check mx-3 my-1">
-                            <input class="form-check-input" type="radio" name="semantic-source" id="src-text" value="text">
-                            <label class="form-check-label small" for="src-text">Full Text (2k chars)</label>
-                        </div>
-                    </li>
-                </ul>
-            </div>
+    <!-- Standardized Buttons Row -->
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
+        <!-- Main Actions (Separate) -->
+        <button id="social-btn" class="btn btn-primary px-4 fw-bold shadow-sm" onclick="executeSearch('social')">
+            Social
+        </button>
+        <button id="semantic-btn" class="btn btn-success px-4 fw-bold shadow-sm" onclick="executeSearch('semantic')">
+            Semantic
+        </button>
+        
+        {% set id_prefix = 'net' %}
+        {% set input_id = 'network-search' %}
+        {% include "components/export_button.html" with context %}
+        
+        <!-- Options Dropdown -->
+        <div class="dropdown">
+            <button class="btn btn-outline-secondary px-3 shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-gear-fill me-1"></i> Options
+            </button>
+            <ul class="dropdown-menu shadow-sm p-3" style="min-width: 250px;">
+                <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">Semantic Source</h6></li>
+                <li>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="semantic-source" id="src-title" value="title" checked>
+                        <label class="form-check-label small" for="src-title">Title & Metadata</label>
+                    </div>
+                </li>
+                <li>
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="radio" name="semantic-source" id="src-text" value="text">
+                        <label class="form-check-label small" for="src-text">Full Text (2k chars)</label>
+                    </div>
+                </li>
+            </ul>
         </div>
+        
+        <div id="network-indicator" class="htmx-indicator d-flex align-items-center gap-2 text-primary small ms-2">
+            <div id="graph-loader-spinner" class="spinner-border spinner-border-sm" role="status" style="display: none;"></div>
+        </div>
+    </div>
 
         <div id="network-stats" class="text-end text-secondary small fw-medium">
             <!-- Stats will be injected here -->
