@@ -1,3 +1,21 @@
+# Current Issues / Punch-up
+
+1. get rid of labels in semantic mode
+2. read text files in 2000 char mode?
+3. height of galaxy cluster map table  - use all space
+4. make input box and buttons same for query, ripgrep and network
+5. querex errors in live query mode?
+6. auto naming of clusters
+7. add counter examples in analysis book from downloads 
+
+
+
+
+
+
+
+# Older Issues
+
 Warning:
 
 archivum [Uber Library] > tag bielecki20(17|18|24) -oa

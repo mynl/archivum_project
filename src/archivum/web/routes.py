@@ -73,6 +73,32 @@ def check_for_reload():
         lib.reset()
         LibraryContext.refresh()
 
+def _render_export_button(id_prefix, hashes, input_id='rg-input'):
+    """Helper to render the full export button group for OOB swaps."""
+    # We use btn-info for active state instead of btn-outline-info
+    return (
+        f"<div id='{id_prefix}-export-container' class='btn-group shadow-sm' hx-swap-oob='true'>"
+        f"    <button id='{id_prefix}-export-btn' "
+        f"            onclick=\"handleExportToQuery('{id_prefix}', '{input_id}')\""
+        f"            class='btn btn-info px-4 fw-bold' "
+        f"            data-hashes='{hashes}'"
+        f"            title='Export documents to Query screen'>"
+        f"        Export"
+        f"    </button>"
+        f"    <button id='{id_prefix}-export-toggle' "
+        f"            type='button' "
+        f"            class='btn btn-info dropdown-toggle dropdown-toggle-split' "
+        f"            data-bs-toggle='dropdown' "
+        f"            aria-expanded='false'>"
+        f"        <span class='visually-hidden'>Toggle Dropdown</span>"
+        f"    </button>"
+        f"    <ul class='dropdown-menu dropdown-menu-end shadow'>"
+        f"        <li><a class='dropdown-item' href='#' onclick=\"handleExportToQuery('{id_prefix}', '{input_id}')\">To Query (Max 500)</a></li>"
+        f"        <li><a class='dropdown-item' href='#' onclick=\"handleExportToCSV('{id_prefix}', '{input_id}')\">To CSV (All matches)</a></li>"
+        f"    </ul>"
+        f"</div>"
+    )
+
 @bp.route('/health')
 @admin_required
 def health_page():
@@ -732,7 +758,7 @@ def get_hash_meta_cache(lib):
                     'title': str(row.get('title', '')).replace('{', '').replace('}', ''),
                     'authors': str(row.get('author', '')), # Keep raw for splitting
                     'year': str(row.get('year', '9999')).split('.')[0],
-                    'size': int(row.get('size', 0))
+                    'size': int(row.get('size', 0)) if pd.notna(row.get('size')) else 0
                 }
         _META_CACHE_GLOBAL['lib_name'] = lib.name
         _META_CACHE_GLOBAL['mtime'] = mtime
@@ -827,11 +853,9 @@ def rg_search():
 
             export_oob = ""
             if hashes:
-                export_oob = (
-                    f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
-                    f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{hashes}' "
-                    f"title='Export top 50 documents by match count to Query screen'>Export</button>"
-                )
+                # Ensure hashes from cache are also 8-char if they weren't already
+                h_list = [h[:8] for h in hashes.split('|')]
+                export_oob = _render_export_button('rg', "|".join(h_list))
 
             # Spacing fix: rg-status margin reduced
             status_fix = f"<div id='rg-status' hx-swap-oob='true' class='rg-info' style='margin-bottom: 0.25rem; display: block;'>Last Command: <code>(Retrieved from Cache)</code></div>"
@@ -891,176 +915,174 @@ def rg_search():
 
         # 4. Summary / Counts Mode
         if show_counts:
-            data_key = f"{query}_{filter_mode}_{case_sensitive}_{glob1}_{glob2}"
-            counts = get_rg_cache_item(lib, data_key, 'data')
-            rg_internal_time = "0.000s"
+            try:
+                data_key = f"{query}_{filter_mode}_{case_sensitive}_{glob1}_{glob2}"
+                counts = get_rg_cache_item(lib, data_key, 'data')
+                rg_internal_time = "0.000s"
 
-            if counts is None:
-                args = ["-n", "-H"] + common_args
-                if not case_sensitive: args.append('-i')
-                rc, proc = lib.run_ripgrep(query, args)
-                yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{query}\"</code></div>")
+                if counts is None:
+                    args = ["-n", "-H"] + common_args
+                    if not case_sensitive: args.append('-i')
+                    rc, proc = lib.run_ripgrep(query, args)
+                    yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{query}\"</code></div>")
 
-                counts, stats_buffer, is_stats_section = {}, [], False
-                for line in proc.stdout:
-                    if not line.strip(): continue
-                    if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line): is_stats_section = True
-                    if is_stats_section: stats_buffer.append(line); continue
-                    parts = line.split(':', 2)
-                    if len(parts) < 3: continue
-                    h_prefix = Path(parts[0]).name[:10]
-                    meta = hash_prefix_to_meta.get(h_prefix, {})
-                    if filter_mode == 'tagged' and not meta.get('tag'): continue
-                    counts[h_prefix] = counts.get(h_prefix, 0) + 1
+                    counts, stats_buffer, is_stats_section = {}, [], False
+                    for line in proc.stdout:
+                        if not line.strip(): continue
+                        if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line): is_stats_section = True
+                        if is_stats_section: stats_buffer.append(line); continue
+                        parts = line.split(':', 2)
+                        if len(parts) < 3: continue
+                        h_prefix = Path(parts[0]).name[:10]
+                        meta = hash_prefix_to_meta.get(h_prefix, {})
+                        if filter_mode == 'tagged' and not meta.get('tag'): continue
+                        counts[h_prefix] = counts.get(h_prefix, 0) + 1
 
-                m = re.findall(r'(\d+\.\d+) seconds', "".join(stats_buffer))
-                rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
-                set_rg_cache_item(data_key, counts, 'data')
-            else:
-                yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>(Retrieved from Cache)</code></div>")
+                    m = re.findall(r'(\d+\.\d+) seconds', "".join(stats_buffer))
+                    rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
+                    set_rg_cache_item(data_key, counts, 'data')
+                else:
+                    yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>(Retrieved from Cache)</code></div>")
 
-            counts_list = []
-            total_m = 0
-            for h_prefix, count_val in counts.items():
-                meta = hash_prefix_to_meta.get(h_prefix, {})
-                counts_list.append({'hash': h_prefix, 'count': count_val, 'tag': meta.get('tag'), 'title': meta.get('title', ''), 'authors': meta.get('authors', '')})
-                total_m += count_val
-            counts_list.sort(key=lambda x: x['count'], reverse=True)
-
-            final_stats['matches'] = total_m
-            final_stats['docs'] = len(counts_list)
-
-            if show_summary:
-                year_data, author_data = {}, {}
-                total_papers_set = set()
+                counts_list = []
+                total_m = 0
                 for h_prefix, count_val in counts.items():
                     meta = hash_prefix_to_meta.get(h_prefix, {})
-                    year, size = meta.get('year', '9999'), meta.get('size', 0)
-                    total_papers_set.add(h_prefix)
-                    
-                    if year not in year_data: year_data[year] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
-                    year_data[year]['papers'] += 1
-                    year_data[year]['matches'] += count_val
-                    year_data[year]['size'] += size
-                    year_data[year]['hashes'].add(h_prefix[:6])
+                    counts_list.append({'hash': h_prefix, 'count': count_val, 'tag': meta.get('tag'), 'title': meta.get('title', ''), 'authors': meta.get('authors', '')})
+                    total_m += count_val
+                counts_list.sort(key=lambda x: x['count'], reverse=True)
 
-                    raw_authors = meta.get('authors', 'Unknown')
-                    author_list = [a.strip().replace('{', '').replace('}', '') for a in raw_authors.split(' and ')]
-                    for auth in author_list:
-                        if not auth or auth == "Unknown": continue
-                        if auth not in author_data: author_data[auth] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
-                        author_data[auth]['papers'] += 1
-                        author_data[auth]['matches'] += count_val
-                        author_data[auth]['size'] += size
-                        author_data[auth]['hashes'].add(h_prefix[:6])
+                final_stats['matches'] = total_m
+                final_stats['docs'] = len(counts_list)
 
-                total_papers_count = len(total_papers_set)
-                def prepare_rows(data):
-                    if not data: return []
-                    max_matches = max(v['matches'] for v in data.values())
-                    rows = []
-                    for label, vals in data.items():
-                        hash_query = f"hash ~ /{ '|'.join(list(vals.get('hashes', []))[:50]) }/" if 'hashes' in vals else ""
-                        rows.append({
-                            'label': label, 'papers': vals['papers'], 'papers_pct': (vals['papers'] / total_papers_count * 100),
-                            'matches': vals['matches'], 'matches_pct': (vals['matches'] / total_m * 100),
-                            'spark_pct': (vals['matches'] / max_matches * 100), 'mtc_pap': vals['matches'] / vals['papers'],
-                            'mtc_100kb': (vals['matches'] / (vals['size'] / 102400)) if vals['size'] else 0, 'hash_query': hash_query
-                        })
-                    return rows
-                year_rows = sorted(prepare_rows(year_data), key=lambda x: x['label'], reverse=True)
-                author_rows = sorted(prepare_rows(author_data), key=lambda x: x['matches'], reverse=True)[:100]
-                summary_html = render_template('components/rg_summary.html', year_rows=year_rows, author_rows=author_rows, totals={'papers': total_papers_count, 'matches': total_m, 'author_count': len(author_data)})
-                yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-5'>{summary_html}</div>")
-            else:
-                yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>{render_template('components/rg_counts.html', counts=counts_list)}</div>")
+                if show_summary:
+                    year_data, author_data = {}, {}
+                    total_papers_set = set()
+                    for h_prefix, count_val in counts.items():
+                        meta = hash_prefix_to_meta.get(h_prefix, {})
+                        year, size = meta.get('year', '9999'), meta.get('size', 0)
+                        total_papers_set.add(h_prefix)
+                        
+                        if year not in year_data: year_data[year] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
+                        year_data[year]['papers'] += 1
+                        year_data[year]['matches'] += count_val
+                        year_data[year]['size'] += size
+                        year_data[year]['hashes'].add(h_prefix[:8])
 
-            # EXPORT BUTTON OOB SWAP
-            top_hashes = "|".join([x['hash'][:6] for x in counts_list[:500]])
-            if top_hashes:
-                export_oob = (
-                    f"<div id='rg-export-btn' hx-swap-oob='true' onclick='exportToQuery()' "
-                    f"class='btn btn-info px-4 fw-bold' data-hashes='{top_hashes}' "
-                    f"title='Export documents to Query screen'>Export</div>"
-                    f"<button id='rg-export-toggle' hx-swap-oob='true' "
-                    f"class='btn btn-info dropdown-toggle dropdown-toggle-split' "
-                    f"data-bs-toggle='dropdown' aria-expanded='false'></button>"
-                )
-                yield yield_and_buffer(export_oob)
+                        raw_authors = meta.get('authors', 'Unknown')
+                        author_list = [a.strip().replace('{', '').replace('}', '') for a in raw_authors.split(' and ')]
+                        for auth in author_list:
+                            if not auth or auth == "Unknown": continue
+                            if auth not in author_data: author_data[auth] = {'papers': 0, 'matches': 0, 'size': 0, 'hashes': set()}
+                            author_data[auth]['papers'] += 1
+                            author_data[auth]['matches'] += count_val
+                            author_data[auth]['size'] += size
+                            author_data[auth]['hashes'].add(h_prefix[:8])
 
-            final_stats['matches'] = total_m
-            final_stats['docs'] = len(counts_list)
-            final_stats['hashes'] = top_50_hashes
+                    total_papers_count = len(total_papers_set)
+                    def prepare_rows(data):
+                        if not data: return []
+                        max_matches = max(v['matches'] for v in data.values())
+                        rows = []
+                        for label, vals in data.items():
+                            hash_query = f"hash ~ /{ '|'.join(list(vals.get('hashes', []))[:50]) }/" if 'hashes' in vals else ""
+                            rows.append({
+                                'label': label, 'papers': vals['papers'], 'papers_pct': (vals['papers'] / total_papers_count * 100),
+                                'matches': vals['matches'], 'matches_pct': (vals['matches'] / total_m * 100),
+                                'spark_pct': (vals['matches'] / max_matches * 100), 'mtc_pap': vals['matches'] / vals['papers'],
+                                'mtc_100kb': (vals['matches'] / (vals['size'] / 102400)) if vals['size'] else 0, 'hash_query': hash_query
+                            })
+                        return rows
+                    year_rows = sorted(prepare_rows(year_data), key=lambda x: x['label'], reverse=True)
+                    author_rows = sorted(prepare_rows(author_data), key=lambda x: x['matches'], reverse=True)[:100]
+                    summary_html = render_template('components/rg_summary.html', year_rows=year_rows, author_rows=author_rows, totals={'papers': total_papers_count, 'matches': total_m, 'author_count': len(author_data)})
+                    yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-5'>{summary_html}</div>")
+                else:
+                    yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>{render_template('components/rg_counts.html', counts=counts_list)}</div>")
 
-            stats_html = f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_m}</b> matches in <b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
-            yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
-            set_rg_cache_item(search_key, "".join(html_buffer), 'html')
-            set_rg_cache_item(search_key, final_stats, 'stats')
+                # EXPORT BUTTON OOB SWAP
+                top_hashes = "|".join([x['hash'][:8] for x in counts_list[:500]])
+                if top_hashes:
+                    yield yield_and_buffer(_render_export_button('rg', top_hashes))
+
+                final_stats['matches'] = total_m
+                final_stats['docs'] = len(counts_list)
+                final_stats['hashes'] = top_hashes
+
+                stats_html = f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_m}</b> matches in <b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
+                yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
+                set_rg_cache_item(search_key, "".join(html_buffer), 'html')
+                set_rg_cache_item(search_key, final_stats, 'stats')
+            except Exception as e:
+                logger.error(f"RG Summary/Counts Error: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                yield yield_and_buffer(f"<div class='error' hx-swap-oob='true'>Ripgrep Summary Error: {str(e)}</div>")
             return
 
         # 5. Details Mode
-        args = ["-n", "-H"] + common_args
-        if not case_sensitive: args.append('-i')
-        args.extend(['-A', context_a, '-B', context_b])
-        rc, proc = lib.run_ripgrep(query, args)
-        yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{query}\"</code></div>")
+        try:
+            args = ["-n", "-H"] + common_args
+            if not case_sensitive: args.append('-i')
+            args.extend(['-A', context_a, '-B', context_b])
+            rc, proc = lib.run_ripgrep(query, args)
+            yield yield_and_buffer(f"<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{query}\"</code></div>")
 
-        limit, rendered_matches, total_matches, seen_hashes = 500, 0, 0, set()
-        current_block, last_file, stats_buffer, is_stats_section = None, None, [], False
+            limit, rendered_matches, total_matches, seen_hashes = 500, 0, 0, set()
+            current_block, last_file, stats_buffer, is_stats_section = None, None, [], False
 
-        for line in proc.stdout:
-            if not line.strip(): continue
-            if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line): is_stats_section = True
-            if is_stats_section: stats_buffer.append(line); continue
-            is_match = ':' in line
-            is_context = '-' in line and not is_match
-            if not (is_match or is_context): continue
-            sep = ':' if is_match else '-'
-            parts = line.split(sep, 2)
-            if len(parts) < 3: continue
-            h_prefix = Path(parts[0]).name[:10]
-            if h_prefix != last_file:
-                if current_block and rendered_matches <= limit:
-                    yield yield_and_buffer(f"<div hx-swap-oob='beforeend:#rg-results'>{render_template('components/rg_block.html', block=current_block)}</div>")
-                last_file = h_prefix
-                meta = hash_prefix_to_meta.get(h_prefix, {})
-                if filter_mode == 'tagged' and not meta.get('tag'): current_block = None; continue
-                seen_hashes.add(h_prefix)
-                current_block = {'hash': h_prefix, 'tag': meta.get('tag'), 'title': meta.get('title', ''), 'authors': meta.get('authors', ''), 'lines': []}
-            if current_block:
-                if is_match: total_matches += 1
-                if rendered_matches < limit:
-                    if is_match: rendered_matches += 1
-                    formatted_line = html.escape(parts[2].rstrip())
-                    if is_match:
-                        try:
-                            pat = re.compile(f'({re.escape(query)})', re.IGNORECASE); formatted_line = pat.sub(r'<mark>\1</mark>', formatted_line)
-                        except: pass
-                    current_block['lines'].append({'type': 'match' if is_match else 'context', 'number': parts[1], 'text': formatted_line})
+            for line in proc.stdout:
+                if not line.strip(): continue
+                if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line): is_stats_section = True
+                if is_stats_section: stats_buffer.append(line); continue
+                is_match = ':' in line
+                is_context = '-' in line and not is_match
+                if not (is_match or is_context): continue
+                sep = ':' if is_match else '-'
+                parts = line.split(sep, 2)
+                if len(parts) < 3: continue
+                h_prefix = Path(parts[0]).name[:10]
+                if h_prefix != last_file:
+                    if current_block and rendered_matches <= limit:
+                        yield yield_and_buffer(f"<div hx-swap-oob='beforeend:#rg-results'>{render_template('components/rg_block.html', block=current_block)}</div>")
+                    last_file = h_prefix
+                    meta = hash_prefix_to_meta.get(h_prefix, {})
+                    if filter_mode == 'tagged' and not meta.get('tag'): current_block = None; continue
+                    seen_hashes.add(h_prefix)
+                    current_block = {'hash': h_prefix, 'tag': meta.get('tag'), 'title': meta.get('title', ''), 'authors': meta.get('authors', ''), 'lines': []}
+                if current_block:
+                    if is_match: total_matches += 1
+                    if rendered_matches < limit:
+                        if is_match: rendered_matches += 1
+                        formatted_line = html.escape(parts[2].rstrip())
+                        if is_match:
+                            try:
+                                pat = re.compile(f'({re.escape(query)})', re.IGNORECASE); formatted_line = pat.sub(r'<mark>\1</mark>', formatted_line)
+                            except: pass
+                        current_block['lines'].append({'type': 'match' if is_match else 'context', 'number': parts[1], 'text': formatted_line})
 
-        if current_block and rendered_matches <= limit:
-            yield yield_and_buffer(f"<div hx-swap-oob='beforeend:#rg-results'>{render_template('components/rg_block.html', block=current_block)}</div>")
+            if current_block and rendered_matches <= limit:
+                yield yield_and_buffer(f"<div hx-swap-oob='beforeend:#rg-results'>{render_template('components/rg_block.html', block=current_block)}</div>")
 
-        m = re.findall(r'(\d+\.\d+) seconds', "".join(stats_buffer))
-        rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
-        final_stats['matches'] = total_matches
-        final_stats['docs'] = len(seen_hashes)
-        
-        # EXPORT BUTTON OOB SWAP
-        top_50_hashes = "|".join(list(seen_hashes)[:50])
-        if top_50_hashes:
-            export_oob = (
-                f"<button id='rg-export-btn' hx-swap-oob='true' onclick='exportTop50()' "
-                f"class='btn btn-info px-4 shadow-sm fw-bold' data-hashes='{top_50_hashes}' "
-                f"title='Export top 50 documents by match count to Query screen'>Export</button>"
-            )
-            yield yield_and_buffer(export_oob)
-            final_stats['hashes'] = top_50_hashes
+            m = re.findall(r'(\d+\.\d+) seconds', "".join(stats_buffer))
+            rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
+            final_stats['matches'] = total_matches
+            final_stats['docs'] = len(seen_hashes)
+            
+            # EXPORT BUTTON OOB SWAP
+            top_hashes = "|".join([h[:8] for h in list(seen_hashes)[:50]])
+            if top_hashes:
+                yield yield_and_buffer(_render_export_button('rg', top_hashes))
+                final_stats['hashes'] = top_hashes
 
-        stats_html = f"<div class='text-muted small mt-n3 mb-3'>Found <b>{total_matches}</b> matches in <b>{len(seen_hashes)}</b> files. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
-        yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
-        set_rg_cache_item(search_key, "".join(html_buffer), 'html')
-        set_rg_cache_item(search_key, final_stats, 'stats')
+            stats_html = f"<div class='text-muted small mt-n3 mb-3'>Found <b>{total_matches}</b> matches in <b>{len(seen_hashes)}</b> files. Total: {time.time() - start_time:.3f}s (RG: {rg_internal_time})</div>"
+            yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
+            set_rg_cache_item(search_key, "".join(html_buffer), 'html')
+            set_rg_cache_item(search_key, final_stats, 'stats')
+        except Exception as e:
+            logger.error(f"RG Details Error: {e}")
+            yield yield_and_buffer(f"<div class='error' hx-swap-oob='true'>Ripgrep Error: {str(e)}</div>")
+    
     
     return Response(stream_with_context(generate_results()), mimetype='text/html')
 
@@ -1442,7 +1464,7 @@ def network_data():
         ]
 
         # Top hashes for export
-        hash_list = result_df['hash'].dropna().astype(str).str[:6].unique()[:500]
+        hash_list = result_df['hash'].dropna().astype(str).str[:8].unique()[:500]
         top_hashes = "|".join([str(h) for h in hash_list])
 
         return {
