@@ -183,3 +183,8 @@ The web interface (`archivum serve`) has been significantly enhanced to provide 
 * On Kolmogorov old Books, Book_scans, and Library are in ~\RawDocs and are Linked back to their original locations in S. These links will obviously work only on Kolmogorov.
 * The two copies are hard links of one another - spot checked and seems to work.
 * Since sharded doc lib is in S it syncs to Google Drive (which means VPS has access in theory...)
+\
+# Development Standards\
+\
+## Documentation\
+- **ALWAYS** update \src/archivum/web/templates/help.html\ whenever a new feature is added to the web interface or core logic. Documentation must remain synchronized with the implementation at all times.

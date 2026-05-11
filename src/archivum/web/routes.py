@@ -14,6 +14,7 @@ import time
 import re
 from datetime import datetime
 from collections import Counter
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,83 @@ _CACHE = {
     'insights': None,
     'audit': None
 }
+
+# Global transformer model to avoid redundant loading
+_MODEL_CACHE = {
+    'transformer': None
+}
+
+def get_transformer_model():
+    """Lazy-load the transformer model."""
+    if _MODEL_CACHE['transformer'] is None:
+        logger.info("Loading SentenceTransformer model 'all-MiniLM-L6-v2'...")
+        from sentence_transformers import SentenceTransformer
+        _MODEL_CACHE['transformer'] = SentenceTransformer('all-MiniLM-L6-v2')
+    return _MODEL_CACHE['transformer']
+
+def _resolve_universe(lib, raw_query):
+    """Robustly resolve document hashes for a combined querex/ripgrep query."""
+    querex_part = ""; ripgrep_part = ""
+    if ' rg ' in raw_query.lower():
+        parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
+        querex_part = parts[0].strip(); ripgrep_part = parts[1].strip()
+        if querex_part.lower().startswith('q '): querex_part = querex_part[2:].strip()
+    elif raw_query.lower().startswith('q '): querex_part = raw_query[2:].strip()
+    elif raw_query.lower().startswith('rg '): ripgrep_part = raw_query[3:].strip()
+    else: querex_part = raw_query
+
+    df = lib.database
+    
+    # 1. Querex Phase
+    querex_hashes = set()
+    if querex_part:
+        # Construct valid querex: [TOP N] [RECENT] SELECT ...
+        q_expr = querex_part
+        if 'select' not in q_expr.lower():
+            # Match top/recent prefixes
+            match = re.match(r'^((?:top\s+\d+\s+)?(?:recent\s+)?)(.*)$', q_expr, re.IGNORECASE)
+            if match:
+                prefix, rest = match.groups()
+                q_expr = f"{prefix}select hash, tag, author, title, year, * {rest}"
+            else:
+                q_expr = "select hash, tag, author, title, year, * " + q_expr
+        
+        q_result = df.querex(q_expr)
+        if not isinstance(q_result, pd.DataFrame):
+            raise ValueError(f"Querex error: {q_result}")
+        querex_hashes = set(q_result['hash'].dropna().astype(str))
+    else:
+        querex_hashes = set(df['hash'].dropna().astype(str))
+
+    # 2. Ripgrep Phase
+    if ripgrep_part:
+        rg_hashes = set()
+        is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
+        args = ["-n", "-H", "--pcre2"] if is_regex else ["-n", "-H"]
+        
+        # Handle -g flags in ripgrep_part
+        clean_rg = ripgrep_part
+        if ' -g ' in ripgrep_part:
+            rg_bits = ripgrep_part.split(' -g ')
+            clean_rg = rg_bits[0].strip()
+            for g in rg_bits[1:]: args.extend(['-g', g.strip()])
+        else:
+            args.extend(['-g', '*.md'])
+        
+        rc, proc = lib.run_ripgrep(clean_rg, args)
+        for line in proc.stdout:
+            line = line.strip()
+            if not line or ':' not in line: continue
+            parts = line.split(':', 2)
+            if len(parts) < 3: continue
+            h_prefix = Path(parts[0]).name[:10].upper()
+            # Map prefix to full hashes in our current querex set
+            for h in querex_hashes:
+                if h.upper().startswith(h_prefix):
+                    rg_hashes.add(h)
+        return rg_hashes
+    
+    return querex_hashes
 
 def get_cached_data(lib, key, calculator):
     """Retrieve from cache or calculate if library state changed."""
@@ -1349,98 +1427,22 @@ def network_page():
 @bp.route('/network-data')
 def network_data():
     raw_query = request.args.get('q', '').strip()
+    verbosity = request.args.get('verbosity', 'minimal')
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
-    if not raw_query: return {"nodes": [], "edges": [], "elements": [], "papers": 0}
-
-    # Unified Search Parser
-    # Examples:
-    # 1. q tag ~ /Wang/ rg risk
-    # 2. q author ~ /Wang/
-    # 3. rg risk
-    
-    querex_part = ""
-    ripgrep_part = ""
-    
-    # Try to find 'rg ' as a separator
-    if ' rg ' in raw_query.lower():
-        parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
-        querex_part = parts[0].strip()
-        ripgrep_part = parts[1].strip()
-        if querex_part.lower().startswith('q '):
-            querex_part = querex_part[2:].strip()
-    elif raw_query.lower().startswith('q '):
-        querex_part = raw_query[2:].strip()
-    elif raw_query.lower().startswith('rg '):
-        ripgrep_part = raw_query[3:].strip()
-    else:
-        # Default to querex if no marker
-        querex_part = raw_query
+    if not raw_query: return {"nodes": [], "edges": [], "elements": [], "papers": 0, "clusters": []}
 
     try:
         df = lib.database
+        universe_hashes = _resolve_universe(lib, raw_query)
+        result_df = df[df['hash'].astype(str).isin(universe_hashes)]
         
-        # Phase 1: Querex Filtering
-        if querex_part:
-            # Ensure we have essential columns for analysis
-            if 'select' not in querex_part.lower():
-                querex_part = "select tag, author, title, year, hash, * " + querex_part
-            result_df = df.querex(querex_part)
-        else:
-            result_df = df.copy()
-
-        if not isinstance(result_df, pd.DataFrame) or result_df.empty:
-            return {"nodes": [], "edges": [], "elements": [], "papers": 0}
-
-        # Phase 2: Ripgrep Filtering (if requested)
-        if ripgrep_part:
-            is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
-            # Use same args as rg_search summary mode for consistency
-            args = ["-n", "-H"] 
-            if not is_regex: args.append('-F')
-            elif any(p in ripgrep_part for p in ['(?=', '(?!', '(?<=', '(?!']): args.append('--pcre2')
-            
-            clean_rg = ripgrep_part
-            if ' -g ' in ripgrep_part:
-                rg_bits = ripgrep_part.split(' -g ')
-                clean_rg = rg_bits[0].strip()
-                for g in rg_bits[1:]:
-                    args.extend(['-g', g.strip()])
-            else:
-                # Default to .md if no glob specified
-                args.extend(['-g', '*.md'])
-            
-            rc, proc = lib.run_ripgrep(clean_rg, args)
-            matched_prefixes = set()
-            is_stats_section = False
-            
-            for line in proc.stdout:
-                line = line.strip()
-                if not line: continue
-                # Skip stats lines
-                if re.match(r'^\s*\d+ matches', line) or re.match(r'^\s*\d+ matched lines', line):
-                    is_stats_section = True
-                    continue
-                if is_stats_section: continue
-                
-                # Parse like rg_search: path:line:text
-                parts = line.split(':', 2)
-                if len(parts) < 3: continue
-                
-                h_prefix = Path(parts[0]).name[:10].upper()
-                matched_prefixes.add(h_prefix)
-            
-            # Map result_df hashes to prefixes and filter (case-insensitive)
-            result_df['hash_prefix_upper'] = result_df['hash'].astype(str).str[:10].str.upper()
-            result_df = result_df[result_df['hash_prefix_upper'].isin(matched_prefixes)]
-            
         if result_df.empty:
-            logger.info(f"Network analysis: result_df is empty after filtering for query '{raw_query}'")
-            return {"nodes": [], "elements": [], "papers": 0, "hashes": ""}
+            return {"nodes": [], "edges": [], "elements": [], "papers": 0, "clusters": []}
 
-        # Phase 3: Social Graph Construction
+        # Social Graph Logic...
         paper_to_authors = {}
-        author_to_papers = {} # author -> [ {title, year, tag} ]
+        author_to_papers = {}
         
         def normalize_name(name):
             if pd.isna(name): return "Unknown"
@@ -1461,276 +1463,218 @@ def network_data():
                 'year': str(row.get('year', '9999')).split('.')[0],
                 'tag': str(row.tag)
             }
-            
             for auth in author_list:
                 author_to_papers.setdefault(auth, []).append(paper_info)
-            
             paper_to_authors[str(row.tag)] = (author_list, paper_info)
-
-        if not author_to_papers:
-            return {"nodes": [], "edges": [], "elements": [], "papers": len(result_df)}
-
-        # Identify central author
-        max_p = 0; central_author = None
-        for auth, papers in author_to_papers.items():
-            if len(papers) > max_p:
-                max_p = len(papers); central_author = auth
 
         nodes = []
         for auth, papers in author_to_papers.items():
             nodes.append({
                 'data': {
                     'id': str(auth), 'label': str(auth), 'weight': int(len(papers)),
-                    'is_central': auth == central_author, 'papers': papers[:50] 
+                    'papers': papers[:50] 
                 }
             })
 
-        edges = {} # (auth1, auth2) -> {weight, papers}
+        edges = {}
         for tag, (author_list, paper_info) in paper_to_authors.items():
             if len(author_list) < 2: continue
-            sorted_authors = sorted(author_list)
             import itertools
-            for a1, a2 in itertools.combinations(sorted_authors, 2):
+            for a1, a2 in itertools.combinations(sorted(author_list), 2):
                 key = (str(a1), str(a2))
-                if key not in edges:
-                    edges[key] = {'weight': 0, 'papers': []}
+                if key not in edges: edges[key] = {'weight': 0, 'papers': []}
                 edges[key]['weight'] += 1
                 edges[key]['papers'].append(paper_info)
 
         elements = nodes + [
-            {'data': {
-                'source': k[0], 'target': k[1], 
-                'weight': int(v['weight']), 
-                'papers': v['papers'],
-                'label': f"{k[0]} & {k[1]}"
-            }}
+            {'data': {'source': k[0], 'target': k[1], 'weight': int(v['weight']), 'papers': v['papers']}}
             for k, v in edges.items()
         ]
 
-        # Top hashes for export
         hash_list = result_df['hash'].dropna().astype(str).str[:8].unique()[:500]
-        top_hashes = "|".join([str(h) for h in hash_list])
-
         return {
-            "nodes": nodes,
-            "elements": elements,
-            "papers": len(result_df),
-            "hashes": top_hashes
+            "nodes": nodes, "elements": elements, "papers": len(result_df),
+            "hashes": "|".join([str(h) for h in hash_list]),
+            "status_msg": f'<i class="bi bi-people me-2"></i> Social graph built for {len(result_df)} papers.',
+            "clusters": []
         }
-
     except Exception as e:
-        logger.error(f"Network analysis error: {e}")
+        logger.error(f"Network error: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return {"error": str(e)}, 500
 
 @bp.route('/semantic-data')
 def semantic_data():
     raw_query = request.args.get('q', '').strip()
-    source_type = request.args.get('source', 'title') # 'title' or 'text'
+    source_type = request.args.get('source', 'title')
+    verbosity = request.args.get('verbosity', 'minimal')
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
-    if not raw_query: return {"elements": [], "papers": 0}
-
-    # 1. Reuse Unified Search Logic to get the Universe
-    querex_part = ""; ripgrep_part = ""
-    if ' rg ' in raw_query.lower():
-        parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
-        querex_part = parts[0].strip(); ripgrep_part = parts[1].strip()
-        if querex_part.lower().startswith('q '): querex_part = querex_part[2:].strip()
-    elif raw_query.lower().startswith('q '): querex_part = raw_query[2:].strip()
-    elif raw_query.lower().startswith('rg '): ripgrep_part = raw_query[3:].strip()
-    else: querex_part = raw_query
+    if not raw_query: return {"elements": [], "papers": 0, "clusters": []}
 
     try:
         df = lib.database
-        logger.info(f"Semantic Search: Starting Querex Phase with '{querex_part}'")
-        if querex_part:
-            if 'select' not in querex_part.lower(): querex_part = "select tag, author, title, year, hash, * " + querex_part
-            result_df = df.querex(querex_part)
-        else:
-            result_df = df.copy()
+        universe_hashes = _resolve_universe(lib, raw_query)
+        result_df = df[df['hash'].astype(str).isin(universe_hashes)].copy()
         
-        logger.info(f"Semantic Search: Querex returned {len(result_df)} papers")
+        if result_df.empty: 
+            return {"elements": [], "papers": 0, "clusters": []}
 
-        if ripgrep_part:
-            logger.info(f"Semantic Search: Starting Ripgrep Phase with '{ripgrep_part}'")
-            is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
-            args = ["-n", "-H"]
-            if not is_regex: args.append('-F')
-            elif any(p in ripgrep_part for p in ['(?=', '(?!', '(?<=', '(?!']): args.append('--pcre2')
-            
-            clean_rg = ripgrep_part
-            if ' -g ' in ripgrep_part:
-                rg_bits = ripgrep_part.split(' -g ')
-                clean_rg = rg_bits[0].strip()
-                for g in rg_bits[1:]: args.extend(['-g', g.strip()])
-            else: args.extend(['-g', '*.md'])
-            
-            rc, proc = lib.run_ripgrep(clean_rg, args)
-            matched_prefixes = set()
-            is_stats = False
-            for line in proc.stdout:
-                line = line.strip()
-                if not line: continue
-                if 'matches' in line or 'matched lines' in line: is_stats = True; continue
-                if is_stats: continue
-                parts = line.split(':', 2)
-                if len(parts) < 3: continue
-                matched_prefixes.add(Path(parts[0]).name[:10].upper())
-            
-            result_df['hash_prefix_upper'] = result_df['hash'].astype(str).str[:10].str.upper()
-            result_df = result_df[result_df['hash_prefix_upper'].isin(matched_prefixes)]
-            logger.info(f"Semantic Search: Ripgrep Filtered down to {len(result_df)} papers")
-
-        if result_df.empty: return {"elements": [], "papers": 0}
-
-        # 2. Semantic Index Management
+        # Phase 2: Semantic Index & Omission
         idx_path = lib.config_path / "semantic-embeddings.feather"
-        logger.info(f"Semantic Search: Checking index at {idx_path}")
-        if idx_path.exists():
-            idx_df = pd.read_feather(idx_path)
-            logger.info(f"Semantic Search: Loaded index with {len(idx_df)} existing embeddings")
-        else:
-            idx_df = pd.DataFrame(columns=['hash', 'tag', 'source', 'embedding', 'mtime'])
-            logger.info("Semantic Search: Index not found, creating new one")
-
-        # Identify papers needing embedding
+        idx_df = pd.read_feather(idx_path) if idx_path.exists() else pd.DataFrame(columns=['hash', 'source', 'embedding'])
+        
         to_embed = []
+        omitted_hashes = []
+        
         for _, row in result_df.iterrows():
             h = str(row.hash)
             match = idx_df[(idx_df.hash == h) & (idx_df.source == source_type)]
             if match.empty:
+                if source_type == 'text':
+                    # Check for extract existence
+                    from ..document import Document
+                    doc = Document(lib.abspath(row.path))
+                    doc.hash = h
+                    txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
+                    if not txt_p.exists():
+                        omitted_hashes.append(h)
+                        continue
                 to_embed.append(row)
 
+        # Remove omitted from results
+        result_df = result_df[~result_df.hash.astype(str).isin(omitted_hashes)]
+        if result_df.empty:
+            return {"elements": [], "papers": 0, "omitted_count": len(omitted_hashes), "omitted_reason": "No text extracts found.", "clusters": []}
+
         if to_embed:
-            logger.info(f"Semantic Search: Need to embed {len(to_embed)} new papers")
-            from sentence_transformers import SentenceTransformer
-            logger.info("Semantic Search: Loading SentenceTransformer model...")
-            model = SentenceTransformer('all-MiniLM-L6-v2')
-            
+            model = get_transformer_model()
             new_rows = []
-            for i, row in enumerate(to_embed):
-                if i % 10 == 0: logger.info(f"Semantic Search: Embedding batch {i}/{len(to_embed)}...")
-                text_to_encode = ""
+            for row in to_embed:
+                text = ""
                 if source_type == 'text':
-                    try:
-                        from ..document import Document
-                        # Row is a Series, so dict access works
-                        rel_p = row['path']
-                        doc_p = lib.abspath(rel_p)
-                        doc = Document(doc_p)
-                        doc.hash = str(row['hash'])
-                        # Resolve to the sharded .md/.txt extract
-                        txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
-                        if txt_p.exists():
-                            text_to_encode = txt_p.read_text(encoding='utf-8', errors='ignore')[:2000]
-                    except Exception as path_err:
-                        logger.warning(f"Failed to load text for {row.get('tag')}: {path_err}")
+                    from ..document import Document
+                    doc = Document(lib.abspath(row.path))
+                    doc.hash = str(row.hash)
+                    txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
+                    text = txt_p.read_text(encoding='utf-8', errors='ignore')[:2000]
+                else:
+                    text = f"{row.title}. {row.author}."
                 
-                if not text_to_encode:
-                    text_to_encode = f"{row['title']}. {row['author']}. {row.get('journal', '')}"
-
-                emb = model.encode(text_to_encode).tolist()
-                new_rows.append({
-                    'hash': str(row['hash']),
-                    'tag': str(row['tag']),
-                    'source': source_type,
-                    'mtime': time.time(),
-                    'embedding': emb
-                })
+                emb = model.encode(text).tolist()
+                new_rows.append({'hash': str(row.hash), 'source': source_type, 'embedding': emb})
             
-            new_idx_df = pd.DataFrame(new_rows)
-            idx_df = pd.concat([idx_df, new_idx_df]).drop_duplicates(['hash', 'source'], keep='last')
+            idx_df = pd.concat([idx_df, pd.DataFrame(new_rows)]).drop_duplicates(['hash', 'source'], keep='last')
             idx_df.reset_index(drop=True).to_feather(idx_path)
-            logger.info("Semantic Search: Updated embedding index on disk")
 
-        # 3. Clustering and Projection
-        universe_hashes = result_df['hash'].astype(str).tolist()
-        relevant_idx = idx_df[(idx_df.hash.isin(universe_hashes)) & (idx_df.source == source_type)]
-        
-        import numpy as np
+        # Phase 3: Math (UMAP + HDBSCAN)
+        relevant_idx = idx_df[(idx_df.hash.isin(result_df.hash.astype(str))) & (idx_df.source == source_type)]
         import umap
         import hdbscan
         
         embeddings = np.array(relevant_idx['embedding'].tolist())
-        logger.info(f"Semantic Search: Ready for Math Phase with {len(embeddings)} vectors")
+        n_pts = len(embeddings)
         
-        # Projection (UMAP)
-        n_neighbors = min(len(embeddings) - 1, 15)
+        # Project (Use cosine for text)
+        n_neighbors = min(n_pts - 1, 15)
         if n_neighbors < 2:
-            logger.info("Semantic Search: Set too small for UMAP, using random projection")
-            coords = np.random.rand(len(embeddings), 2) * 100
+            coords = np.random.rand(n_pts, 2) * 200
         else:
-            logger.info(f"Semantic Search: Running UMAP (n_neighbors={n_neighbors})...")
-            reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=0.1, n_components=2, random_state=42)
+            reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=0.1, n_components=2, metric='cosine', random_state=42)
             coords = reducer.fit_transform(embeddings)
-            logger.info("Semantic Search: UMAP completed")
 
-        # Clustering (HDBSCAN)
-        min_cluster_size = min(len(embeddings), 5)
-        if len(embeddings) < 5:
-            logger.info("Semantic Search: Set too small for HDBSCAN, labeling as single cluster")
-            cluster_labels = np.zeros(len(embeddings))
+        # Cluster
+        min_cluster = max(2, min(n_pts, 5))
+        if n_pts < min_cluster:
+            cluster_labels = np.zeros(n_pts)
         else:
-            logger.info(f"Semantic Search: Running HDBSCAN (min_cluster={min_cluster_size})...")
-            clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size, gen_min_span_tree=True)
-            cluster_labels = clusterer.fit_predict(coords)
-            logger.info("Semantic Search: HDBSCAN completed")
+            try:
+                clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster)
+                cluster_labels = clusterer.fit_predict(coords)
+            except:
+                cluster_labels = np.zeros(n_pts)
 
-        # 4. Result Formatting
-        logger.info("Semantic Search: Formatting final elements...")
+        # Phase 4: Thematic Naming & Formatting
+        stop_words = {'the', 'and', 'for', 'with', 'model', 'analysis', 'using', 'based', 'from', 'study', 'results', 'data', 'approach', 'system', 'research', 'paper', 'new', 'proposed'}
+        cluster_themes = {}
+        
+        # Pre-calculate themes
+        unique_cids = sorted([cid for cid in set(cluster_labels) if cid >= 0])
+        for cid in unique_cids:
+            indices = [i for i, l in enumerate(cluster_labels) if l == cid]
+            cluster_hashes = [relevant_idx.iloc[i].hash for i in indices]
+            cluster_titles = result_df[result_df.hash.astype(str).isin(cluster_hashes)].title.dropna().tolist()
+            
+            # Simple keyword extraction
+            words = []
+            for t in cluster_titles:
+                tokens = re.findall(r'\b[a-z]{4,}\b', t.lower())
+                words.extend([w for w in tokens if w not in stop_words])
+            
+            top_words = [w for w, _ in Counter(words).most_common(3)]
+            cluster_themes[cid] = ", ".join(top_words).title() if top_words else f"Constellation {cid}"
+
         elements = []
         current_year = datetime.now().year
         palette = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#0dcaf0', '#6610f2', '#fd7e14', '#20c997']
         
+        cluster_summary = []
+        for idx, cid in enumerate(unique_cids):
+            indices = [i for i, l in enumerate(cluster_labels) if l == cid]
+            cluster_hashes = [relevant_idx.iloc[i].hash for i in indices]
+            sample_titles = result_df[result_df.hash.astype(str).isin(cluster_hashes)].title.head(3).tolist()
+            cluster_summary.append({
+                'id': int(cid),
+                'number': idx + 1,
+                'name': cluster_themes[cid],
+                'count': len(indices),
+                'samples': [clean_latex(t) for t in sample_titles],
+                'color': palette[int(cid) % len(palette)]
+            })
+
         for i, (_, row_idx) in enumerate(relevant_idx.iterrows()):
-            h = row_idx.hash
-            meta_match = result_df[result_df.hash.astype(str) == h]
-            if meta_match.empty: continue
-            meta = meta_match.iloc[0]
+            matches = result_df[result_df.hash.astype(str) == row_idx.hash]
+            if matches.empty: continue
+            meta = matches.iloc[0]
             
-            cluster_id = int(cluster_labels[i])
-            color = palette[cluster_id % len(palette)] if cluster_id >= 0 else '#adb5bd'
-            
+            cid = int(cluster_labels[i])
             try: year = int(str(meta.year).split('.')[0])
             except: year = 2000
             
-            age_diff = max(0, current_year - year)
-            opacity = max(0.2, 1.0 - (age_diff / 25.0))
+            opacity = max(0.4, 1.0 - (max(0, current_year - year) / 30.0))
             
+            # Determine mapping number for display
+            c_num = ""
+            if cid >= 0:
+                for cs in cluster_summary:
+                    if cs['id'] == cid:
+                        c_num = cs['number']
+                        break
+
             elements.append({
                 'data': {
-                    'id': f"paper-{h}",
-                    'tag': str(meta.tag),
-                    'title': clean_latex(str(meta.title)),
-                    'authors': trim_author(str(meta.author)),
-                    'year': year,
-                    'cluster_id': cluster_id,
-                    'cluster_name': f"Constellation {cluster_id}" if cluster_id >= 0 else "Lone Star",
-                    'color': color,
+                    'id': f"paper-{row_idx.hash}", 'tag': str(meta.tag), 'title': clean_latex(str(meta.title)),
+                    'authors': trim_author(str(meta.author)), 'year': year, 'cluster_id': cid,
+                    'cluster_number': c_num,
+                    'cluster_name': cluster_themes.get(cid, "Lone Star"),
+                    'color': palette[cid % len(palette)] if cid >= 0 else '#adb5bd',
                     'opacity': opacity
                 },
-                'position': {'x': float(coords[i][0] * 50), 'y': float(coords[i][1] * 50)}
+                'position': {'x': float(coords[i][0] * 120), 'y': float(coords[i][1] * 120)}
             })
 
-        # Top hashes for export - force to strings and drop NaNs to avoid join errors
-        hash_list = result_df['hash'].dropna().astype(str).str[:8].unique()[:500]
-        top_hashes = "|".join([str(h) for h in hash_list])
-
-        logger.info(f"Semantic Search: Success! Returning {len(elements)} elements")
+        status = f'<i class="bi bi-stars me-2"></i> Galaxy mapped: {len(elements)} papers, {len(cluster_summary)} clusters.'
+        if verbosity == 'verbose':
+            status += f" (Omitted: {len(omitted_hashes)} | Embeddings: {len(to_embed)})"
 
         return {
-            "elements": elements,
-            "papers": len(result_df),
-            "authors": int(len(result_df['author'].unique())),
-            "hashes": top_hashes
+            "elements": elements, "papers": len(result_df), "omitted_count": len(omitted_hashes),
+            "omitted_reason": "No text extracts found for these papers.",
+            "hashes": "|".join(result_df['hash'].dropna().astype(str).str[:8].unique()[:500]),
+            "status_msg": status,
+            "clusters": cluster_summary
         }
-
-    except Exception as e:
-        logger.error(f"Semantic analysis error: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-        return {"error": str(e)}, 500
-
     except Exception as e:
         logger.error(f"Semantic analysis error: {e}")
         import traceback
@@ -1874,6 +1818,112 @@ def search_export_csv():
         return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
     except Exception as e:
         logger.error(f"Search export error: {e}")
+        return str(e), 500
+
+@bp.route('/semantic-export-csv')
+def semantic_export_csv():
+    raw_query = request.args.get('q', '').strip()
+    source_type = request.args.get('source', 'title')
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query: return "No query provided.", 400
+
+    try:
+        # 1. Get the data (This re-uses the semantic_data logic but returns a CSV)
+        # To avoid code duplication, we'd ideally refactor semantic_data, 
+        # but for a quick fix we can call it or replicate the core parts.
+        
+        # We'll re-run the universe resolution and clustering
+        # (It will be fast due to the embedding cache)
+        
+        # [Universe Resolution - Replicated from semantic_data]
+        df = lib.database
+        querex_part = ""; ripgrep_part = ""
+        if ' rg ' in raw_query.lower():
+            parts = re.split(r'\s+rg\s+', raw_query, flags=re.IGNORECASE, maxsplit=1)
+            querex_part = parts[0].strip(); ripgrep_part = parts[1].strip()
+            if querex_part.lower().startswith('q '): querex_part = querex_part[2:].strip()
+        elif raw_query.lower().startswith('q '): querex_part = raw_query[2:].strip()
+        elif raw_query.lower().startswith('rg '): ripgrep_part = raw_query[3:].strip()
+        else: querex_part = raw_query
+
+        querex_hashes = set()
+        if querex_part:
+            q_df = df.querex(f"select hash {querex_part}")
+            if isinstance(q_df, pd.DataFrame):
+                querex_hashes = set(q_df['hash'].dropna().astype(str))
+        else:
+            querex_hashes = set(df['hash'].dropna().astype(str))
+
+        rg_hashes = set()
+        if ripgrep_part:
+            is_regex = any(c in ripgrep_part for c in r".*+?^$|()[]{}")
+            args = ["-n", "-H", "--pcre2"] if is_regex else ["-n", "-H"]
+            rc, proc = lib.run_ripgrep(ripgrep_part, args)
+            for line in proc.stdout:
+                line = line.strip()
+                if not line or ':' not in line: continue
+                parts = line.split(':', 2)
+                h_prefix = Path(parts[0]).name[:10].upper()
+                for h in querex_hashes:
+                    if h.upper().startswith(h_prefix): rg_hashes.add(h)
+            universe_hashes = rg_hashes
+        else:
+            universe_hashes = querex_hashes
+
+        result_df = df[df['hash'].astype(str).isin(universe_hashes)].copy()
+        if result_df.empty: return "No matches found.", 400
+
+        # [Clustering - Replicated from semantic_data]
+        idx_path = lib.config_path / "semantic-embeddings.feather"
+        if not idx_path.exists(): return "No embeddings found. Run analysis in browser first.", 400
+        
+        idx_df = pd.read_feather(idx_path)
+        relevant_idx = idx_df[(idx_df.hash.isin(result_df.hash.astype(str))) & (idx_df.source == source_type)]
+        
+        if relevant_idx.empty: return "No cached embeddings for this set.", 400
+
+        import numpy as np
+        import umap
+        import hdbscan
+        
+        embeddings = np.array(relevant_idx['embedding'].tolist())
+        n_pts = len(embeddings)
+        
+        # Project & Cluster
+        n_neighbors = min(n_pts - 1, 15)
+        if n_neighbors < 2:
+            cluster_labels = np.zeros(n_pts)
+        else:
+            reducer = umap.UMAP(n_neighbors=n_neighbors, min_dist=0.1, n_components=2, random_state=42)
+            coords = reducer.fit_transform(embeddings)
+            min_cluster = min(n_pts, 5)
+            clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster)
+            cluster_labels = clusterer.fit_predict(coords)
+
+        # Map clusters back to result_df
+        hash_to_cluster = {str(row.hash): int(cluster_labels[i]) for i, (_, row) in enumerate(relevant_idx.iterrows())}
+        
+        result_df['constellation'] = result_df['hash'].astype(str).map(hash_to_cluster).fillna(-1).astype(int)
+        result_df['constellation'] = result_df['constellation'].apply(lambda x: f"Constellation {x}" if x >= 0 else "Lone Star")
+
+        # Reorder columns
+        cols = ['constellation', 'tag', 'author', 'title', 'year', 'publisher', 'journal', 'hash']
+        existing_cols = [c for c in cols if c in result_df.columns]
+        remaining = [c for c in result_df.columns if c not in existing_cols]
+        export_df = result_df[existing_cols + remaining]
+
+        # Filename
+        date_str = datetime.now().strftime("%m-%d")
+        clean_q = re.sub(r'[^a-zA-Z0-9]+', '-', raw_query).strip('-')[:30]
+        filename = f"arc-galaxy-{date_str}-{clean_q}.csv"
+
+        temp_path = Path("temp") / filename
+        export_df.to_csv(temp_path, index=False, encoding='utf-8-sig')
+        
+        return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"Semantic export error: {e}")
         return str(e), 500
 
 @bp.route('/qmd')

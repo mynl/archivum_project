@@ -30,6 +30,7 @@
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-advanced">Advanced Querexfuzz</a>
                 <a class="nav-link py-1 px-0 text-dark" href="#screens">Screen Guide</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-query">Query Page</a>
+                <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-network">Network & Discovery</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-ripgrep">Ripgrep (Full-Text)</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-reports">Report Studio</a>
                 {% if is_admin %}
@@ -69,6 +70,20 @@
                     <div class="p-3 border rounded bg-light h-100">
                         <h6 class="fw-bold text-warning"><i class="bi bi-link-45deg me-2"></i>Ref-Doc</h6>
                         <p class="small mb-0"><strong>Junction Table</strong><br>The bridge that links high-level tags to physical content hashes.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="p-3 border rounded bg-light h-100">
+                        <h6 class="fw-bold text-info"><i class="bi bi-clock-history me-2"></i>Read</h6>
+                        <p class="small mb-0"><strong>Read History</strong><br>Tracks timestamps, view counts, and origin URLs (referrers) for every document opened.</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="p-3 border rounded bg-light h-100">
+                        <h6 class="fw-bold text-success"><i class="bi bi-cpu me-2"></i>Semantic Cache</h6>
+                        <p class="small mb-0"><strong>Embedding Cache</strong><br>Stores high-dimensional vectors for papers, enabling instant re-analysis and galaxy mapping without re-encoding.</p>
                     </div>
                 </div>
             </div>
@@ -144,9 +159,38 @@
                 <p>The default landing page for searching your library.</p>
                 <ul>
                     <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type.</li>
-                    <li><strong>View Modes</strong>: Toggle between <strong>List</strong> (rich snippets) and <strong>Table</strong> (high density).</li>
-                    <li><strong>Abstracts</strong>: Click the tag to open the PDF. Hover to see the abstract if available.</li>
-                    <li><strong>Export</strong>: (Admin only) Generate standalone HTML reports of your search results using Quarto.</li>
+                    <li><strong>Quick Actions</strong>:
+                        <ul>
+                            <li><strong>Recent</strong>: Dropdown to quickly view the last 50, 100, or 250 items added.</li>
+                            <li><strong>Read</strong>: Quick access to your reading history, ordered by most recent.</li>
+                            <li><strong>Random</strong>: Discovers papers using a random 2-digit hex hash prefix.</li>
+                        </ul>
+                    </li>
+                    <li><strong>View Modes</strong>: Toggle between <strong>List</strong>, <strong>Verbose</strong> (all metadata), and <strong>Table</strong>.</li>
+                    <li><strong>CSV Export</strong>: Download your current search results as an Excel-compatible CSV file.</li>
+                </ul>
+            </div>
+
+            <div id="screen-network" class="mb-4">
+                <h5 class="fw-bold"><i class="bi bi-share me-2"></i>Network & Discovery</h5>
+                <p>Advanced visualization modes for exploring connections and thematic clusters.</p>
+                
+                <h6 class="fw-bold text-primary small">1. Social Graph (Co-Authorship)</h6>
+                <p class="small">Maps the "Social Network" of your library. Nodes represent authors, and edges represent papers they have co-authored.</p>
+                <ul class="small">
+                    <li><strong>Weighting</strong>: Author nodes are sized by the total number of papers they have in the current search universe.</li>
+                    <li><strong>Connectivity</strong>: Edges connect authors who appear on the same paper. Edge thickness indicates the number of collaborations.</li>
+                    <li><strong>Interaction</strong>: Click an author to see their papers. Double-click to "Rebase" the graph onto that author.</li>
+                </ul>
+
+                <h6 class="fw-bold text-success small">2. Semantic Galaxy (Thematic Clustering)</h6>
+                <p class="small">Uses Machine Learning to project your papers into a 2D "Galaxy" where distance represents semantic similarity.</p>
+                <ul class="small">
+                    <li><strong>Embedding</strong>: Papers are converted into high-dimensional vectors (384-D) using the <code>all-MiniLM-L6-v2</code> transformer model.</li>
+                    <li><strong>Projection (UMAP)</strong>: These vectors are flattened into 2D coordinates using <strong>UMAP</strong>, preserving local and global structures.</li>
+                    <li><strong>Clustering (HDBSCAN)</strong>: <strong>HDBSCAN</strong> automatically identifies dense "Constellations" of related papers.</li>
+                    <li><strong>Lone Stars</strong>: Points colored grey represent "Noise"—papers that don't statistically fit into any specific cluster.</li>
+                    <li><strong>Sources</strong>: Analysis can be run against <strong>Titles</strong> or the first 2,000 characters of <strong>Full Text</strong> extracts.</li>
                 </ul>
             </div>
 

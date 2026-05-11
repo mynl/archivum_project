@@ -20,15 +20,45 @@
     </div>
 
     <!-- Standardized Buttons Row -->
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
-        <!-- Main Actions (Separate) -->
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <!-- Main Actions -->
         <button id="social-btn" class="btn btn-primary px-4 fw-bold shadow-sm" onclick="executeSearch('social')">
             Social
         </button>
-        <button id="semantic-btn" class="btn btn-success px-4 fw-bold shadow-sm" onclick="executeSearch('semantic')">
-            Semantic
-        </button>
-        
+
+        <div class="btn-group shadow-sm">
+            <button id="semantic-btn" class="btn btn-success px-4 fw-bold" onclick="executeSearch('semantic')">
+                Semantic (Title)
+            </button>
+            <button type="button" class="btn btn-success dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu shadow-sm">
+                <li><h6 class="dropdown-header text-uppercase small pb-1">Analysis Source</h6></li>
+                <li>
+                    <div class="dropdown-item py-1">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="source-select" id="radio-title" value="title" checked onclick="setSemanticSource('title')">
+                            <label class="form-check-label small w-100 cursor-pointer" for="radio-title">
+                                <i class="bi bi-fonts me-1"></i> Title & Metadata
+                            </label>
+                        </div>
+                    </div>
+                </li>
+                <li>
+                    <div class="dropdown-item py-1">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="source-select" id="radio-text" value="text" onclick="setSemanticSource('text')">
+                            <label class="form-check-label small w-100 cursor-pointer" for="radio-text">
+                                <i class="bi bi-file-text me-1"></i> Full Text (2k chars)
+                            </label>
+                        </div>
+                    </div>
+                </li>
+            </ul>
+        </div>
+        <input type="hidden" id="semantic-source-input" value="title">
+
         {% set id_prefix = 'net' %}
         {% set input_id = 'network-search' %}
         {% include "components/export_button.html" with context %}
@@ -38,18 +68,18 @@
             <button class="btn btn-outline-secondary px-3 shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-gear-fill me-1"></i> Options
             </button>
-            <ul class="dropdown-menu shadow-sm p-3" style="min-width: 250px;">
-                <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">Semantic Source</h6></li>
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm p-3" style="min-width: 250px;">
+                <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">Verbosity</h6></li>
                 <li>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="semantic-source" id="src-title" value="title" checked>
-                        <label class="form-check-label small" for="src-title">Title & Metadata</label>
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-minimal" value="minimal" checked>
+                        <label class="form-check-label small" for="verb-minimal">Minimal</label>
                     </div>
                 </li>
                 <li>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="semantic-source" id="src-text" value="text">
-                        <label class="form-check-label small" for="src-text">Full Text (2k chars)</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-verbose" value="verbose">
+                        <label class="form-check-label small" for="verb-verbose">Verbose</label>
                     </div>
                 </li>
             </ul>
@@ -60,6 +90,10 @@
         </div>
     </div>
 
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div id="network-status-area" class="small text-muted font-monospace overflow-auto bg-light border rounded p-2" style="height: 5rem; width: 60%;">
+            Enter "q querex rg regex" to begin analysis...
+        </div>
         <div id="network-stats" class="text-end text-secondary small fw-medium">
             <!-- Stats will be injected here -->
         </div>
@@ -119,6 +153,27 @@
         </div>
     </div>
 
+    <!-- Cluster Summary (Thematic Overview) -->
+    <div id="cluster-summary-container" class="mt-4 d-none">
+        <div class="card shadow-sm border-0 border-start border-success border-4">
+            <div class="card-header bg-white py-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-collection me-2"></i>Thematic Constellations</h6>
+            </div>
+            <div class="card-body p-0 overflow-auto" style="max-height: 400px;">
+                <table class="table table-hover table-sm mb-0 align-middle">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th class="ps-3" style="width: 250px;">Theme</th>
+                            <th class="text-center" style="width: 100px;">Papers</th>
+                            <th>Representative Samples</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cluster-summary-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
     <!-- Details Table (Visible in Semantic Mode) -->
     <div id="semantic-details" class="mt-4 d-none">
         <div class="card shadow-sm border-0">
@@ -131,7 +186,7 @@
                     <thead class="table-light sticky-top">
                         <tr>
                             <th class="ps-3" style="width: 100px;">Tag</th>
-                            <th style="width: 150px;">Constellation</th>
+                            <th class="text-center" style="width: 60px;">ID</th>
                             <th>Author</th>
                             <th>Title</th>
                             <th class="text-center" style="width: 60px;">Year</th>
@@ -163,21 +218,47 @@
         input.focus();
     }
 
+    function executeReadHistory() {
+        const input = document.getElementById('network-search');
+        if (input) {
+            input.value = `q where read_count > 0 order by -last_read`;
+            executeSearch('social');
+        }
+    }
+
+    function setSemanticSource(source) {
+        const input = document.getElementById('semantic-source-input');
+        const btn = document.getElementById('semantic-btn');
+        input.value = source;
+        
+        const label = source === 'title' ? 'Semantic (Title)' : 'Semantic (Text)';
+        btn.innerText = label;
+    }
+
     async function executeSearch(mode) {
         const query = document.getElementById('network-search').value.trim();
         if (!query) return;
 
         const btn = mode === 'social' ? document.getElementById('social-btn') : document.getElementById('semantic-btn');
         const loader = document.getElementById('graph-loader');
-        const sourceInput = document.querySelector('input[name="semantic-source"]:checked');
-        const source = sourceInput ? sourceInput.value : 'title';
+        
+        // Use hidden input for semantic source
+        const source = document.getElementById('semantic-source-input').value;
+        
+        const verbosityInput = document.querySelector('input[name="verbosity"]:checked');
+        const verbosity = verbosityInput ? verbosityInput.value : 'minimal';
+        
         const semanticTable = document.getElementById('semantic-details');
         const socialControls = document.getElementById('social-controls');
         const cyContainer = document.getElementById('cy-container');
         const infoContainer = document.getElementById('info-container');
+        const statusArea = document.getElementById('network-status-area');
         
         btn.disabled = true;
         loader.classList.remove('d-none');
+        
+        const methodLabel = mode === 'social' ? 'Social Connections' : (source === 'title' ? 'Semantic (Title)' : 'Semantic (Text)');
+        statusArea.innerHTML = `<i class="bi bi-cpu me-2"></i> Initializing for ${methodLabel}...`;
 
         // Toggle UI elements based on mode
         if (mode === 'semantic') {
@@ -194,13 +275,17 @@
 
         try {
             const url = mode === 'social' 
-                ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}`
-                : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}`;
+                ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}&verbosity=${verbosity}`
+                : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}&verbosity=${verbosity}`;
             
             const response = await fetch(url);
             const data = await response.json();
             currentData = { ...data, mode: mode };
             
+            if (data.status_msg) {
+                statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${data.status_msg}<br>` + statusArea.innerHTML;
+            }
+
             if (data.error) {
                 alert("Error: " + data.error);
             } else if (data.papers === 0) {
@@ -212,13 +297,18 @@
                 } else {
                     renderSemanticGalaxy(data);
                     populateGalaxyTable(data.elements);
+                    populateClusterSummary(data.clusters || []);
                 }
                 
                 // Update stats
                 const authorCount = data.nodes ? data.nodes.length : (data.authors || 0);
-                document.getElementById('network-stats').innerHTML = 
-                    `<span class="badge bg-light text-dark border me-2">${data.papers} papers</span>` +
-                    `<span class="badge bg-light text-dark border">${authorCount} authors</span>`;
+                let statsHtml = `<span class="badge bg-light text-dark border me-2">${data.papers} papers</span>` +
+                                `<span class="badge bg-light text-dark border">${authorCount} authors</span>`;
+                
+                if (data.omitted_count > 0) {
+                    statsHtml += ` <span class="badge bg-warning-subtle text-warning-emphasis border ms-2" title="${data.omitted_reason}">${data.omitted_count} Omitted</span>`;
+                }
+                document.getElementById('network-stats').innerHTML = statsHtml;
                 
                 // Update export button
                 const exportBtn = document.getElementById('net-export-btn');
@@ -238,6 +328,7 @@
 
         } catch (err) {
             console.error(err);
+            statusArea.innerHTML = `<span class="text-danger">Analysis failed: ${err.message}</span>`;
             alert("Analysis failed. See console for details.");
         } finally {
             btn.disabled = false;
@@ -369,7 +460,7 @@
             ],
             layout: {
                 name: 'preset', 
-                padding: 60
+                padding: 100
             }
         });
 
@@ -390,9 +481,9 @@
             html += `
                 <tr id="row-${d.id}" class="${rowClass}" onclick="focusPaper('${d.id}')" style="cursor: pointer;">
                     <td class="ps-3"><code class="small">${d.tag}</code></td>
-                    <td>
-                        <span class="badge" style="background-color: ${d.color}; color: ${d.cluster_id >= 0 ? '#fff' : '#333'}">
-                            ${d.cluster_name}
+                    <td class="text-center">
+                        <span class="badge rounded-pill" style="background-color: ${d.color}; color: ${d.cluster_id >= 0 ? '#fff' : '#333'}">
+                            ${d.cluster_number || (d.cluster_id < 0 ? '?' : '!')}
                         </span>
                     </td>
                     <td class="small text-truncate" style="max-width: 150px;">${d.authors}</td>
@@ -402,6 +493,34 @@
             `;
         });
         tbody.innerHTML = html;
+    }
+
+    function populateClusterSummary(clusters) {
+        const tbody = document.getElementById('cluster-summary-body');
+        if (!tbody) return;
+        
+        let html = '';
+        clusters.forEach(c => {
+            const samples = c.samples.map(s => `<li class="x-small mb-1">${s}</li>`).join('');
+            html += `
+                <tr>
+                    <td class="ps-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge rounded-pill" style="background-color: ${c.color}">${c.number}</span>
+                            <span class="fw-bold">${c.name}</span>
+                        </div>
+                    </td>
+                    <td class="text-center fw-bold">${c.count}</td>
+                    <td>
+                        <ul class="list-unstyled mb-0 text-muted small">
+                            ${samples}
+                        </ul>
+                    </td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = html;
+        document.getElementById('cluster-summary-container').classList.remove('d-none');
     }
 
     function focusPaper(nodeId) {
@@ -520,7 +639,7 @@
                 <p class="text-muted small mb-3">${data.authors}</p>
                 <div class="mb-4">
                     <span class="badge" style="background-color: ${data.color}; color: ${data.cluster_id >= 0 ? '#fff' : '#333'}">
-                        ${data.cluster_name}
+                        ${data.cluster_number ? '#' + data.cluster_number + ': ' : ''}${data.cluster_name}
                     </span>
                     <span class="badge bg-light text-dark border">${data.year}</span>
                 </div>
@@ -547,6 +666,21 @@
             initSearchInput('network-search');
         }
     });
+
+    // Override component export logic for Network-specific features
+    window.handleExportToCSV = function(idPrefix, inputId) {
+        const input = document.getElementById(inputId);
+        const query = input ? input.value : '';
+        
+        if (currentData && currentData.mode === 'semantic') {
+            const source = document.getElementById('semantic-source-input').value;
+            const url = `{{ url_for('main.semantic_export_csv') }}?q=${encodeURIComponent(query)}&source=${source}`;
+            window.location.href = url;
+        } else {
+            const url = `{{ url_for('main.rg_export_csv') }}?q=${encodeURIComponent(query)}`;
+            window.location.href = url;
+        }
+    };
 </script>
 
 <style>
