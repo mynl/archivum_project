@@ -11,6 +11,12 @@
 8. fix hanging indent on iphone
 9. favorites and last accessed
 
+  You can now use querex to leverage this data:
+   * q order by -last_read: See your most recently read papers.
+   * q where read_count > 0 order by -last_read: Find your most frequently consulted documents.
+   * q last_read == None: Find papers you haven't read yet.
+
+
 
 
 

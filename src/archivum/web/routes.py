@@ -1128,6 +1128,10 @@ def view_hash(h):
     lib = LibraryContext.get()
     path = get_path_for_hash(lib, h)
     if not path or not Path(path).exists(): abort(404)
+    
+    # Record read
+    lib.record_read(h, caller=request.referrer or "")
+    
     return send_file(path, mimetype='application/pdf', as_attachment=False)
 
 def get_path_for_tag(lib, tag):
@@ -1142,6 +1146,13 @@ def get_path_for_tag(lib, tag):
 @bp.route('/view/<tag>')
 def view(tag):
     lib = LibraryContext.get()
+    
+    # Resolve hash for recording
+    doc_links = lib.ref_doc_df[lib.ref_doc_df.tag == tag]
+    if not doc_links.empty:
+        h = doc_links.iloc[0].hash
+        lib.record_read(h, caller=request.referrer or "")
+
     path = get_path_for_tag(lib, tag)
     if not path or not Path(path).exists(): abort(404)
     return send_file(path, mimetype='application/pdf', as_attachment=False)

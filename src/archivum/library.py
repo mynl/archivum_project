@@ -91,7 +91,7 @@ class Library(LibraryBase):
         self._observer: Optional[Observer] = None
 
         # Initialize mtimes for core files
-        for f in ["ref.feather", "doc.feather", "ref-doc.feather"]:
+        for f in ["ref.feather", "doc.feather", "ref-doc.feather", "read.feather"]:
             p = self.config_path / f
             if p.exists():
                 self._last_mtimes[f] = p.stat().st_mtime
@@ -242,12 +242,13 @@ class Library(LibraryBase):
         self._config_df = pd.DataFrame()
         self._doc_df = pd.DataFrame()
         self._ref_df = pd.DataFrame()
+        self._read_df = pd.DataFrame()
         self._ref_doc_df = pd.DataFrame()
         # fully blown up docs x refs x authors
         self._full_df = pd.DataFrame()
 
         # Update mtimes so we don't immediately trigger another reload
-        for f in ["ref.feather", "doc.feather", "ref-doc.feather"]:
+        for f in ["ref.feather", "doc.feather", "ref-doc.feather", "read.feather"]:
             p = self.config_path / f
             if p.exists():
                 self._last_mtimes[f] = p.stat().st_mtime
@@ -266,7 +267,7 @@ class Library(LibraryBase):
         """Return a dictionary containing status information for the library."""
         import datetime
         
-        core_files = ["ref.feather", "doc.feather", "ref-doc.feather"]
+        core_files = ["ref.feather", "doc.feather", "ref-doc.feather", "read.feather"]
         file_status = []
         
         for f in core_files:
@@ -373,21 +374,73 @@ class Library(LibraryBase):
         return self._ref_doc_df
 
     @property
+    def read_df(self):
+        """Return the read history df, loading if needed."""
+        if self._read_df.empty:
+            p = self.config_path / "read.feather"
+            if p.exists():
+                try:
+                    self._read_df = pd.read_feather(p)
+                except Exception as e:
+                    logger.error(f"Error loading read.feather: {e}")
+                    self._read_df = pd.DataFrame(columns=['hash', 'last_read', 'read_count', 'last_caller'])
+            else:
+                self._read_df = pd.DataFrame(columns=['hash', 'last_read', 'read_count', 'last_caller'])
+        return self._read_df
+
+    def record_read(self, file_hash: str, caller: str = ""):
+        """Record a read event for a specific file hash."""
+        if not file_hash:
+            return
+
+        df = self.read_df
+        now = pd.Timestamp.now()
+        
+        if file_hash in df['hash'].values:
+            idx = df[df['hash'] == file_hash].index[0]
+            df.at[idx, 'last_read'] = now
+            df.at[idx, 'read_count'] = int(df.at[idx, 'read_count']) + 1
+            df.at[idx, 'last_caller'] = caller
+        else:
+            new_row = pd.DataFrame([{
+                'hash': file_hash,
+                'last_read': now,
+                'read_count': 1,
+                'last_caller': caller
+            }])
+            self._read_df = pd.concat([df, new_row], ignore_index=True)
+
+        # Trigger internal reset for database merge next time
+        self._database = pd.DataFrame()
+        self.save()
+
+    @property
     def database(self):
-        """Merged database, with exploded authors."""
+        """Merged database, with exploded authors and read history."""
         if self._database.empty:
             if self.ref_df.empty:
                 return self._database
 
             # Use hash and version for joining
-            self._database = (
+            merged = (
                 self.ref_doc_df.merge(self.ref_df, on="tag", how="right")
             ).merge(self.doc_df, on=["hash", "version"], how="left")
+            
+            # Join with read history
+            if not self.read_df.empty:
+                merged = merged.merge(self.read_df, on="hash", how="left")
+                if 'read_count' in merged.columns:
+                    merged['read_count'] = merged['read_count'].fillna(0).astype(int)
 
             for c in ["node", "links", "size"]:
-                if c in self._database.columns:
-                    self._database[c] = self._database[c].fillna(0)
-            self._database['hash'] = self._database['hash'].str[:8]
+                if c in merged.columns:
+                    merged[c] = merged[c].fillna(0)
+            
+            # Note: We don't truncate hash here because querex might need it for filtering,
+            # and truncating before merging or using it in query logic is risky.
+            # But the display code usually handles the truncation.
+            
+            self._database = merged
             config_file = (
                 files("archivum.configurations") / "querexfuzz-database-config.yaml"
             )
@@ -729,7 +782,8 @@ class Library(LibraryBase):
         files_to_save = {
             "ref.feather": ref_to_save,
             "doc.feather": doc_to_save,
-            "ref-doc.feather": ref_doc_to_save
+            "ref-doc.feather": ref_doc_to_save,
+            "read.feather": self.read_df
         }
 
         # 2. BACKUP & VALIDATE

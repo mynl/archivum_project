@@ -40,6 +40,11 @@
             </ul>
         </div>
 
+        <button class="btn btn-outline-primary px-3 shadow-sm" 
+                onclick="executeReadHistory()">
+            <i class="bi bi-book me-1"></i> Read
+        </button>
+
         <button class="btn btn-outline-secondary px-3 shadow-sm" 
                 onclick="executeRandom()">
             <i class="bi bi-dice-5 me-1"></i> Random
@@ -117,6 +122,14 @@
         const input = document.getElementById('search-input');
         if (input) {
             input.value = `q top ${limit} recent`;
+            htmx.trigger(input, 'keyup');
+        }
+    }
+
+    function executeReadHistory() {
+        const input = document.getElementById('search-input');
+        if (input) {
+            input.value = `q top 50 select last_read, read_count, * where read_count > 0 order by -last_read`;
             htmx.trigger(input, 'keyup');
         }
     }
