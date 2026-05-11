@@ -1532,7 +1532,7 @@ def semantic_data():
             h = str(row.hash)
             match = idx_df[(idx_df.hash == h) & (idx_df.source == source_type)]
             if match.empty:
-                if source_type == 'text':
+                if source_type in ['text', 'text-4k']:
                     # Check for extract existence
                     from ..document import Document
                     doc = Document(lib.abspath(row.path))
@@ -1553,12 +1553,13 @@ def semantic_data():
             new_rows = []
             for row in to_embed:
                 text = ""
-                if source_type == 'text':
+                if source_type in ['text', 'text-4k']:
                     from ..document import Document
                     doc = Document(lib.abspath(row.path))
                     doc.hash = str(row.hash)
                     txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
-                    text = txt_p.read_text(encoding='utf-8', errors='ignore')[:2000]
+                    window = 4000 if source_type == 'text-4k' else 2000
+                    text = txt_p.read_text(encoding='utf-8', errors='ignore')[:window]
                 else:
                     text = f"{row.title}. {row.author}."
                 
