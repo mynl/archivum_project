@@ -1807,6 +1807,61 @@ def rg_export_csv():
     
     return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
 
+@bp.route('/search-export-csv')
+def search_export_csv():
+    raw_query = request.args.get('q', '').strip()
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query:
+        return "No query provided.", 400
+
+    # Determine search type and actual query string
+    lower_query = raw_query.lower()
+    if lower_query.startswith('q '):
+        search_type = 'q'
+        query = raw_query[2:].strip()
+    elif lower_query.startswith('f '):
+        search_type = 'f'
+        query = raw_query[2:].strip()
+    else:
+        search_type = 'f'
+        query = raw_query
+
+    try:
+        if search_type == 'f':
+            if query[0] != "!" and query.find("~") == -1:
+                # Fuzzy search, export all matches (no top 50 limit)
+                query_expr = f"select * tag ~ {query}"
+            else:
+                query_expr = query
+                if "select" not in query_expr.lower():
+                    query_expr = "select * " + query_expr
+                # We don't force 'top 50' or 'recent' for export unless the user did
+        else:
+            query_expr = query
+            if "select" not in query_expr.lower():
+                query_expr = "select * " + query_expr
+
+        df = lib.database
+        export_df = df.querex(query_expr)
+
+        if not isinstance(export_df, pd.DataFrame) or export_df.empty:
+            return "No matches found to export.", 400
+
+        # Filename generation: arc-MM-DD-shortened-query.csv
+        date_str = datetime.now().strftime("%m-%d")
+        clean_q = re.sub(r'[^a-zA-Z0-9]+', '-', raw_query).strip('-')[:30]
+        filename = f"arc-{date_str}-{clean_q}.csv"
+
+        # Save to temp and send
+        temp_path = Path("temp") / filename
+        export_df.to_csv(temp_path, index=False, encoding='utf-8-sig') # BOM for Excel
+        
+        return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"Search export error: {e}")
+        return str(e), 500
+
 @bp.route('/qmd')
 def qmd_page():
     lib = LibraryContext.get()

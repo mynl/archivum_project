@@ -146,6 +146,10 @@ The web interface (`archivum serve`) has been significantly enhanced to provide 
 - **Streaming Ripgrep**: Full-text results are now streamed to the browser as they are found, providing near-instant feedback even for massive libraries. Optimized with `--line-buffered` and metadata caching.
 - **Standalone Tag Editor**: A new "Edit" tab with a high-density, live-filterable sidebar for selecting tags and editing BibTeX metadata directly in the browser.
 - **Search History**: Added terminal-style history (Up/Down arrows) and a "Clear" icon to all search inputs.
+- **Query Shortcuts**:
+    - **Recent Dropdown**: Quick access to 50, 100, or 250 most recent items.
+    - **Random Button**: Discovers entries using a random 2-digit hex hash prefix (e.g., `hash ~ ^AA`).
+- **CSV Export**: Standardized CSV export for both Query results and Ripgrep matches.
 - **Enhanced Status**: Full visibility into the underlying `.feather` database files, including disk modification times and synchronization status.
 - **Mobile Responsive**: Fully collapsible navbar and reflowing control bars for use on phones and tablets.
 

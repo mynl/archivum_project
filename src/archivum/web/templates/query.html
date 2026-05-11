@@ -26,9 +26,23 @@
     <!-- Standardized Buttons Row -->
     <div class="d-flex flex-wrap align-items-center gap-2 mb-4">
         <!-- Main Actions -->
-        <button class="btn btn-primary px-3 shadow-sm" 
-                onclick="executeRecent()">
-            Recent
+        <div class="btn-group shadow-sm">
+            <button class="btn btn-primary px-3" onclick="executeRecent(50)">
+                Recent
+            </button>
+            <button type="button" class="btn btn-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu shadow-sm">
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(50)">50 Recent</a></li>
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(100)">100 Recent</a></li>
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(250)">250 Recent</a></li>
+            </ul>
+        </div>
+
+        <button class="btn btn-outline-secondary px-3 shadow-sm" 
+                onclick="executeRandom()">
+            <i class="bi bi-dice-5 me-1"></i> Random
         </button>
 
         {% if is_admin %}
@@ -38,10 +52,13 @@
         </button>
         {% endif %}
 
-        <!-- Placeholder for Export (Standardized across views) -->
-        <div id="export-container" class="btn-group shadow-sm">
-             <button class="btn btn-outline-info px-4 opacity-50" disabled>Export</button>
-        </div>
+        <!-- Export Button -->
+        <button id="search-export-btn" 
+                class="btn btn-outline-info px-3 shadow-sm"
+                onclick="exportQueryToCSV()"
+                title="Export results to CSV">
+            <i class="bi bi-file-earmark-spreadsheet me-1"></i> CSV
+        </button>
 
         <!-- Options Dropdown -->
         <div class="dropdown">
@@ -96,12 +113,29 @@
         }
     }
 
-    function executeRecent() {
+    function executeRecent(limit = 50) {
         const input = document.getElementById('search-input');
         if (input) {
-            input.value = 'q top 20 recent';
+            input.value = `q top ${limit} recent`;
             htmx.trigger(input, 'keyup');
         }
+    }
+
+    function executeRandom() {
+        const input = document.getElementById('search-input');
+        if (input) {
+            const hex = Math.floor(Math.random() * 256).toString(16).padStart(2, '0').toUpperCase();
+            input.value = `q top 25 select year, * hash ~ ^${hex} order by -year`;
+            htmx.trigger(input, 'keyup');
+        }
+    }
+
+    function exportQueryToCSV() {
+        const input = document.getElementById('search-input');
+        const query = input ? input.value.trim() : '';
+        if (!query) return;
+        
+        window.location.href = `{{ url_for('main.search_export_csv') }}?q=${encodeURIComponent(query)}`;
     }
 
     // Deep-linking support
