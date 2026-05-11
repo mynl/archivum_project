@@ -596,16 +596,19 @@ def author_search(author):
         if not isinstance(result, pd.DataFrame):
             return f"Query error: {result}"
         
-        # Options dropdown items
-        def opt_link(mode, label):
-            active = "active" if view_mode == mode else ""
+        # Add header with Author name, Export, and Options
+        def render_radio(mode, label):
+            checked = 'checked' if view_mode == mode else ''
             return (
-                f"<li><a class='dropdown-item small {active}' href='#' "
-                f"hx-get=\"{url_for('main.author_search', author=author, view_mode=mode)}\" "
-                f"hx-target='#author-results'>{label}</a></li>"
+                f"<li><div class='dropdown-item py-1'><div class='form-check'>"
+                f"  <input class='form-check-input' type='radio' name='author-view-mode' "
+                f"         id='author-mode-{mode}' value='{mode}' {checked} "
+                f"         hx-get=\"{url_for('main.author_search', author=author, view_mode=mode)}\" "
+                f"         hx-target='#author-results'> "
+                f"  <label class='form-check-label small w-100 cursor-pointer' for='author-mode-{mode}'>{label}</label>"
+                f"</div></div></li>"
             )
 
-        # Add header with Author name, Export, and Options
         header_oob = (
             f"<div id='author-results-header' hx-swap-oob='true' class='d-flex flex-wrap align-items-center gap-2 mb-4'>"
             f"  <h4 class='mb-0 fw-bold me-auto'><i class='bi bi-person-fill me-2'></i>{author}</h4>"
@@ -616,11 +619,11 @@ def author_search(author):
             f"    <button class='btn btn-outline-secondary px-3 shadow-sm dropdown-toggle' type='button' data-bs-toggle='dropdown'>"
             f"      <i class='bi bi-gear-fill me-1'></i> Options"
             f"    </button>"
-            f"    <ul class='dropdown-menu dropdown-menu-end shadow-sm'>"
+            f"    <ul class='dropdown-menu dropdown-menu-end shadow-sm' style='min-width: 200px;'>"
             f"      <li><h6 class='dropdown-header text-uppercase small pb-1'>View Mode</h6></li>"
-            f"      {opt_link('list', 'Dense List')}"
-            f"      {opt_link('verbose', 'Verbose')}"
-            f"      {opt_link('table', 'Table')}"
+            f"      {render_radio('list', 'Dense List')}"
+            f"      {render_radio('verbose', 'Verbose')}"
+            f"      {render_radio('table', 'Table')}"
             f"    </ul>"
             f"  </div>"
             f"</div>"

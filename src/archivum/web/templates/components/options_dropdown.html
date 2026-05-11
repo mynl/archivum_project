@@ -1,0 +1,54 @@
+<!-- Reusable Options Dropdown with Radio Buttons -->
+<div class="dropdown">
+    <button class="btn btn-outline-secondary px-3 shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+        <i class="bi bi-gear-fill me-1"></i> Options
+    </button>
+    <ul class="dropdown-menu dropdown-menu-end shadow-sm" style="min-width: 200px;">
+        <li><h6 class="dropdown-header text-uppercase small pb-1">View Mode</h6></li>
+        <li>
+            <div class="dropdown-item py-1">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="{{ id_prefix }}-view-mode" id="{{ id_prefix }}-mode-list" 
+                           value="list" {% if current_mode == 'list' %}checked{% endif %}
+                           hx-get="{{ base_url }}" 
+                           hx-include="{{ include_selector }}"
+                           hx-target="{{ target_selector }}"
+                           hx-vals='{"view_mode": "list"}'>
+                    <label class="form-check-label small w-100 cursor-pointer" for="{{ id_prefix }}-mode-list">
+                        Dense List
+                    </label>
+                </div>
+            </div>
+        </li>
+        <li>
+            <div class="dropdown-item py-1">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="{{ id_prefix }}-view-mode" id="{{ id_prefix }}-mode-verbose" 
+                           value="verbose" {% if current_mode == 'verbose' %}checked{% endif %}
+                           hx-get="{{ base_url }}" 
+                           hx-include="{{ include_selector }}"
+                           hx-target="{{ target_selector }}"
+                           hx-vals='{"view_mode": "verbose"}'>
+                    <label class="form-check-label small w-100 cursor-pointer" for="{{ id_prefix }}-mode-verbose">
+                        Verbose
+                    </label>
+                </div>
+            </div>
+        </li>
+        <li>
+            <div class="dropdown-item py-1">
+                <div class="form-check">
+                    <input class="form-check-input" type="radio" name="{{ id_prefix }}-view-mode" id="{{ id_prefix }}-mode-table" 
+                           value="table" {% if current_mode == 'table' %}checked{% endif %}
+                           hx-get="{{ base_url }}" 
+                           hx-include="{{ include_selector }}"
+                           hx-target="{{ target_selector }}"
+                           hx-vals='{"view_mode": "table"}'>
+                    <label class="form-check-label small w-100 cursor-pointer" for="{{ id_prefix }}-mode-table">
+                        Table
+                    </label>
+                </div>
+            </div>
+        </li>
+    </ul>
+</div>

@@ -48,11 +48,28 @@
         </div>
         <div class="title mb-1 {{ 'fw-bold fs-5' if row.is_book else 'fs-6' }}">"{{ row.title_display }}"</div>
         <div class="author text-muted small mb-2">{{ row.author_display }}</div>
+        
+        <!-- Dynamic Metadata Grid -->
+        {% set skip_keys = ['tag', 'title', 'author', 'year', 'journal', 'publisher', 'hash', 'path', 'is_book', 'title_display', 'author_display', 'year_display', 'hash_display', 'querex', 'version', 'type', 'node', 'links', 'suffix', 'mod', 'create', 'access', 'last_caller'] %}
+        <div class="metadata-grid d-flex flex-wrap gap-2 mb-2">
+            {% for key, value in row.items() %}
+                {% if key not in skip_keys and value is not none and value|string|trim != '' and value|string|lower != 'nan' and value|string != 'NaT' %}
+                <div class="metadata-item bg-light border px-2 py-1 rounded small shadow-xs" style="font-size: 0.75rem;">
+                    <span class="text-muted text-uppercase fw-bold me-1" style="font-size: 0.65rem;">{{ key.replace('_', ' ') }}:</span>
+                    <span class="text-dark">{{ value }}</span>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+
         <div class="footer-meta d-flex gap-3 small text-muted border-top pt-2 mt-2">
             {% if row.get('journal') or row.get('publisher') %}
             <span><i class="bi bi-journal-text me-1"></i>{{ row.journal if row.get('journal') else row.publisher }}</span>
             {% endif %}
-            <span><i class="bi bi-hash me-1"></i><code>{{ row.hash_display if row.hash_display else 'N/A' }}</code></span>
+            {% if row.get('last_caller') %}
+            <span title="Last accessed from {{ row.last_caller }}"><i class="bi bi-link-45deg me-1"></i>{{ row.last_caller|replace('http://', '')|replace('https://', '')|truncate(30) }}</span>
+            {% endif %}
+            <span class="ms-auto"><i class="bi bi-hash me-1"></i><code>{{ row.hash_display if row.hash_display else 'N/A' }}</code></span>
         </div>
     </div>
     {% endfor %}

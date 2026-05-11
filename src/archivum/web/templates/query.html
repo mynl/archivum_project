@@ -66,36 +66,12 @@
         </button>
 
         <!-- Options Dropdown -->
-        <div class="dropdown">
-            <button class="btn btn-outline-secondary px-3 shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                <i class="bi bi-gear-fill me-1"></i> Options
-            </button>
-            <ul class="dropdown-menu shadow-sm p-3" style="min-width: 200px;">
-                <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">View Mode</h6></li>
-                <li>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="view_mode" id="view_list" value="list" checked 
-                               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
-                        <label class="form-check-label small" for="view_list">Dense List</label>
-                    </div>
-                </li>
-                <li>
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="view_mode" id="view_verbose" value="verbose"
-                               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
-                        <label class="form-check-label small" for="view_verbose">Verbose</label>
-                    </div>
-                </li>
-                <li>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="view_mode" id="view_table" value="table" 
-                               hx-get="{{ url_for('main.search') }}" hx-target="#results" hx-include="#search-input">
-                        <label class="form-check-label small" for="view_table">Table</label>
-                    </div>
-                </li>
-            </ul>
-        </div>
-
+        {% set id_prefix = 'query' %}
+        {% set base_url = url_for('main.search') %}
+        {% set include_selector = '#search-input' %}
+        {% set target_selector = '#results' %}
+        {% set current_mode = 'list' %}
+        {% include "components/options_dropdown.html" %}
         <div id="export-indicator" class="htmx-indicator d-flex align-items-center gap-1 text-success small ms-2">
             <div class="spinner-border spinner-border-sm" role="status"></div>
         </div>
