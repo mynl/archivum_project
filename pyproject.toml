@@ -45,7 +45,17 @@ classifiers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["archivum"]
+include = ["archivum", "archivum.*"]
+
+[tool.setuptools.package-data]
+archivum = [
+    "web/templates/*.html",
+    "web/templates/components/*.html",
+    "web/static/*",
+    "web/static/icon/*",
+    "web/static/img/*",
+    "configurations/*.yaml",
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "archivum.__version__" }
