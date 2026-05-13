@@ -11,6 +11,7 @@ from importlib.resources import files
 import json
 import logging
 import os
+import re
 import time
 from pathlib import Path
 import shutil
@@ -42,6 +43,10 @@ from .enhancements import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class LibraryImportBlocked(ValueError):
+    """Raised when an import analysis says the web ingest should not proceed."""
 
 
 class Library(LibraryBase):
@@ -1403,6 +1408,192 @@ class Library(LibraryBase):
             # actually update
             b.update_library()
             qd(self.stats(), caption="Updated library stats")
+
+    def import_staged_document(
+        self,
+        bibtex_text: str,
+        staged_document_path: Union[str, Path],
+        *,
+        known_hash: str | None = None,
+        source_label: str = "web-ingest",
+        extract_text: bool = True,
+    ):
+        """
+        Import one staged document through the same incremental BibTeX path as the CLI.
+
+        The edited BibTeX is the metadata source. This helper only injects the
+        staged document as a Mendeley-style ``file`` field so Bib2df_Incremental
+        can perform its normal author, tag, duplicate, sharding, and audit work.
+        """
+        importer = self._make_staged_document_importer(
+            bibtex_text,
+            staged_document_path,
+            known_hash=known_hash,
+            source_label=source_label,
+            write_audit=True,
+        )
+
+        analysis = importer.import_analysis()
+        self._raise_for_blocked_import(analysis, fallback_tag=self._first_bibtex_tag(bibtex_text))
+
+        if importer.ported_df.empty:
+            raise LibraryImportBlocked("Import did not produce any new entries.")
+
+        importer.update_library(save=True)
+
+        if extract_text:
+            new_paths = [
+                self.abspath(p)
+                for p in importer.doc_df.path.values
+                if str(p).lower().endswith(".pdf")
+            ]
+            if new_paths:
+                path_to_hash = {
+                    self.abspath(row.path): row.hash
+                    for _, row in importer.doc_df.iterrows()
+                }
+                extract_text_for_paths(
+                    new_paths,
+                    self.text_dir_path,
+                    extractor=self.config.extractor,
+                    workers=self.config.hash_workers,
+                    hashes=path_to_hash,
+                )
+
+        return importer
+
+    def preview_staged_document_import(
+        self,
+        bibtex_text: str,
+        staged_document_path: Union[str, Path],
+        *,
+        known_hash: str | None = None,
+        source_label: str = "web-ingest-preview",
+    ) -> dict:
+        """Return the BibTeX and analysis that the real staged import would produce."""
+        importer = self._make_staged_document_importer(
+            bibtex_text,
+            staged_document_path,
+            known_hash=known_hash,
+            source_label=source_label,
+            write_audit=False,
+        )
+        analysis = importer.import_analysis()
+        blocked_message = self._blocked_import_message(
+            analysis,
+            fallback_tag=self._first_bibtex_tag(bibtex_text),
+        )
+
+        if importer.ref_df.empty:
+            preview_bibtex = bibtex_text
+            final_tag = self._first_bibtex_tag(bibtex_text)
+        else:
+            preview_row = importer.ref_df.iloc[0]
+            preview_bibtex = dict_to_bibtex(preview_row)
+            final_tag = str(preview_row.tag)
+
+        return {
+            "bibtex": preview_bibtex,
+            "tag": final_tag,
+            "analysis": analysis,
+            "blocked": blocked_message is not None,
+            "blocked_message": blocked_message or "",
+        }
+
+    @staticmethod
+    def _first_bibtex_tag(bibtex_text: str) -> str:
+        from .bibtex import bibtex_to_dict
+
+        entries = bibtex_to_dict(bibtex_text)
+        if not entries:
+            return ""
+        return str(next(iter(entries.keys())))
+
+    def _make_staged_document_importer(
+        self,
+        bibtex_text: str,
+        staged_document_path: Union[str, Path],
+        *,
+        known_hash: str | None,
+        source_label: str,
+        write_audit: bool,
+    ):
+        from .bibtex import bibtex_to_dict
+        from .import_bibtex import Bib2df_Incremental
+
+        staged_document_path = Path(staged_document_path)
+        if not staged_document_path.exists() or not staged_document_path.is_file():
+            raise FileNotFoundError(f"Staged document not found: {staged_document_path}")
+
+        entries = bibtex_to_dict(bibtex_text)
+        if len(entries) != 1:
+            raise ValueError("Expected exactly one BibTeX entry.")
+
+        tag, data = next(iter(entries.items()))
+        data = data.copy()
+        data["tag"] = tag
+        staged_abs = staged_document_path.resolve()
+        suffix = staged_abs.suffix.lstrip(".") or "pdf"
+        data["file"] = f":{staged_abs.as_posix()}:{suffix}"
+
+        staging_dir = self.config_path / "staging"
+        staging_dir.mkdir(parents=True, exist_ok=True)
+        safe_tag = "".join(c if c.isalnum() or c in "-_" else "_" for c in tag) or "entry"
+        review_bib = staging_dir / f"{source_label}-{safe_tag}.bib"
+        review_text = dict_to_bibtex(data)
+        review_text = re.sub(
+            r"(?m)^\s*file\s*=\s*\{.*\},\s*$",
+            f"  file = {{{data['file']}}},",
+            review_text,
+        )
+        review_bib.write_text(review_text, encoding="utf-8")
+
+        importer = Bib2df_Incremental(
+            bibtex_file_path=review_bib,
+            doc_dir=staged_abs.parent,
+            reference_library=self,
+            add_hashes=True,
+            incremental=True,
+            fillna=True,
+            write_audit=write_audit,
+        )
+        importer.import_bibtex_file()
+
+        if known_hash:
+            self._apply_known_hash(importer, staged_abs, known_hash)
+
+        return importer
+
+    @staticmethod
+    def _apply_known_hash(importer, staged_abs: Path, known_hash: str):
+        doc_df = importer.doc_df
+        if doc_df.empty or "path" not in doc_df:
+            return
+        doc_match = doc_df.path.map(lambda p: Path(p) == staged_abs)
+        if doc_match.any():
+            importer._doc_df.loc[doc_match, "hash"] = known_hash
+
+    @classmethod
+    def _raise_for_blocked_import(cls, analysis: pd.DataFrame, fallback_tag: str):
+        blocked_message = cls._blocked_import_message(analysis, fallback_tag=fallback_tag)
+        if blocked_message:
+            raise LibraryImportBlocked(blocked_message)
+
+    @staticmethod
+    def _blocked_import_message(analysis: pd.DataFrame, *, fallback_tag: str) -> str | None:
+        blocked_actions = {"SKIP (Dupe)", "Merge/Warn"}
+        if not analysis.empty:
+            blocked = analysis[analysis["action"].isin(blocked_actions)]
+            if not blocked.empty:
+                row = blocked.iloc[0]
+                parts = [
+                    f"Import blocked: {row.get('action', 'duplicate warning')}",
+                    f"tag {row.get('tag', fallback_tag)}",
+                ]
+                if row.get("title"):
+                    parts.append(f"title {row.get('title')}")
+                return "; ".join(parts)
+        return None
 
     def history(self):
         """The history of how self was built from the audit files."""

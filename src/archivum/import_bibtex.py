@@ -163,6 +163,7 @@ class Bib2df_Incremental(LibraryBase):
         add_hashes=False,
         incremental=False,
         qd=None,
+        write_audit=True,
     ):
         """
         Read Path p into bibtex df, doc_dir is a Path to pdf files (must exist)
@@ -223,6 +224,7 @@ class Bib2df_Incremental(LibraryBase):
         self.remap_dashes = remap_dashes
         self._add_hashes = add_hashes or incremental
         self.incremental = incremental
+        self.write_audit = write_audit
         assert self.bibtex_file_path.exists(), "Bibtex file must exist"
         if self.doc_dir and not self.doc_dir.exists():
             logger.info("PDF directory is None or does not exist")
@@ -1396,6 +1398,8 @@ class Bib2df_Incremental(LibraryBase):
 
     def save_audit_file(self, df, suffix):
         """Save df audit file with a standard filename."""
+        if not self.write_audit:
+            return
         fn = self.bibtex_file_path.stem + suffix + ".csv"
         p = self._audit_dir_path / fn
         df.to_csv(p, encoding="utf-8")

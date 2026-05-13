@@ -223,8 +223,11 @@
                 <p>Import new documents or BibTeX entries into the library.</p>
                 <ul>
                     <li><strong>Source</strong>: Paste BibTeX, provide a local path, or enter a URL (including Arxiv/DOI support).</li>
-                    <li><strong>Workbench</strong>: Verify metadata discovery, hash matching, and tag allocation before committing.</li>
-                    <li><strong>Duplicate Detection</strong>: Archivum will warn you if the content hash already exists in the library.</li>
+                    <li><strong>Workbench</strong>: Edit the source BibTeX while viewing the staged document and metadata candidates.</li>
+                    <li><strong>Import Preview</strong>: The preview runs the real BibTeX importer without saving. It shows the BibTeX that will be produced after author Trie normalization and tag allocation.</li>
+                    <li><strong>Tag Allocation</strong>: Previewed tags are advisory. The final tag is recomputed when you click <strong>GO: Archive Document</strong> and is locked down only when the library update is saved.</li>
+                    <li><strong>Duplicate Detection</strong>: Archivum warns on matching hashes and blocks unsafe duplicate or merge-warning imports before committing.</li>
+                    <li><strong>Commit</strong>: Archive Document reruns the same import path, shards the document into the library store, writes import audit files, updates the Feather data, and extracts text for new PDFs.</li>
                 </ul>
             </div>
 

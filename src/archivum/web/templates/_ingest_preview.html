@@ -1,0 +1,50 @@
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
+        <span class="text-muted small fw-bold text-uppercase">Import Preview</span>
+        {% if preview_tag %}
+            <span class="badge bg-light text-dark border">Final Tag: {{ preview_tag }}</span>
+        {% endif %}
+    </div>
+    <div class="card-body p-0">
+        {% if preview_blocked %}
+            <div class="alert alert-danger m-3 mb-0" role="alert">
+                {{ preview_message }}
+            </div>
+        {% else %}
+            <div class="alert alert-success m-3 mb-0" role="alert">
+                Preview generated through the real import path.
+            </div>
+        {% endif %}
+        <textarea id="preview-bibtex"
+                  class="form-control font-monospace p-3 border-0 bg-light"
+                  rows="10"
+                  readonly
+                  style="resize: none; font-size: 0.85rem;">{{ preview_bibtex }}</textarea>
+        {% if analysis_rows %}
+            <div class="table-responsive px-3 pb-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Tag</th>
+                            <th>Action</th>
+                            <th>Hash</th>
+                            <th>DOI</th>
+                            <th>Title</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in analysis_rows %}
+                            <tr>
+                                <td>{{ row.get('tag', '') }}</td>
+                                <td>{{ row.get('action', '') }}</td>
+                                <td>{{ row.get('hash match', '') }}</td>
+                                <td>{{ row.get('doi match', '') }}</td>
+                                <td>{{ row.get('title match', '') }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+    </div>
+</div>

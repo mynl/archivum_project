@@ -45,24 +45,25 @@
         <div class="card shadow-sm border-0">
             <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
                 <span class="text-muted small fw-bold text-uppercase">BibTeX Editor</span>
-                <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-primary fw-bold" 
-                            hx-post="{{ url_for('main.ingest_enhance', action='names') }}" 
-                            hx-target="#workbench-bibtex" 
-                            hx-include="#workbench-bibtex">
-                        <i class="bi bi-person-check me-1"></i> Normalize Names
+                <form hx-post="{{ url_for('main.ingest_preview') }}"
+                      hx-target="#import-preview"
+                      hx-include="#workbench-bibtex, #preview-temp-path, #preview-hash"
+                      hx-indicator="#preview-indicator">
+                    <input type="hidden" name="temp_path" id="preview-temp-path" value="{{ temp_path }}">
+                    <input type="hidden" name="hash" id="preview-hash" value="{{ doc.hash if doc else '' }}">
+                    <button class="btn btn-sm btn-outline-primary fw-bold" type="submit">
+                        <span id="preview-indicator" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+                        <i class="bi bi-eye me-1"></i> Refresh Import Preview
                     </button>
-                    <button class="btn btn-sm btn-outline-primary fw-bold" 
-                            hx-post="{{ url_for('main.ingest_enhance', action='tag') }}" 
-                            hx-target="#workbench-bibtex" 
-                            hx-include="#workbench-bibtex">
-                        <i class="bi bi-tag me-1"></i> Generate Tag
-                    </button>
-                </div>
+                </form>
             </div>
             <div class="card-body p-0">
                 <textarea id="workbench-bibtex" name="bibtex" class="form-control font-monospace p-3 border-0" rows="12" style="resize: none; font-size: 0.9rem;">{{ bibtex }}</textarea>
             </div>
+        </div>
+
+        <div id="import-preview" class="mt-3">
+            {{ preview_html|safe }}
         </div>
 
         <!-- Candidate Cards / Diagnostics -->

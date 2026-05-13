@@ -67,6 +67,7 @@ Important current features:
 
 - Streaming ripgrep full-text search.
 - Standalone tag editor.
+- Admin ingest workbench with real importer-backed BibTeX preview.
 - Search history for query inputs.
 - Query shortcuts for recent and random entries.
 - CSV export.
@@ -79,6 +80,18 @@ When adding or changing web interface or core user-facing behavior, update:
 ```text
 src/archivum/web/templates/help.html
 ```
+
+## Web Ingest Notes
+
+The admin Ingest page stages a document, lets the user edit source BibTeX, and shows an import preview generated through the real `Bib2df_Incremental` path.
+
+Important implementation details:
+
+- `Library.preview_staged_document_import(...)` injects the staged document into a Mendeley-style `file` field, runs `Bib2df_Incremental.import_bibtex_file()`, and returns the adjusted BibTeX, final preview tag, and import analysis without updating the library.
+- Preview uses `write_audit=False`; commit uses `write_audit=True`.
+- `/ingest/preview` replaces the old ad hoc `Normalize Names` / `Generate Tag` buttons. Do not reintroduce separate tag/name preview logic unless it delegates to the same library helper.
+- `/ingest/commit` calls `Library.import_staged_document(...)`, reruns the importer, then saves through `update_library(save=True)`, shards the document, writes import audit files, and extracts text for new PDFs.
+- Previewed tags are advisory. The importer resets the library tag allocator during `map_tags()`, computes `proposed_tag`, and writes it into `ported_df`; the tag is only locked down when commit saves the library. If the library changes between preview and commit, the committed tag may differ.
 
 ## Safety Rules
 

@@ -1,5 +1,32 @@
 from .shared import *
 
+
+def _render_ingest_preview(lib, bibtex, temp_path, known_hash):
+    try:
+        preview = lib.preview_staged_document_import(
+            bibtex,
+            temp_path,
+            known_hash=known_hash,
+            source_label="web-ingest-preview",
+        )
+    except Exception as e:
+        logger.error(f"Preview error: {e}")
+        preview = {
+            "bibtex": bibtex,
+            "tag": "",
+            "analysis": pd.DataFrame(),
+            "blocked": True,
+            "blocked_message": f"Preview error: {str(e)}",
+        }
+    return render_template(
+        "_ingest_preview.html",
+        preview_bibtex=preview["bibtex"],
+        preview_tag=preview["tag"],
+        preview_blocked=preview["blocked"],
+        preview_message=preview["blocked_message"],
+        analysis_rows=preview["analysis"].to_dict("records") if not preview["analysis"].empty else [],
+    )
+
 @bp.route('/ingest')
 @admin_required
 def ingest_page():
@@ -110,67 +137,25 @@ def ingest_start():
         except Exception:
             pass # Keep original if parsing fails
 
+    preview_html = _render_ingest_preview(lib, bibtex, temp_path, doc.hash)
+
     return render_template('_ingest_workbench.html', 
                            lib=lib, 
                            doc=doc, 
                            bibtex=bibtex, 
+                           preview_html=preview_html,
                            temp_path=str(temp_path),
                            temp_filename=temp_filename,
                            duplicate_tag=duplicate_tag)
 
-@bp.route('/ingest/enhance', methods=['POST'])
+@bp.route('/ingest/preview', methods=['POST'])
 @admin_required
-def ingest_enhance():
+def ingest_preview():
     lib = LibraryContext.get()
-    action = request.args.get('action')
     bibtex = request.form.get('bibtex', '')
-
-    from ...bibtex import bibtex_to_dict, dict_to_bibtex
-    try:
-        # Simple parser for single entry
-        entries = bibtex_to_dict(bibtex)
-        if not entries: return bibtex
-        tag, data = list(entries.items())[0]
-        data['tag'] = tag
-        
-        if action == 'names':
-            authors = data.get('author', '')
-            if authors:
-                from ...document import Document
-                author_list = authors.split(' and ')
-                new_authors = []
-                for a in author_list:
-                    # Extend using Trie
-                    extended = lib.to_name_ex(a.strip())
-                    # Ensure Last, First
-                    new_authors.append(Document._sort_authors(extended))
-                data['author'] = ' and '.join(new_authors)
-            bibtex = dict_to_bibtex(data)
-            
-        elif action == 'tag':
-            from ...utilities import TagAllocator
-            ta = TagAllocator(set(lib.ref_df.tag.tolist()))
-            
-            author = data.get('author', 'Unknown')
-            year = data.get('year', '9999')
-            
-            # Extract first author last name
-            first_author = author.split(' and ')[0]
-            if ',' in first_author:
-                last_name = first_author.split(',')[0].strip()
-            else:
-                last_name = first_author.split(' ')[-1].strip()
-            
-            last_name = "".join(c for c in last_name if c.isalnum())
-            new_tag = ta.get_tag(last_name, year)
-            data['tag'] = new_tag
-            bibtex = dict_to_bibtex(data)
-            
-    except Exception as e:
-        logger.error(f"Enhance error: {e}")
-        return bibtex
-
-    return bibtex
+    temp_path = Path(request.form.get('temp_path'))
+    h = request.form.get('hash')
+    return _render_ingest_preview(lib, bibtex, temp_path, h)
 
 @bp.route('/ingest/commit', methods=['POST'])
 @admin_required
@@ -180,109 +165,16 @@ def ingest_commit():
     temp_path = Path(request.form.get('temp_path'))
     h = request.form.get('hash')
 
-    from ...bibtex import bibtex_to_dict
-    from ...library import Library
+    from ...library import LibraryImportBlocked
     
     try:
-        entries = bibtex_to_dict(bibtex)
-        if not entries: return "Invalid BibTeX", 400
-        tag, data = list(entries.items())[0]
-
-        # Final check for tag uniqueness
-        if tag in lib.ref_df.tag.values:
-            return f"Error: Tag '{tag}' already exists.", 400
-
-        # Import using the library's internal logic
-        # We'll simulate an importer object to use lib.update()
-        class MockImporter:
-            def __init__(self, tag, data, h, path, lib):
-                import pandas as pd
-                from ...enhancements import canonical_name_from_row
-                import os
-                
-                # We need a row-like object for canonical_name_from_row
-                class Row:
-                    def __init__(self, tag, data, h, path):
-                        self.tag = tag
-                        self.hash = h
-                        self.author = data.get('author', 'Unknown')
-                        self.title = data.get('title', 'Unknown')
-                        self.year = data.get('year', '9999')
-                        self.path = path.name
-                
-                row = Row(tag, data, h, path)
-                fn = canonical_name_from_row(row)
-                full_fn = f"{fn}{path.suffix}"
-                dest_path = lib.doc_store_path / fn[:2].upper() / full_fn
-                
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                if not dest_path.exists():
-                    import shutil
-                    shutil.copy2(path, dest_path)
-                
-                rel_path = os.path.relpath(dest_path, lib.doc_store_path)
-                
-                # Metadata compliance
-                st = os.stat(dest_path)
-                
-                # Precise Timestamps with Timezone (using current system timezone)
-                # Archivum usually uses local timezone for these.
-                def to_precise_ts(t):
-                    return pd.Timestamp(t, unit='s', tz='Europe/London').floor('ns')
-
-                self.ref_df = pd.DataFrame([data])
-                self.ref_df['tag'] = tag
-                
-                self.doc_df = pd.DataFrame([{
-                    "name": full_fn,
-                    "path": rel_path.replace("\\", "/"),
-                    "mod": to_precise_ts(st.st_mtime),
-                    "create": to_precise_ts(getattr(st, 'st_ctime', st.st_mtime)),
-                    "access": to_precise_ts(st.st_atime),
-                    "node": st.st_ino,
-                    "links": 1,
-                    "size": st.st_size,
-                    "suffix": path.suffix,
-                    "hash": h,
-                    "version": 0
-                }])
-                
-                self.ref_doc_df = pd.DataFrame([{
-                    "tag": tag,
-                    "hash": h,
-                    "version": 0
-                }])
-
-        importer = MockImporter(tag, data, h, temp_path, lib)
-        lib.update(importer)
-        
-        # Add to import-audit history to maintain CLI compatibility
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-            audit_dir = lib.config_path / "import-audit" / timestamp
-            audit_dir.mkdir(parents=True, exist_ok=True)
-            
-            import_info_dict = {
-                "created": datetime.now().isoformat(),
-                "bibtex_file": "web-ingest",
-                "raw_entries": 1,
-                "net_entries": 1
-            }
-            import_info = pd.DataFrame(import_info_dict.items(), columns=["key", "value"])
-            import_info.to_csv(audit_dir / f"{timestamp}.audit-info.csv")
-            
-            # Also save tag mapping for completeness
-            tag_map = pd.DataFrame([{"old_tag": "web", "new_tag": tag}])
-            tag_map.to_csv(audit_dir / f"{timestamp}.tag-mapping.csv")
-        except Exception as audit_err:
-            logger.warning(f"Failed to write audit log: {audit_err}")
-
-        # Trigger full-text extraction in background
-        from ...document import extract_text_for_paths
-        fn = importer.doc_df.iloc[0].path
-        extract_text_for_paths([lib.doc_store_path / fn], 
-                               text_dir_path=lib.text_dir_path,
-                               extractor=lib.config.extractor)
+        importer = lib.import_staged_document(
+            bibtex,
+            temp_path,
+            known_hash=h,
+            source_label="web-ingest",
+        )
+        tag = str(importer.ref_df.iloc[0].tag)
 
         return render_template(
             'components/alert.html',
@@ -292,6 +184,13 @@ def ingest_commit():
                 f'Successfully archived <strong>{html.escape(str(tag))}</strong>! '
                 f'<a href="/view/{html.escape(str(tag), quote=True)}" target="_blank">View PDF</a>'
             ),
+        )
+    except LibraryImportBlocked as e:
+        return render_template(
+            'components/alert.html',
+            level='danger',
+            classes='mt-4',
+            message=str(e),
         )
     
     except Exception as e:
