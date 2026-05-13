@@ -267,6 +267,7 @@
         const prependStatus = (message) => {
             statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}<br>` + statusArea.innerHTML;
         };
+        const formatSeconds = (start, end) => `${((end - start) / 1000.0).toFixed(3)}s`;
         
         btn.disabled = true;
         loader.classList.remove('d-none');
@@ -314,12 +315,15 @@
         }
 
         try {
+            const browserStarted = performance.now();
             const url = mode === 'social' 
                 ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}&verbosity=${verbosity}`
                 : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}&verbosity=${verbosity}`;
             
             const response = await fetch(url);
+            const responseReceived = performance.now();
             const data = await response.json();
+            const jsonParsed = performance.now();
             currentData = { ...data, mode: mode };
             
             if (data.status_msg) {
@@ -335,6 +339,7 @@
                 document.getElementById('network-stats').innerHTML = '<span class="text-danger">No matches found.</span>';
                 if (cy) cy.elements().remove();
             } else {
+                const renderStarted = performance.now();
                 if (mode === 'social') {
                     renderSocialGraph(data);
                 } else {
@@ -342,6 +347,7 @@
                     populateGalaxyTable(data.elements);
                     populateClusterSummary(data.clusters || []);
                 }
+                const renderFinished = performance.now();
                 
                 // Update stats
                 const authorCount = data.nodes ? data.nodes.length : (data.authors || 0);
@@ -366,6 +372,16 @@
                     exportToggle.disabled = false;
                     exportToggle.classList.remove('opacity-50', 'btn-outline-info');
                     exportToggle.classList.add('btn-info');
+                }
+
+                if (verbosity === 'verbose') {
+                    const totalFinished = performance.now();
+                    [
+                        `Browser timing: fetch response ${formatSeconds(browserStarted, responseReceived)}`,
+                        `Browser timing: JSON parse ${formatSeconds(responseReceived, jsonParsed)}`,
+                        `Browser timing: graph render ${formatSeconds(renderStarted, renderFinished)}`,
+                        `Browser timing: total ${formatSeconds(browserStarted, totalFinished)}`
+                    ].reverse().forEach((message) => prependStatus(message));
                 }
             }
 

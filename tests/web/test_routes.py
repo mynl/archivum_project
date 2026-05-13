@@ -124,6 +124,10 @@ def test_network_social_payloads(client, request, query_fixture):
         assert "papers" in payload
         assert "elements" in payload
         assert "nodes" in payload
+        assert any(
+            message.startswith("Timing: ")
+            for message in payload.get("log_messages", [])
+        )
         edge_count = len([el for el in payload.get("elements", []) if el.get("data", {}).get("source")])
         logger.info("social derived edge_count=%s", edge_count)
 
@@ -169,6 +173,7 @@ def test_network_semantic_payloads(client, request, query_fixture, source):
             messages = payload["log_messages"]
             assert any(message.startswith("Model: ") for message in messages)
             assert any(message.startswith("Model cache: ") for message in messages)
+            assert any(message.startswith("Timing: ") for message in messages)
 
         if int(payload.get("papers") or 0) == 0:
             pytest.skip(f"No semantic papers matched {query!r} source={source!r}.")

@@ -12,6 +12,7 @@ import pandas as pd
 from .. import BASE_DIR
 from ..search.universe import resolve_universe
 from ..utilities import clean_latex, trim_author
+from .timing import PerformanceTimer, TimingEvent, timing_messages
 
 
 logger = logging.getLogger(__name__)
@@ -137,8 +138,10 @@ class SemanticResult:
     min_cluster_size: int = 0
     cluster_summary: list[dict] = field(default_factory=list)
     cluster_themes: dict[int, str] = field(default_factory=dict)
+    timings: list[TimingEvent] = field(default_factory=list)
 
     def to_cytoscape_json(self, *, verbosity: str = "minimal") -> dict:
+        payload_timer = PerformanceTimer()
         elements = []
         current_year = datetime.now().year
 
@@ -201,7 +204,7 @@ class SemanticResult:
             "clusters": self.cluster_summary,
         }
         if verbosity == "verbose":
-            payload["log_messages"] = [
+            messages = [
                 f"Semantic source: {self.source_type}",
                 f"Model: {self.model_name}",
                 f"Model cache: {self.model_cache_dir}",
@@ -212,6 +215,9 @@ class SemanticResult:
                 f"Projection input points: {len(elements)}; UMAP neighbors: {self.n_neighbors}",
                 f"Cluster pass complete: {len(self.cluster_summary)} clusters; min cluster size: {self.min_cluster_size}",
             ]
+            payload_timer.mark("semantic payload serialization")
+            messages.extend(timing_messages(self.timings + payload_timer.events))
+            payload["log_messages"] = messages
         return payload
 
     def to_export_dataframe(self) -> pd.DataFrame:
@@ -232,11 +238,17 @@ class SemanticResult:
 
 
 def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> SemanticResult:
+    timer = PerformanceTimer()
     df = lib.database
+    timer.mark("database load")
     model_cache_dir = str(get_semantic_model_cache_dir())
+    timer.mark("model cache directory")
     universe_hashes = resolve_universe(lib, raw_query)
+    timer.mark("universe resolution")
     result_df = df[df["hash"].astype(str).isin(universe_hashes)].copy()
+    timer.mark("database filtering")
     if result_df.empty:
+        timer.mark("total semantic analysis")
         return SemanticResult(
             result_df=result_df,
             relevant_idx=pd.DataFrame(columns=["hash", "source", "embedding"]),
@@ -244,6 +256,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             coords=np.empty((0, 2)),
             source_type=source_type,
             model_cache_dir=model_cache_dir,
+            timings=timer.events,
         )
 
     idx_path = lib.config_path / "semantic-embeddings.feather"
@@ -253,6 +266,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         else pd.DataFrame(columns=["hash", "source", "embedding"])
     )
     source_idx_count = len(idx_df[idx_df.source == source_type]) if not idx_df.empty else 0
+    timer.mark("embedding cache load")
 
     to_embed = []
     omitted_hashes = []
@@ -271,9 +285,11 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
                     omitted_hashes.append(h)
                     continue
             to_embed.append(row)
+    timer.mark("embedding cache lookup")
 
     result_df = result_df[~result_df.hash.astype(str).isin(omitted_hashes)]
     if result_df.empty:
+        timer.mark("total semantic analysis")
         return SemanticResult(
             result_df=result_df,
             relevant_idx=pd.DataFrame(columns=["hash", "source", "embedding"]),
@@ -282,10 +298,12 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             omitted_hashes=omitted_hashes,
             source_type=source_type,
             model_cache_dir=model_cache_dir,
+            timings=timer.events,
         )
 
     if to_embed:
         model = get_transformer_model()
+        timer.mark("transformer model load")
         new_rows = []
         for row in to_embed:
             if source_type in ["text", "text-4k"]:
@@ -301,16 +319,20 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
 
             emb = model.encode(text, show_progress_bar=False).tolist()
             new_rows.append({"hash": str(row.hash), "source": source_type, "embedding": emb})
+        timer.mark("missing embedding generation")
 
         idx_df = pd.concat([idx_df, pd.DataFrame(new_rows)]).drop_duplicates(
             ["hash", "source"], keep="last"
         )
         idx_df.reset_index(drop=True).to_feather(idx_path)
         source_idx_count = len(idx_df[idx_df.source == source_type])
+        timer.mark("embedding cache write")
 
     relevant_idx = idx_df[(idx_df.hash.isin(result_df.hash.astype(str))) & (idx_df.source == source_type)]
     cached_embedding_count = max(0, len(relevant_idx) - len(to_embed))
+    timer.mark("relevant embedding selection")
     if relevant_idx.empty:
+        timer.mark("total semantic analysis")
         return SemanticResult(
             result_df=result_df,
             relevant_idx=relevant_idx,
@@ -322,6 +344,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             embedding_index_count=source_idx_count,
             source_type=source_type,
             model_cache_dir=model_cache_dir,
+            timings=timer.events,
         )
 
     import hdbscan
@@ -342,6 +365,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             random_state=42,
         )
         coords = reducer.fit_transform(embeddings)
+    timer.mark("UMAP projection")
 
     min_cluster = max(2, min(n_pts, 5))
     if n_pts < min_cluster:
@@ -352,6 +376,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             cluster_labels = clusterer.fit_predict(coords)
         except Exception:
             cluster_labels = np.zeros(n_pts)
+    timer.mark("HDBSCAN clustering")
 
     cluster_themes = {}
     unique_cids = sorted([cid for cid in set(cluster_labels) if cid >= 0])
@@ -383,6 +408,8 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
                 "color": SEMANTIC_PALETTE[int(cid) % len(SEMANTIC_PALETTE)],
             }
         )
+    timer.mark("cluster summary generation")
+    timer.mark("total semantic analysis")
 
     return SemanticResult(
         result_df=result_df,
@@ -399,4 +426,5 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         min_cluster_size=min_cluster,
         cluster_summary=cluster_summary,
         cluster_themes=cluster_themes,
+        timings=timer.events,
     )

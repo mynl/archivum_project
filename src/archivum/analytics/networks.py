@@ -6,6 +6,7 @@ import pandas as pd
 
 from ..search.universe import resolve_universe
 from ..utilities import clean_latex
+from .timing import PerformanceTimer, TimingEvent, timing_messages
 
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,18 @@ class SocialNetworkResult:
     elements: list[dict] = field(default_factory=list)
     hashes: str = ""
     clusters: list[dict] = field(default_factory=list)
+    timings: list[TimingEvent] = field(default_factory=list)
 
     def to_cytoscape_json(self, *, verbosity: str = "minimal") -> dict:
+        payload_timer = PerformanceTimer()
         if self.result_df.empty:
-            return EMPTY_SOCIAL_GRAPH.copy()
+            payload = EMPTY_SOCIAL_GRAPH.copy()
+            if verbosity == "verbose":
+                payload_timer.mark("social payload serialization")
+                payload["log_messages"] = timing_messages(self.timings + payload_timer.events)
+            return payload
 
-        return {
+        payload = {
             "nodes": self.nodes,
             "elements": self.elements,
             "papers": len(self.result_df),
@@ -38,24 +45,42 @@ class SocialNetworkResult:
             ),
             "clusters": self.clusters,
         }
+        if verbosity == "verbose":
+            payload_timer.mark("social payload serialization")
+            payload["log_messages"] = [
+                f"Social papers after query: {len(self.result_df)}",
+                f"Social nodes: {len(self.nodes)}",
+                f"Social edges: {len(self.edges)}",
+                *timing_messages(self.timings + payload_timer.events),
+            ]
+        return payload
 
 
 def analyze_social_network(lib, raw_query: str) -> SocialNetworkResult:
+    timer = PerformanceTimer()
     df = lib.database
+    timer.mark("database load")
     universe_hashes = resolve_universe(lib, raw_query)
+    timer.mark("universe resolution")
     result_df = df[df["hash"].astype(str).isin(universe_hashes)]
+    timer.mark("database filtering")
 
     if result_df.empty:
-        return SocialNetworkResult(result_df=result_df)
+        timer.mark("total social analysis")
+        return SocialNetworkResult(result_df=result_df, timings=timer.events)
 
     nodes, edges = _build_social_graph(result_df)
+    timer.mark("author graph build")
     elements = nodes + [
         {"data": {"source": k[0], "target": k[1], "weight": int(v["weight"]), "papers": v["papers"]}}
         for k, v in edges.items()
     ]
+    timer.mark("cytoscape element build")
 
     hash_list = result_df["hash"].dropna().astype(str).str[:8].unique()[:500]
     hashes = "|".join([str(h) for h in hash_list])
+    timer.mark("hash export list build")
+    timer.mark("total social analysis")
 
     return SocialNetworkResult(
         result_df=result_df,
@@ -63,6 +88,7 @@ def analyze_social_network(lib, raw_query: str) -> SocialNetworkResult:
         edges=edges,
         elements=elements,
         hashes=hashes,
+        timings=timer.events,
     )
 
 

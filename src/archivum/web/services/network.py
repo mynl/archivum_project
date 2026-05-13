@@ -29,13 +29,16 @@ def get_semantic_network_payload(
 
     result = analyze_semantic(lib, raw_query, source_type)
     if result.result_df.empty:
-        return empty_semantic_graph_response()
+        return result.to_cytoscape_json(verbosity=verbosity)
     if result.relevant_idx.empty:
-        return {
+        payload = {
             "elements": [],
             "papers": 0,
             "omitted_count": len(result.omitted_hashes),
             "omitted_reason": "No text extracts found.",
             "clusters": [],
         }
+        if verbosity == "verbose":
+            payload["log_messages"] = result.to_cytoscape_json(verbosity=verbosity).get("log_messages", [])
+        return payload
     return result.to_cytoscape_json(verbosity=verbosity)
