@@ -278,3 +278,25 @@ mark {
 .animate-pulse {
     animation: pulse-opacity 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* Stable compact rows for large sidebar indexes such as Authors and Edit tags. */
+.sidebar-index-list {
+    overflow-y: auto;
+}
+
+.sidebar-index-item {
+    box-sizing: border-box;
+    min-height: 2rem;
+    line-height: 1.2;
+    flex-shrink: 0;
+    font-size: 0.82rem;
+    padding: 0.45rem 0.75rem;
+    overflow: hidden;
+}
+
+.sidebar-index-item .sidebar-index-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

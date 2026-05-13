@@ -2,8 +2,30 @@
 
 {% block content %}
 <div class="row g-0 border rounded shadow-sm bg-white author-main-row">
+    <!-- Right Panel: Bibliography -->
+    <div class="col-md-8 col-lg-9 order-2 order-md-2 d-flex flex-column bg-light-subtle bibliography-panel p-4">
+        {% if author_results_header_html %}
+            {{ author_results_header_html|safe }}
+        {% else %}
+        <div id="author-results-header"></div>
+        {% endif %}
+        <div id="author-results" class="flex-grow-1">
+            {% if author_results_html %}
+                {{ author_results_html|safe }}
+            {% else %}
+            <div class="text-center py-5 mt-5">
+                <div class="mb-4 text-muted opacity-25">
+                    <i class="bi bi-people" style="font-size: 6rem;"></i>
+                </div>
+                <h4 class="text-muted fw-light">Select an Author</h4>
+                <p class="text-muted">Search and select an author from the sidebar to view their papers.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
     <!-- Left Sidebar: Author List -->
-    <div class="col-md-4 col-lg-3 border-end d-flex flex-column h-100 author-sidebar">
+    <div class="col-md-4 col-lg-3 order-1 order-md-1 border-end d-flex flex-column h-100 author-sidebar">
         <div class="p-3 border-bottom bg-light">
             <h6 class="mb-3 text-muted small fw-bold text-uppercase">Author Index</h6>
             <div class="search-wrapper">
@@ -17,33 +39,19 @@
             </div>
         </div>
         
-        <div id="author-list" class="list-group list-group-flush overflow-auto flex-grow-1 author-list-container">
+        <div id="author-list" class="list-group list-group-flush flex-grow-1 author-list-container sidebar-index-list">
             {% for author, count in authors %}
             <button type="button" 
-                    class="author-item list-group-item list-group-item-action py-2 border-0 small d-flex justify-content-between align-items-center" 
+                    class="author-item sidebar-index-item list-group-item list-group-item-action border-0 d-flex justify-content-between align-items-center" 
                     data-author="{{ author|lower }}"
                     hx-get="{{ url_for('main.author_search', author=author) }}" 
                     hx-target="#author-results"
                     hx-trigger="click"
                     onclick="setActiveAuthor(this)">
-                <span class="text-truncate me-2">{{ author }}</span>
+                <span class="sidebar-index-label me-2">{{ author }}</span>
                 <span class="badge bg-light text-muted border">{{ count }}</span>
             </button>
             {% endfor %}
-        </div>
-    </div>
-    
-    <!-- Right Panel: Bibliography -->
-    <div class="col-md-8 col-lg-9 d-flex flex-column bg-light-subtle bibliography-panel p-4">
-        <div id="author-results-header"></div>
-        <div id="author-results" class="flex-grow-1">
-            <div class="text-center py-5 mt-5">
-                <div class="mb-4 text-muted opacity-25">
-                    <i class="bi bi-people" style="font-size: 6rem;"></i>
-                </div>
-                <h4 class="text-muted fw-light">Select an Author</h4>
-                <p class="text-muted">Search and select an author from the sidebar to view their papers.</p>
-            </div>
         </div>
     </div>
 </div>
@@ -116,10 +124,8 @@
             const items = document.querySelectorAll('.author-item');
             for (const item of items) {
                 if (item.querySelector('span').innerText.trim() === selectedAuthor) {
-                    setTimeout(() => {
-                        item.click();
-                        item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }, 100);
+                    setActiveAuthor(item);
+                    item.scrollIntoView({ behavior: 'instant', block: 'center' });
                     break;
                 }
             }
@@ -148,7 +154,7 @@
         }
     }
 
-    .author-item { transition: background-color 0.05s ease; font-size: 0.82rem; }
+    .author-item { transition: background-color 0.05s ease; }
     .author-item.active { background-color: var(--primary-color) !important; color: white !important; }
     .author-item.active .badge { background-color: rgba(255,255,255,0.2) !important; color: white !important; border: none !important; }
 

@@ -88,38 +88,14 @@ def author_search(author):
     if lib.is_empty: return "No library"
 
     view_mode = request.args.get('view_mode', 'list')
-
-    # Use native querex sorting: order by -year
-    # We explicitly select year to ensure it's available for sorting
-    query_expr = f"select year, path, hash, type, * ! /{author}/ order by -year"
     
     try:
-        df = lib.database
-        result = df.querex(query_expr)
-        if not isinstance(result, pd.DataFrame):
-            return f"Query error: {result}"
-        
-        header_oob = render_template(
-            'components/author_results_header.html',
-            author=author,
-            view_mode=view_mode,
-            view_modes=[
-                ('list', 'Dense List'),
-                ('verbose', 'Verbose'),
-                ('table', 'Table'),
-            ],
-        )
-        
-        return header_oob + _render_search_results(result, view_mode=view_mode)
+        header_oob, results_html = render_author_results_parts(lib, author, view_mode, oob_header=True)
+        return header_oob + results_html
         
     except Exception as e:
         logger.error(f"Author search error: {e}")
         return f"Error: {str(e)}"
-
-def _render_search_results(df, view_mode='list'):
-    """Helper to render results consistently."""
-    prepared_df = prepare_search_results(df)
-    return render_template('components/results.html', results=prepared_df, view_mode=view_mode)
 
 @bp.route('/search')
 def search():
@@ -151,7 +127,7 @@ def search():
             return f"Query error: result is {type(result)}"
 
         view_mode = request.args.get('view_mode', 'list')
-        return _render_search_results(result, view_mode=view_mode)
+        return render_search_results(result, view_mode=view_mode)
     except Exception as e:
         logger.error(f"Search error: {e}")
         return render_template('components/alert.html', level='danger', message=f"Error: {str(e)}", classes='error')

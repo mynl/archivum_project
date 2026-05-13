@@ -46,3 +46,36 @@ def _render_export_button(id_prefix, hashes, input_id='rg-input'):
         hashes=hashes,
         input_id=input_id,
     )
+
+
+AUTHOR_VIEW_MODES = [
+    ('list', 'Dense List'),
+    ('verbose', 'Verbose'),
+    ('table', 'Table'),
+]
+
+
+def render_search_results(df, view_mode='list'):
+    """Render search results consistently across query and author views."""
+    prepared_df = prepare_search_results(df)
+    return render_template('components/results.html', results=prepared_df, view_mode=view_mode)
+
+
+def author_query_results(lib, author):
+    query_expr = f"select year, path, hash, type, * ! /{author}/ order by -year"
+    result = lib.database.querex(query_expr)
+    if not isinstance(result, pd.DataFrame):
+        raise ValueError(f"Query error: {result}")
+    return result
+
+
+def render_author_results_parts(lib, author, view_mode='list', *, oob_header=True):
+    result = author_query_results(lib, author)
+    header = render_template(
+        'components/author_results_header.html',
+        author=author,
+        view_mode=view_mode,
+        view_modes=AUTHOR_VIEW_MODES,
+        oob_header=oob_header,
+    )
+    return header, render_search_results(result, view_mode=view_mode)

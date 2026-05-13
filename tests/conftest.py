@@ -167,6 +167,16 @@ def sample_hash_prefix(active_library) -> str:
     return prefix
 
 
+@pytest.fixture(scope="session")
+def sample_tag(active_library) -> str:
+    tags = active_library.all_tags
+    if not tags:
+        pytest.skip("Active library has no usable tags.")
+    tag = str(tags[0])
+    logger.info("Selected deterministic tag: %s", tag)
+    return tag
+
+
 def assert_ok_html(response, *, context: str) -> str:
     assert response.status_code == 200, f"{context}: expected HTTP 200, got {response.status_code}"
     html = response.get_data(as_text=True)

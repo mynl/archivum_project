@@ -1,4 +1,4 @@
-<div id="author-results-header" hx-swap-oob="true" class="d-flex flex-wrap align-items-center gap-2 mb-4">
+<div id="author-results-header"{% if oob_header|default(true) %} hx-swap-oob="true"{% endif %} class="d-flex flex-wrap align-items-center gap-2 mb-4">
     <h4 class="mb-0 fw-bold me-auto"><i class="bi bi-person-fill me-2"></i>{{ author }}</h4>
     <button class="btn btn-info px-4 fw-bold shadow-sm" onclick="exportAuthorToQuery({{ author|tojson }})">
         Export

@@ -2,11 +2,35 @@ from .shared import *
 from ...bibtex import dict_to_bibtex
 from ...import_bibtex import Bib2df_Incremental
 
+
+def _render_edit_form(lib, tag):
+    row = lib.ref_df[lib.ref_df.tag == tag]
+    if row.empty:
+        return f"Reference '{tag}' not found.", 404
+    bib_str = dict_to_bibtex(row.iloc[0])
+    return render_template('components/edit_form.html', tag=tag, bib_str=bib_str)
+
+
 @bp.route('/edit')
 @admin_required
 def editor_page():
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
     tag = request.args.get('tag', '').strip()
-    return render_template('edit.html', initial_tag=tag)
+    initial_edit_html = ''
+    initial_edit_status = 200
+    if tag:
+        rendered = _render_edit_form(lib, tag)
+        if isinstance(rendered, tuple):
+            initial_edit_html, initial_edit_status = rendered
+        else:
+            initial_edit_html = rendered
+    return render_template(
+        'edit.html',
+        initial_tag=tag,
+        initial_edit_html=initial_edit_html,
+        initial_edit_status=initial_edit_status,
+    )
 
 @bp.route('/tag-suggest')
 def tag_suggest():
@@ -25,10 +49,7 @@ def edit_tag(tag):
     if lib.is_empty: return "No library open."
     
     if request.method == 'GET':
-        row = lib.ref_df[lib.ref_df.tag == tag]
-        if row.empty: return f"Reference '{tag}' not found.", 404
-        bib_str = dict_to_bibtex(row.iloc[0])
-        return render_template('components/edit_form.html', tag=tag, bib_str=bib_str)
+        return _render_edit_form(lib, tag)
     
     # POST - Save changes
     bib_str = request.form.get('bibtex', '').strip()

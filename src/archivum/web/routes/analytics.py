@@ -15,8 +15,28 @@ def authors_page():
     
     authors = get_cached_data(lib, 'author_counts', calc_authors)
     selected_author = request.args.get('author', '')
+    author_results_header_html = ''
+    author_results_html = ''
+    if selected_author:
+        try:
+            author_results_header_html, author_results_html = render_author_results_parts(
+                lib,
+                selected_author,
+                request.args.get('view_mode', 'list'),
+                oob_header=False,
+            )
+        except Exception as e:
+            logger.error(f"Author preload error: {e}")
+            author_results_html = f"Error: {str(e)}"
     
-    return render_template('authors.html', lib=lib, authors=authors, selected_author=selected_author)
+    return render_template(
+        'authors.html',
+        lib=lib,
+        authors=authors,
+        selected_author=selected_author,
+        author_results_header_html=author_results_header_html,
+        author_results_html=author_results_html,
+    )
 
 @bp.route('/insights')
 def insights_page():
