@@ -1,0 +1,10 @@
+<div class="text-muted small {{ classes|default('mt-n3 mb-3') }}">
+    {% if file_count is defined and file_count is not none %}
+        Found <b>{{ file_count }}</b> files in {{ total_time }}
+    {% else %}
+        {% if cached %}
+            <i class="bi bi-lightning-fill text-warning me-1"></i>
+        {% endif %}
+        {{ verb }} <b>{{ matches }}</b> matches in <b>{{ docs }}</b> {{ noun }}.{% if cached %} (Retrieved from cache){% endif %}{% if total_time is defined and total_time is not none %} Total: {{ total_time }}{% endif %}{% if rg_time %} (RG: {{ rg_time }}){% endif %}
+    {% endif %}
+</div>

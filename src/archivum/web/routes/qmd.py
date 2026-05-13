@@ -36,7 +36,11 @@ def qmd_extract():
     logger.info(f"QMD Extraction found tags: {tags}")
     
     if not tags:
-        return "<div class='alert alert-warning'>No citations found (e.g. @Tag2023).</div>"
+        return render_template(
+            'components/alert.html',
+            level='warning',
+            message='No citations found (e.g. @Tag2023).',
+        )
 
     # Match against library (case-insensitive if needed, but Archivum tags are usually case-sensitive)
     matches = lib.ref_df[lib.ref_df['tag'].isin(tags)]
@@ -47,7 +51,11 @@ def qmd_extract():
         matches = lib.ref_df[lib.ref_df['tag'].str.lower().isin(tags_lower)]
         
     if matches.empty:
-        return f"<div class='alert alert-warning'>Found {len(tags)} citations but none matched the library. Tags: {', '.join(tags)}</div>"
+        return render_template(
+            'components/alert.html',
+            level='warning',
+            message=f"Found {len(tags)} citations but none matched the library. Tags: {', '.join(tags)}",
+        )
 
     bib_entries = [dict_to_bibtex(row) for _, row in matches.sort_values("tag").iterrows()]
     bib_text = "\n\n".join(bib_entries)

@@ -1,0 +1,7 @@
+<div class="alert alert-{{ level|default('info') }}{% if classes %} {{ classes }}{% endif %}">
+    {% if html_message is defined and html_message %}
+        {{ html_message|safe }}
+    {% else %}
+        {{ message }}
+    {% endif %}
+</div>

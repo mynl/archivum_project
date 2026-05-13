@@ -68,7 +68,11 @@ class SemanticResult:
     coords: np.ndarray
     omitted_hashes: list[str] = field(default_factory=list)
     embedded_count: int = 0
+    cached_embedding_count: int = 0
+    embedding_index_count: int = 0
     source_type: str = "title"
+    n_neighbors: int = 0
+    min_cluster_size: int = 0
     cluster_summary: list[dict] = field(default_factory=list)
     cluster_themes: dict[int, str] = field(default_factory=dict)
 
@@ -119,9 +123,13 @@ class SemanticResult:
             f"{len(elements)} papers, {len(self.cluster_summary)} clusters."
         )
         if verbosity == "verbose":
-            status += f" (Omitted: {len(self.omitted_hashes)} | Embeddings: {self.embedded_count})"
+            status += (
+                f" Source: {self.source_type}. Matched: {len(self.result_df)}. "
+                f"Rendered: {len(elements)}. Omitted: {len(self.omitted_hashes)}. "
+                f"Embeddings: {self.cached_embedding_count} cached, {self.embedded_count} new."
+            )
 
-        return {
+        payload = {
             "elements": elements,
             "papers": len(self.result_df),
             "omitted_count": len(self.omitted_hashes),
@@ -130,6 +138,17 @@ class SemanticResult:
             "status_msg": status,
             "clusters": self.cluster_summary,
         }
+        if verbosity == "verbose":
+            payload["log_messages"] = [
+                f"Semantic source: {self.source_type}",
+                f"Matched papers after query: {len(self.result_df)}",
+                f"Embedding index rows for source: {self.embedding_index_count}",
+                f"Embeddings used: {len(self.relevant_idx)} ({self.cached_embedding_count} cached, {self.embedded_count} new)",
+                f"Omitted papers without usable text: {len(self.omitted_hashes)}",
+                f"Projection input points: {len(elements)}; UMAP neighbors: {self.n_neighbors}",
+                f"Cluster pass complete: {len(self.cluster_summary)} clusters; min cluster size: {self.min_cluster_size}",
+            ]
+        return payload
 
     def to_export_dataframe(self) -> pd.DataFrame:
         result_df = self.result_df.copy()
@@ -167,6 +186,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         if idx_path.exists()
         else pd.DataFrame(columns=["hash", "source", "embedding"])
     )
+    source_idx_count = len(idx_df[idx_df.source == source_type]) if not idx_df.empty else 0
 
     to_embed = []
     omitted_hashes = []
@@ -219,8 +239,10 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             ["hash", "source"], keep="last"
         )
         idx_df.reset_index(drop=True).to_feather(idx_path)
+        source_idx_count = len(idx_df[idx_df.source == source_type])
 
     relevant_idx = idx_df[(idx_df.hash.isin(result_df.hash.astype(str))) & (idx_df.source == source_type)]
+    cached_embedding_count = max(0, len(relevant_idx) - len(to_embed))
     if relevant_idx.empty:
         return SemanticResult(
             result_df=result_df,
@@ -229,6 +251,8 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             coords=np.empty((0, 2)),
             omitted_hashes=omitted_hashes,
             embedded_count=len(to_embed),
+            cached_embedding_count=cached_embedding_count,
+            embedding_index_count=source_idx_count,
             source_type=source_type,
         )
 
@@ -299,7 +323,11 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         coords=coords,
         omitted_hashes=omitted_hashes,
         embedded_count=len(to_embed),
+        cached_embedding_count=cached_embedding_count,
+        embedding_index_count=source_idx_count,
         source_type=source_type,
+        n_neighbors=n_neighbors,
+        min_cluster_size=min_cluster,
         cluster_summary=cluster_summary,
         cluster_themes=cluster_themes,
     )

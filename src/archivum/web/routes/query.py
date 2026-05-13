@@ -99,37 +99,15 @@ def author_search(author):
         if not isinstance(result, pd.DataFrame):
             return f"Query error: {result}"
         
-        # Add header with Author name, Export, and Options
-        def render_radio(mode, label):
-            checked = 'checked' if view_mode == mode else ''
-            return (
-                f"<li><div class='dropdown-item py-1'><div class='form-check'>"
-                f"  <input class='form-check-input' type='radio' name='author-view-mode' "
-                f"         id='author-mode-{mode}' value='{mode}' {checked} "
-                f"         hx-get=\"{url_for('main.author_search', author=author, view_mode=mode)}\" "
-                f"         hx-target='#author-results'> "
-                f"  <label class='form-check-label small w-100 cursor-pointer' for='author-mode-{mode}'>{label}</label>"
-                f"</div></div></li>"
-            )
-
-        header_oob = (
-            f"<div id='author-results-header' hx-swap-oob='true' class='d-flex flex-wrap align-items-center gap-2 mb-4'>"
-            f"  <h4 class='mb-0 fw-bold me-auto'><i class='bi bi-person-fill me-2'></i>{author}</h4>"
-            f"  <button class='btn btn-info px-4 fw-bold shadow-sm' onclick=\"exportAuthorToQuery('{author}')\">"
-            f"    Export"
-            f"  </button>"
-            f"  <div class='dropdown'>"
-            f"    <button class='btn btn-outline-secondary px-3 shadow-sm dropdown-toggle' type='button' data-bs-toggle='dropdown'>"
-            f"      <i class='bi bi-gear-fill me-1'></i> Options"
-            f"    </button>"
-            f"    <ul class='dropdown-menu dropdown-menu-end shadow-sm' style='min-width: 200px;'>"
-            f"      <li><h6 class='dropdown-header text-uppercase small pb-1'>View Mode</h6></li>"
-            f"      {render_radio('list', 'Dense List')}"
-            f"      {render_radio('verbose', 'Verbose')}"
-            f"      {render_radio('table', 'Table')}"
-            f"    </ul>"
-            f"  </div>"
-            f"</div>"
+        header_oob = render_template(
+            'components/author_results_header.html',
+            author=author,
+            view_mode=view_mode,
+            view_modes=[
+                ('list', 'Dense List'),
+                ('verbose', 'Verbose'),
+                ('table', 'Table'),
+            ],
         )
         
         return header_oob + _render_search_results(result, view_mode=view_mode)
@@ -176,7 +154,7 @@ def search():
         return _render_search_results(result, view_mode=view_mode)
     except Exception as e:
         logger.error(f"Search error: {e}")
-        return f"<div class='error'>Error: {str(e)}</div>"
+        return render_template('components/alert.html', level='danger', message=f"Error: {str(e)}", classes='error')
 
 
 @bp.route('/search-export-csv')

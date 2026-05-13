@@ -94,12 +94,15 @@ def get_cached_ripgrep_search(lib, options: RipgrepSearchOptions):
     verb = "Summarized" if options.mode in ["summary", "counts"] else "Found"
     noun = "documents" if options.mode in ["summary", "counts"] else "files"
 
-    cache_tag = (
-        "<div id='rg-stats-header' hx-swap-oob='true'>"
-        "<div class='text-muted small mt-n3 mb-3'>"
-        "<i class='bi bi-lightning-fill text-warning me-1'></i> "
-        f"{verb} <b>{matches}</b> matches in <b>{docs}</b> {noun}. (Retrieved from cache)"
-        "</div></div>"
+    cache_tag = _render_oob(
+        "rg-stats-header",
+        _render_stats(
+            verb=verb,
+            matches=matches,
+            docs=docs,
+            noun=noun,
+            cached=True,
+        ),
     )
 
     export_oob = ""
@@ -107,11 +110,7 @@ def get_cached_ripgrep_search(lib, options: RipgrepSearchOptions):
         h_list = [h[:8] for h in hashes.split("|")]
         export_oob = _render_export_button("rg", "|".join(h_list))
 
-    status_fix = (
-        "<div id='rg-status' hx-swap-oob='true' class='rg-info' "
-        "style='margin-bottom: 0.25rem; display: block;'>"
-        "Last Command: <code>(Retrieved from Cache)</code></div>"
-    )
+    status_fix = _render_status("(Retrieved from Cache)", margin_bottom="0.25rem")
     return cached_html + cache_tag + status_fix + export_oob
 
 
@@ -126,9 +125,9 @@ def stream_ripgrep_search(lib, options: RipgrepSearchOptions):
         html_buffer.append(chunk)
         return chunk
 
-    yield yield_and_buffer("<div id='rg-results' hx-swap-oob='true'></div>")
-    yield yield_and_buffer("<div id='rg-stats-header' hx-swap-oob='true'></div>")
-    yield yield_and_buffer("<div id='rg-more-container' hx-swap-oob='true' style='display: none;'></div>")
+    yield yield_and_buffer(_render_oob("rg-results", ""))
+    yield yield_and_buffer(_render_oob("rg-stats-header", ""))
+    yield yield_and_buffer(_render_oob("rg-more-container", "", style="display: none;"))
 
     if options.show_files:
         yield from _stream_file_listing(lib, options, common_args, hash_prefix_to_meta, start_time, yield_and_buffer)
@@ -230,6 +229,51 @@ def _render_export_button(id_prefix, hashes, input_id="rg-input"):
     )
 
 
+def _render_oob(target_id, content, *, classes="", style="", swap="true"):
+    return render_template(
+        "components/rg_oob.html",
+        target_id=target_id,
+        content=content,
+        classes=classes,
+        style=style,
+        swap=swap,
+    )
+
+
+def _render_status(command, *, margin_bottom="0.5rem"):
+    return render_template(
+        "components/rg_status.html",
+        command=command,
+        margin_bottom=margin_bottom,
+    )
+
+
+def _render_stats(
+    *,
+    verb="Found",
+    matches=0,
+    docs=0,
+    noun="files",
+    cached=False,
+    total_time=None,
+    rg_time=None,
+    classes="mt-n3 mb-3",
+    file_count=None,
+):
+    return render_template(
+        "components/rg_stats.html",
+        verb=verb,
+        matches=matches,
+        docs=docs,
+        noun=noun,
+        cached=cached,
+        total_time=total_time,
+        rg_time=rg_time,
+        classes=classes,
+        file_count=file_count,
+    )
+
+
 def _format_glob(glob):
     if not glob:
         return None
@@ -261,10 +305,7 @@ def _build_common_args(options):
 
 def _stream_file_listing(lib, options, common_args, hash_prefix_to_meta, start_time, yield_and_buffer):
     cmd = ["rg", "--files"] + common_args + [str(lib.text_dir_path)]
-    yield yield_and_buffer(
-        "<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' "
-        f"hx-swap-oob='true'>Last Command: <code>{' '.join(cmd)}</code></div>"
-    )
+    yield yield_and_buffer(_render_status(" ".join(cmd)))
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         files = []
@@ -275,13 +316,16 @@ def _stream_file_listing(lib, options, common_args, hash_prefix_to_meta, start_t
                 continue
             files.append({"hash": h_prefix, "tag": meta.get("tag"), "title": meta.get("title", h_prefix)})
         yield yield_and_buffer(
-            f"<div id='rg-results' hx-swap-oob='true'>"
-            f"{render_template('components/rg_files.html', files=files)}</div>"
+            _render_oob("rg-results", render_template("components/rg_files.html", files=files))
         )
-        stats_html = f"<div class='text-muted small mb-3'>Found <b>{len(files)}</b> files in {time.time() - start_time:.3f}s</div>"
-        yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
+        stats_html = _render_stats(
+            classes="mb-3",
+            file_count=len(files),
+            total_time=f"{time.time() - start_time:.3f}s",
+        )
+        yield yield_and_buffer(_render_oob("rg-stats-header", stats_html))
     except Exception as e:
-        yield yield_and_buffer(f"<div class='error' hx-swap-oob='true'>Ripgrep Error: {str(e)}</div>")
+        yield yield_and_buffer(_render_oob(None, f"Ripgrep Error: {html.escape(str(e))}", classes="error"))
 
 
 def _stream_counts_or_summary(
@@ -303,10 +347,7 @@ def _stream_counts_or_summary(
             if not options.case_sensitive:
                 args.append("-i")
             _rc, proc = lib.run_ripgrep(options.query, args)
-            yield yield_and_buffer(
-                "<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' "
-                f"hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{options.query}\"</code></div>"
-            )
+            yield yield_and_buffer(_render_status(f'rg {" ".join(args)} "{options.query}"'))
 
             counts, stats_buffer, is_stats_section = {}, [], False
             for line in proc.stdout:
@@ -330,10 +371,7 @@ def _stream_counts_or_summary(
             rg_internal_time = f"{float(m[-1]):.3f}s" if m else "0.000s"
             set_rg_cache_item(options.data_key, counts, "data")
         else:
-            yield yield_and_buffer(
-                "<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' "
-                "hx-swap-oob='true'>Last Command: <code>(Retrieved from Cache)</code></div>"
-            )
+            yield yield_and_buffer(_render_status("(Retrieved from Cache)"))
 
         counts_list = []
         total_m = 0
@@ -356,11 +394,14 @@ def _stream_counts_or_summary(
 
         if options.show_summary:
             summary_html = _render_summary(counts, hash_prefix_to_meta, total_m)
-            yield yield_and_buffer(f"<div id='rg-results' hx-swap-oob='true' class='mt-5'>{summary_html}</div>")
+            yield yield_and_buffer(_render_oob("rg-results", summary_html, classes="mt-5"))
         else:
             yield yield_and_buffer(
-                f"<div id='rg-results' hx-swap-oob='true' class='mt-4'>"
-                f"{render_template('components/rg_counts.html', counts=counts_list)}</div>"
+                _render_oob(
+                    "rg-results",
+                    render_template("components/rg_counts.html", counts=counts_list),
+                    classes="mt-4",
+                )
             )
 
         top_hashes = "|".join([x["hash"][:8] for x in counts_list[:500]])
@@ -371,12 +412,15 @@ def _stream_counts_or_summary(
         final_stats["docs"] = len(counts_list)
         final_stats["hashes"] = top_hashes
 
-        stats_html = (
-            f"<div class='text-muted small mt-n3 mb-3'>Summarized <b>{total_m}</b> matches in "
-            f"<b>{len(counts_list)}</b> documents. Total: {time.time() - start_time:.3f}s "
-            f"(RG: {rg_internal_time})</div>"
+        stats_html = _render_stats(
+            verb="Summarized",
+            matches=total_m,
+            docs=len(counts_list),
+            noun="documents",
+            total_time=f"{time.time() - start_time:.3f}s",
+            rg_time=rg_internal_time,
         )
-        yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
+        yield yield_and_buffer(_render_oob("rg-stats-header", stats_html))
         set_rg_cache_item(options.search_key, "".join(html_buffer), "html")
         set_rg_cache_item(options.search_key, final_stats, "stats")
     except Exception as e:
@@ -384,7 +428,7 @@ def _stream_counts_or_summary(
         import traceback
 
         logger.error(traceback.format_exc())
-        yield yield_and_buffer(f"<div class='error' hx-swap-oob='true'>Ripgrep Summary Error: {str(e)}</div>")
+        yield yield_and_buffer(_render_oob(None, f"Ripgrep Summary Error: {html.escape(str(e))}", classes="error"))
 
 
 def _render_summary(counts, hash_prefix_to_meta, total_m):
@@ -464,10 +508,7 @@ def _stream_details(
             args.append("-i")
         args.extend(["-A", options.context_after, "-B", options.context_before])
         _rc, proc = lib.run_ripgrep(options.query, args)
-        yield yield_and_buffer(
-            "<div id='rg-status' class='rg-info' style='margin-bottom: 0.5rem; display: block;' "
-            f"hx-swap-oob='true'>Last Command: <code>rg {html.escape(' '.join(args))} \"{options.query}\"</code></div>"
-        )
+        yield yield_and_buffer(_render_status(f'rg {" ".join(args)} "{options.query}"'))
 
         limit, rendered_matches, total_matches, seen_hashes = 500, 0, 0, set()
         current_block, last_file, stats_buffer, is_stats_section = None, None, [], False
@@ -492,8 +533,11 @@ def _stream_details(
             if h_prefix != last_file:
                 if current_block and rendered_matches <= limit:
                     yield yield_and_buffer(
-                        f"<div hx-swap-oob='beforeend:#rg-results'>"
-                        f"{render_template('components/rg_block.html', block=current_block)}</div>"
+                        _render_oob(
+                            None,
+                            render_template("components/rg_block.html", block=current_block),
+                            swap="beforeend:#rg-results",
+                        )
                     )
                 last_file = h_prefix
                 meta = hash_prefix_to_meta.get(h_prefix, {})
@@ -527,8 +571,11 @@ def _stream_details(
 
         if current_block and rendered_matches <= limit:
             yield yield_and_buffer(
-                f"<div hx-swap-oob='beforeend:#rg-results'>"
-                f"{render_template('components/rg_block.html', block=current_block)}</div>"
+                _render_oob(
+                    None,
+                    render_template("components/rg_block.html", block=current_block),
+                    swap="beforeend:#rg-results",
+                )
             )
 
         m = re.findall(r"(\d+\.\d+) seconds", "".join(stats_buffer))
@@ -541,14 +588,17 @@ def _stream_details(
             yield yield_and_buffer(_render_export_button("rg", top_hashes))
             final_stats["hashes"] = top_hashes
 
-        stats_html = (
-            f"<div class='text-muted small mt-n3 mb-3'>Found <b>{total_matches}</b> matches in "
-            f"<b>{len(seen_hashes)}</b> files. Total: {time.time() - start_time:.3f}s "
-            f"(RG: {rg_internal_time})</div>"
+        stats_html = _render_stats(
+            verb="Found",
+            matches=total_matches,
+            docs=len(seen_hashes),
+            noun="files",
+            total_time=f"{time.time() - start_time:.3f}s",
+            rg_time=rg_internal_time,
         )
-        yield yield_and_buffer(f"<div id='rg-stats-header' hx-swap-oob='true'>{stats_html}</div>")
+        yield yield_and_buffer(_render_oob("rg-stats-header", stats_html))
         set_rg_cache_item(options.search_key, "".join(html_buffer), "html")
         set_rg_cache_item(options.search_key, final_stats, "stats")
     except Exception as e:
         logger.error("RG Details Error: %s", e)
-        yield yield_and_buffer(f"<div class='error' hx-swap-oob='true'>Ripgrep Error: {str(e)}</div>")
+        yield yield_and_buffer(_render_oob(None, f"Ripgrep Error: {html.escape(str(e))}", classes="error"))

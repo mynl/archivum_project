@@ -12,7 +12,7 @@ def network_page():
 @bp.route('/network-data')
 def network_data():
     raw_query = request.args.get('q', '').strip()
-    verbosity = request.args.get('verbosity', 'minimal')
+    verbosity = request.args.get('verbosity', 'verbose')
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
 
@@ -28,7 +28,7 @@ def network_data():
 def semantic_data():
     raw_query = request.args.get('q', '').strip()
     source_type = request.args.get('source', 'title')
-    verbosity = request.args.get('verbosity', 'minimal')
+    verbosity = request.args.get('verbosity', 'verbose')
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
 

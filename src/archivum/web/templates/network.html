@@ -82,13 +82,13 @@
                 <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">Verbosity</h6></li>
                 <li>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="verbosity" id="verb-minimal" value="minimal" checked>
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-minimal" value="minimal">
                         <label class="form-check-label small" for="verb-minimal">Minimal</label>
                     </div>
                 </li>
                 <li>
                     <div class="form-check">
-                        <input class="form-check-input" type="radio" name="verbosity" id="verb-verbose" value="verbose">
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-verbose" value="verbose" checked>
                         <label class="form-check-label small" for="verb-verbose">Verbose</label>
                     </div>
                 </li>
@@ -256,19 +256,49 @@
         const source = document.getElementById('semantic-source-input').value;
         
         const verbosityInput = document.querySelector('input[name="verbosity"]:checked');
-        const verbosity = verbosityInput ? verbosityInput.value : 'minimal';
+        const verbosity = verbosityInput ? verbosityInput.value : 'verbose';
         
         const semanticTable = document.getElementById('semantic-details');
         const socialControls = document.getElementById('social-controls');
         const cyContainer = document.getElementById('cy-container');
         const infoContainer = document.getElementById('info-container');
         const statusArea = document.getElementById('network-status-area');
+        let progressTimer = null;
+        const prependStatus = (message) => {
+            statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}<br>` + statusArea.innerHTML;
+        };
         
         btn.disabled = true;
         loader.classList.remove('d-none');
         
         const methodLabel = mode === 'social' ? 'Social Connections' : (source === 'title' ? 'Semantic (Title)' : 'Semantic (Text)');
         statusArea.innerHTML = `<i class="bi bi-cpu me-2"></i> Initializing for ${methodLabel}...`;
+        if (mode === 'semantic' && verbosity === 'verbose') {
+            const startedAt = Date.now();
+            const phases = [
+                'resolving query universe',
+                'checking embedding cache',
+                'embedding missing records when needed',
+                'projecting points into 2D',
+                'detecting clusters',
+                'rendering graph payload'
+            ];
+            let phaseIndex = 0;
+            progressTimer = window.setInterval(() => {
+                const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                const phase = phases[Math.min(phaseIndex, phases.length - 1)];
+                const existing = document.getElementById('semantic-progress-line');
+                const html = `<i class="bi bi-hourglass-split me-2"></i> Semantic analysis running for ${elapsed}s; ${phase}...`;
+                if (existing) {
+                    existing.innerHTML = html;
+                } else {
+                    statusArea.innerHTML = `<div id="semantic-progress-line">${html}</div>` + statusArea.innerHTML;
+                }
+                if (elapsed % 8 === 0 && phaseIndex < phases.length - 1) {
+                    phaseIndex += 1;
+                }
+            }, 1000);
+        }
 
         // Toggle UI elements based on mode
         if (mode === 'semantic') {
@@ -293,7 +323,10 @@
             currentData = { ...data, mode: mode };
             
             if (data.status_msg) {
-                statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${data.status_msg}<br>` + statusArea.innerHTML;
+                prependStatus(data.status_msg);
+            }
+            if (Array.isArray(data.log_messages)) {
+                data.log_messages.slice().reverse().forEach(msg => prependStatus(msg));
             }
 
             if (data.error) {
@@ -341,6 +374,11 @@
             statusArea.innerHTML = `<span class="text-danger">Analysis failed: ${err.message}</span>`;
             alert("Analysis failed. See console for details.");
         } finally {
+            if (progressTimer) {
+                window.clearInterval(progressTimer);
+                const existing = document.getElementById('semantic-progress-line');
+                if (existing) existing.remove();
+            }
             btn.disabled = false;
             loader.classList.add('d-none');
         }

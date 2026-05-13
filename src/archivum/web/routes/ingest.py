@@ -284,11 +284,24 @@ def ingest_commit():
                                text_dir_path=lib.text_dir_path,
                                extractor=lib.config.extractor)
 
-        return f'<div class="alert alert-success mt-4">Successfully archived <strong>{tag}</strong>! <a href="/view/{tag}" target="_blank">View PDF</a></div>'
+        return render_template(
+            'components/alert.html',
+            level='success',
+            classes='mt-4',
+            html_message=(
+                f'Successfully archived <strong>{html.escape(str(tag))}</strong>! '
+                f'<a href="/view/{html.escape(str(tag), quote=True)}" target="_blank">View PDF</a>'
+            ),
+        )
     
     except Exception as e:
         logger.error(f"Commit error: {e}")
-        return f'<div class="alert alert-danger mt-4">Error: {str(e)}</div>'
+        return render_template(
+            'components/alert.html',
+            level='danger',
+            classes='mt-4',
+            message=f"Error: {str(e)}",
+        )
 
 @bp.route('/view-temp/<filename>')
 def view_temp(filename):

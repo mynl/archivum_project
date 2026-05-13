@@ -10,7 +10,7 @@ def empty_semantic_graph_response():
     return {"elements": [], "papers": 0, "clusters": []}
 
 
-def get_social_network_payload(lib, raw_query: str, verbosity: str = "minimal") -> dict:
+def get_social_network_payload(lib, raw_query: str, verbosity: str = "verbose") -> dict:
     if not raw_query:
         return empty_social_graph_response()
 
@@ -22,7 +22,7 @@ def get_semantic_network_payload(
     lib,
     raw_query: str,
     source_type: str = "title",
-    verbosity: str = "minimal",
+    verbosity: str = "verbose",
 ) -> dict:
     if not raw_query:
         return empty_semantic_graph_response()
