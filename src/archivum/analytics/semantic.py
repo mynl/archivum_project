@@ -1,12 +1,15 @@
 import logging
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
+from .. import BASE_DIR
 from ..search.universe import resolve_universe
 from ..utilities import clean_latex, trim_author
 
@@ -49,14 +52,71 @@ _MODEL_CACHE = {
     "transformer": None,
 }
 
+SEMANTIC_MODEL_NAME = "all-MiniLM-L6-v2"
+
+
+def get_semantic_model_cache_dir() -> Path:
+    """Return the shared app-level cache directory for semantic models."""
+    cache_dir = BASE_DIR / "models" / "sentence-transformers"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
+def _configure_semantic_model_environment(cache_dir: Path) -> None:
+    """Keep model downloads/cache and progress output predictable for web use."""
+    os.environ.setdefault("SENTENCE_TRANSFORMERS_HOME", str(cache_dir))
+    os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+
+def _cached_model_files_exist(cache_dir: Path) -> bool:
+    model_dir_name = f"models--sentence-transformers--{SEMANTIC_MODEL_NAME}"
+    model_dir = cache_dir / model_dir_name
+    if not model_dir.exists():
+        return False
+    return any(model_dir.rglob("*.safetensors")) or any(model_dir.rglob("pytorch_model.bin"))
+
 
 def get_transformer_model():
     """Lazy-load the transformer model used by semantic analysis."""
     if _MODEL_CACHE["transformer"] is None:
-        logger.info("Loading SentenceTransformer model 'all-MiniLM-L6-v2'...")
+        cache_dir = get_semantic_model_cache_dir()
+        _configure_semantic_model_environment(cache_dir)
+        logger.info(
+            "Loading SentenceTransformer model %r from cache %s",
+            SEMANTIC_MODEL_NAME,
+            cache_dir,
+        )
         from sentence_transformers import SentenceTransformer
 
-        _MODEL_CACHE["transformer"] = SentenceTransformer("all-MiniLM-L6-v2")
+        try:
+            from huggingface_hub.utils import disable_progress_bars
+
+            disable_progress_bars()
+        except Exception:
+            pass
+
+        try_local_only = _cached_model_files_exist(cache_dir)
+        try:
+            _MODEL_CACHE["transformer"] = SentenceTransformer(
+                SEMANTIC_MODEL_NAME,
+                cache_folder=str(cache_dir),
+                local_files_only=try_local_only,
+            )
+        except Exception:
+            if try_local_only:
+                logger.warning(
+                    "Cached semantic model could not be loaded locally; retrying with Hub fallback.",
+                    exc_info=True,
+                )
+                _MODEL_CACHE["transformer"] = SentenceTransformer(
+                    SEMANTIC_MODEL_NAME,
+                    cache_folder=str(cache_dir),
+                    local_files_only=False,
+                )
+            else:
+                raise
     return _MODEL_CACHE["transformer"]
 
 
@@ -71,6 +131,8 @@ class SemanticResult:
     cached_embedding_count: int = 0
     embedding_index_count: int = 0
     source_type: str = "title"
+    model_name: str = SEMANTIC_MODEL_NAME
+    model_cache_dir: str = ""
     n_neighbors: int = 0
     min_cluster_size: int = 0
     cluster_summary: list[dict] = field(default_factory=list)
@@ -141,6 +203,8 @@ class SemanticResult:
         if verbosity == "verbose":
             payload["log_messages"] = [
                 f"Semantic source: {self.source_type}",
+                f"Model: {self.model_name}",
+                f"Model cache: {self.model_cache_dir}",
                 f"Matched papers after query: {len(self.result_df)}",
                 f"Embedding index rows for source: {self.embedding_index_count}",
                 f"Embeddings used: {len(self.relevant_idx)} ({self.cached_embedding_count} cached, {self.embedded_count} new)",
@@ -169,6 +233,7 @@ class SemanticResult:
 
 def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> SemanticResult:
     df = lib.database
+    model_cache_dir = str(get_semantic_model_cache_dir())
     universe_hashes = resolve_universe(lib, raw_query)
     result_df = df[df["hash"].astype(str).isin(universe_hashes)].copy()
     if result_df.empty:
@@ -178,6 +243,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             cluster_labels=np.array([]),
             coords=np.empty((0, 2)),
             source_type=source_type,
+            model_cache_dir=model_cache_dir,
         )
 
     idx_path = lib.config_path / "semantic-embeddings.feather"
@@ -215,6 +281,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             coords=np.empty((0, 2)),
             omitted_hashes=omitted_hashes,
             source_type=source_type,
+            model_cache_dir=model_cache_dir,
         )
 
     if to_embed:
@@ -232,7 +299,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             else:
                 text = f"{row.title}. {row.author}."
 
-            emb = model.encode(text).tolist()
+            emb = model.encode(text, show_progress_bar=False).tolist()
             new_rows.append({"hash": str(row.hash), "source": source_type, "embedding": emb})
 
         idx_df = pd.concat([idx_df, pd.DataFrame(new_rows)]).drop_duplicates(
@@ -254,6 +321,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             cached_embedding_count=cached_embedding_count,
             embedding_index_count=source_idx_count,
             source_type=source_type,
+            model_cache_dir=model_cache_dir,
         )
 
     import hdbscan
@@ -326,6 +394,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         cached_embedding_count=cached_embedding_count,
         embedding_index_count=source_idx_count,
         source_type=source_type,
+        model_cache_dir=model_cache_dir,
         n_neighbors=n_neighbors,
         min_cluster_size=min_cluster,
         cluster_summary=cluster_summary,
