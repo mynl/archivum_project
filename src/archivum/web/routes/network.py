@@ -13,11 +13,12 @@ def network_page():
 def network_data():
     raw_query = request.args.get('q', '').strip()
     verbosity = request.args.get('verbosity', 'verbose')
+    case_sensitive = request.args.get('case') == 'sensitive'
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
 
     try:
-        return get_social_network_payload(lib, raw_query, verbosity=verbosity)
+        return get_social_network_payload(lib, raw_query, verbosity=verbosity, case_sensitive=case_sensitive)
     except Exception as e:
         logger.error(f"Network error: {e}")
         import traceback
@@ -29,11 +30,18 @@ def semantic_data():
     raw_query = request.args.get('q', '').strip()
     source_type = request.args.get('source', 'title')
     verbosity = request.args.get('verbosity', 'verbose')
+    case_sensitive = request.args.get('case') == 'sensitive'
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
 
     try:
-        return get_semantic_network_payload(lib, raw_query, source_type, verbosity=verbosity)
+        return get_semantic_network_payload(
+            lib,
+            raw_query,
+            source_type,
+            verbosity=verbosity,
+            case_sensitive=case_sensitive,
+        )
     except Exception as e:
         logger.error(f"Semantic analysis error: {e}")
         import traceback

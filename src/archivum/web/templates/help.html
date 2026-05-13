@@ -181,16 +181,19 @@
                     <li><strong>Weighting</strong>: Author nodes are sized by the total number of papers they have in the current search universe.</li>
                     <li><strong>Connectivity</strong>: Edges connect authors who appear on the same paper. Edge thickness indicates the number of collaborations.</li>
                     <li><strong>Interaction</strong>: Click an author to see their papers. Double-click to "Rebase" the graph onto that author.</li>
+                    <li><strong>Ripgrep Universe</strong>: Searches using <code>rg</code> are case insensitive by default, matching the Ripgrep page behavior. Use <strong>Options &rarr; Case sensitive rg</strong> when exact case matters.</li>
                 </ul>
 
                 <h6 class="fw-bold text-success small">2. Semantic Galaxy (Thematic Clustering)</h6>
                 <p class="small">Uses Machine Learning to project your papers into a 2D "Galaxy" where distance represents semantic similarity.</p>
                 <ul class="small">
                     <li><strong>Embedding</strong>: Papers are converted into high-dimensional vectors (384-D) using the <code>all-MiniLM-L6-v2</code> transformer model.</li>
-                    <li><strong>Projection (UMAP)</strong>: These vectors are flattened into 2D coordinates using <strong>UMAP</strong>, preserving local and global structures.</li>
+                    <li><strong>Cache</strong>: Embeddings are cached per library and source, so repeated runs usually reuse existing vectors. First runs, new documents, or longer full-text windows may need to encode missing papers.</li>
+                    <li><strong>Projection (UMAP)</strong>: These vectors are flattened into 2D coordinates using <strong>UMAP</strong>, preserving local and global structures while using available CPU cores.</li>
                     <li><strong>Clustering (HDBSCAN)</strong>: <strong>HDBSCAN</strong> automatically identifies dense "Constellations" of related papers.</li>
-                    <li><strong>Lone Stars</strong>: Points colored grey represent "Noise"—papers that don't statistically fit into any specific cluster.</li>
-                    <li><strong>Sources</strong>: Analysis can be run against <strong>Titles</strong> or the first 2,000 characters of <strong>Full Text</strong> extracts.</li>
+                    <li><strong>Lone Stars</strong>: Points colored grey represent "Noise"-papers that don't statistically fit into any specific cluster.</li>
+                    <li><strong>Sources</strong>: Analysis can be run against <strong>Title &amp; Metadata</strong>, the first 2,000 characters of <strong>Full Text</strong>, or the first 4,000 characters of <strong>Full Text</strong>.</li>
+                    <li><strong>Verbose Logs</strong>: Verbose mode reports timing spans for universe resolution, embedding cache lookup, model load, missing embedding generation, UMAP, clustering, serialization, and browser rendering. When an <code>rg</code> clause is used, it also shows the ripgrep command and cache hit/miss.</li>
                 </ul>
             </div>
 

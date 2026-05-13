@@ -4,7 +4,7 @@ import logging
 
 import pandas as pd
 
-from ..search.universe import resolve_universe
+from ..search.universe import resolve_universe_details
 from ..utilities import clean_latex
 from .timing import PerformanceTimer, TimingEvent, timing_messages
 
@@ -24,6 +24,8 @@ class SocialNetworkResult:
     hashes: str = ""
     clusters: list[dict] = field(default_factory=list)
     timings: list[TimingEvent] = field(default_factory=list)
+    rg_command: str = ""
+    rg_cache_hit: bool = False
 
     def to_cytoscape_json(self, *, verbosity: str = "minimal") -> dict:
         payload_timer = PerformanceTimer()
@@ -47,27 +49,37 @@ class SocialNetworkResult:
         }
         if verbosity == "verbose":
             payload_timer.mark("social payload serialization")
-            payload["log_messages"] = [
+            messages = [
                 f"Social papers after query: {len(self.result_df)}",
                 f"Social nodes: {len(self.nodes)}",
                 f"Social edges: {len(self.edges)}",
                 *timing_messages(self.timings + payload_timer.events),
             ]
+            if self.rg_command:
+                messages.insert(1, f"Ripgrep command: {self.rg_command}")
+                messages.insert(2, f"Ripgrep cache: {'hit' if self.rg_cache_hit else 'miss'}")
+            payload["log_messages"] = messages
         return payload
 
 
-def analyze_social_network(lib, raw_query: str) -> SocialNetworkResult:
+def analyze_social_network(lib, raw_query: str, *, case_sensitive: bool = False) -> SocialNetworkResult:
     timer = PerformanceTimer()
     df = lib.database
     timer.mark("database load")
-    universe_hashes = resolve_universe(lib, raw_query)
+    universe_result = resolve_universe_details(lib, raw_query, case_sensitive=case_sensitive)
+    universe_hashes = universe_result.hashes
     timer.mark("universe resolution")
     result_df = df[df["hash"].astype(str).isin(universe_hashes)]
     timer.mark("database filtering")
 
     if result_df.empty:
         timer.mark("total social analysis")
-        return SocialNetworkResult(result_df=result_df, timings=timer.events)
+        return SocialNetworkResult(
+            result_df=result_df,
+            timings=timer.events,
+            rg_command=universe_result.rg_command,
+            rg_cache_hit=universe_result.rg_cache_hit,
+        )
 
     nodes, edges = _build_social_graph(result_df)
     timer.mark("author graph build")
@@ -89,6 +101,8 @@ def analyze_social_network(lib, raw_query: str) -> SocialNetworkResult:
         elements=elements,
         hashes=hashes,
         timings=timer.events,
+        rg_command=universe_result.rg_command,
+        rg_cache_hit=universe_result.rg_cache_hit,
     )
 
 

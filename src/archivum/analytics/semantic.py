@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -10,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .. import BASE_DIR
-from ..search.universe import resolve_universe
+from ..search.universe import resolve_universe_details
 from ..utilities import clean_latex, trim_author
 from .timing import PerformanceTimer, TimingEvent, timing_messages
 
@@ -52,6 +53,15 @@ SEMANTIC_STOP_WORDS = {
 _MODEL_CACHE = {
     "transformer": None,
 }
+_MODEL_LOCK = threading.Lock()
+_TRANSFORMER_WARMUP = {
+    "started": False,
+    "finished": False,
+}
+_UMAP_WARMUP = {
+    "started": False,
+    "finished": False,
+}
 
 SEMANTIC_MODEL_NAME = "all-MiniLM-L6-v2"
 
@@ -82,43 +92,136 @@ def _cached_model_files_exist(cache_dir: Path) -> bool:
 def get_transformer_model():
     """Lazy-load the transformer model used by semantic analysis."""
     if _MODEL_CACHE["transformer"] is None:
-        cache_dir = get_semantic_model_cache_dir()
-        _configure_semantic_model_environment(cache_dir)
-        logger.info(
-            "Loading SentenceTransformer model %r from cache %s",
-            SEMANTIC_MODEL_NAME,
-            cache_dir,
-        )
-        from sentence_transformers import SentenceTransformer
-
-        try:
-            from huggingface_hub.utils import disable_progress_bars
-
-            disable_progress_bars()
-        except Exception:
-            pass
-
-        try_local_only = _cached_model_files_exist(cache_dir)
-        try:
-            _MODEL_CACHE["transformer"] = SentenceTransformer(
-                SEMANTIC_MODEL_NAME,
-                cache_folder=str(cache_dir),
-                local_files_only=try_local_only,
-            )
-        except Exception:
-            if try_local_only:
-                logger.warning(
-                    "Cached semantic model could not be loaded locally; retrying with Hub fallback.",
-                    exc_info=True,
-                )
-                _MODEL_CACHE["transformer"] = SentenceTransformer(
+        with _MODEL_LOCK:
+            if _MODEL_CACHE["transformer"] is None:
+                cache_dir = get_semantic_model_cache_dir()
+                _configure_semantic_model_environment(cache_dir)
+                logger.info(
+                    "Loading SentenceTransformer model %r from cache %s",
                     SEMANTIC_MODEL_NAME,
-                    cache_folder=str(cache_dir),
-                    local_files_only=False,
+                    cache_dir,
                 )
-            else:
-                raise
+                from sentence_transformers import SentenceTransformer
+
+                try:
+                    from huggingface_hub.utils import disable_progress_bars
+
+                    disable_progress_bars()
+                except Exception:
+                    pass
+
+                try_local_only = _cached_model_files_exist(cache_dir)
+                try:
+                    _MODEL_CACHE["transformer"] = SentenceTransformer(
+                        SEMANTIC_MODEL_NAME,
+                        cache_folder=str(cache_dir),
+                        local_files_only=try_local_only,
+                    )
+                except Exception:
+                    if try_local_only:
+                        logger.warning(
+                            "Cached semantic model could not be loaded locally; retrying with Hub fallback.",
+                            exc_info=True,
+                        )
+                        _MODEL_CACHE["transformer"] = SentenceTransformer(
+                            SEMANTIC_MODEL_NAME,
+                            cache_folder=str(cache_dir),
+                            local_files_only=False,
+                        )
+                    else:
+                        raise
     return _MODEL_CACHE["transformer"]
+
+
+def warm_transformer_model(background: bool = True) -> None:
+    """Warm the transformer model and first encode path once per process."""
+
+    def run_warmup():
+        try:
+            model = get_transformer_model()
+            model.encode(["semantic warmup"], batch_size=1, show_progress_bar=False)
+            _TRANSFORMER_WARMUP["finished"] = True
+            logger.info("Semantic transformer warmup complete.")
+        except Exception:
+            logger.warning("Semantic transformer warmup failed.", exc_info=True)
+
+    if _TRANSFORMER_WARMUP["started"]:
+        return
+    _TRANSFORMER_WARMUP["started"] = True
+
+    if background:
+        thread = threading.Thread(target=run_warmup, name="semantic-transformer-warmup", daemon=True)
+        thread.start()
+    else:
+        run_warmup()
+
+
+def warm_semantic_projection(background: bool = True) -> None:
+    """Warm UMAP/Numba projection code without blocking regular requests."""
+
+    def run_warmup():
+        try:
+            import umap
+
+            rng = np.random.default_rng(42)
+            embeddings = rng.normal(size=(12, 8))
+            reducer = umap.UMAP(
+                n_neighbors=5,
+                min_dist=0.1,
+                n_components=2,
+                metric="cosine",
+                n_jobs=-1,
+            )
+            reducer.fit_transform(embeddings)
+            _UMAP_WARMUP["finished"] = True
+            logger.info("Semantic UMAP warmup complete.")
+        except Exception:
+            logger.warning("Semantic UMAP warmup failed.", exc_info=True)
+
+    if _UMAP_WARMUP["started"]:
+        return
+    _UMAP_WARMUP["started"] = True
+
+    if background:
+        thread = threading.Thread(target=run_warmup, name="semantic-umap-warmup", daemon=True)
+        thread.start()
+    else:
+        run_warmup()
+
+
+def _source_embedding_index(idx_df: pd.DataFrame, source_type: str) -> tuple[pd.DataFrame, set[str]]:
+    if idx_df.empty:
+        source_idx = pd.DataFrame(columns=["hash", "source", "embedding"])
+    else:
+        source_idx = idx_df[idx_df.source == source_type].copy()
+    cached_hashes = set(source_idx["hash"].dropna().astype(str)) if "hash" in source_idx else set()
+    return source_idx, cached_hashes
+
+
+def _prepare_embedding_texts(lib, rows, source_type: str) -> tuple[list[str], list[str]]:
+    hashes = []
+    texts = []
+    for row in rows:
+        h = str(row.hash)
+        if source_type in ["text", "text-4k"]:
+            from ..document import Document
+
+            doc = Document(lib.abspath(row.path))
+            doc.hash = h
+            txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
+            window = 4000 if source_type == "text-4k" else 2000
+            text = txt_p.read_text(encoding="utf-8", errors="ignore")[:window]
+        else:
+            text = f"{row.title}. {row.author}."
+        hashes.append(h)
+        texts.append(text)
+    return hashes, texts
+
+
+def _as_embedding_list(embeddings) -> list:
+    if hasattr(embeddings, "tolist"):
+        return embeddings.tolist()
+    return list(embeddings)
 
 
 @dataclass
@@ -139,6 +242,9 @@ class SemanticResult:
     cluster_summary: list[dict] = field(default_factory=list)
     cluster_themes: dict[int, str] = field(default_factory=dict)
     timings: list[TimingEvent] = field(default_factory=list)
+    embedding_work_count: int = 0
+    rg_command: str = ""
+    rg_cache_hit: bool = False
 
     def to_cytoscape_json(self, *, verbosity: str = "minimal") -> dict:
         payload_timer = PerformanceTimer()
@@ -202,6 +308,10 @@ class SemanticResult:
             "hashes": "|".join(self.result_df["hash"].dropna().astype(str).str[:8].unique()[:500]),
             "status_msg": status,
             "clusters": self.cluster_summary,
+            "embedded_count": self.embedded_count,
+            "cached_embedding_count": self.cached_embedding_count,
+            "embedding_work_count": self.embedding_work_count,
+            "embedding_work_pending": self.embedding_work_count > 0,
         }
         if verbosity == "verbose":
             messages = [
@@ -211,10 +321,14 @@ class SemanticResult:
                 f"Matched papers after query: {len(self.result_df)}",
                 f"Embedding index rows for source: {self.embedding_index_count}",
                 f"Embeddings used: {len(self.relevant_idx)} ({self.cached_embedding_count} cached, {self.embedded_count} new)",
+                f"Embedding work: {self.embedding_work_count} missing {self.source_type} embeddings",
                 f"Omitted papers without usable text: {len(self.omitted_hashes)}",
                 f"Projection input points: {len(elements)}; UMAP neighbors: {self.n_neighbors}",
                 f"Cluster pass complete: {len(self.cluster_summary)} clusters; min cluster size: {self.min_cluster_size}",
             ]
+            if self.rg_command:
+                messages.insert(3, f"Ripgrep command: {self.rg_command}")
+                messages.insert(4, f"Ripgrep cache: {'hit' if self.rg_cache_hit else 'miss'}")
             payload_timer.mark("semantic payload serialization")
             messages.extend(timing_messages(self.timings + payload_timer.events))
             payload["log_messages"] = messages
@@ -237,13 +351,20 @@ class SemanticResult:
         return result_df[existing_cols + remaining]
 
 
-def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> SemanticResult:
+def analyze_semantic(
+    lib,
+    raw_query: str,
+    source_type: str = "title",
+    *,
+    case_sensitive: bool = False,
+) -> SemanticResult:
     timer = PerformanceTimer()
     df = lib.database
     timer.mark("database load")
     model_cache_dir = str(get_semantic_model_cache_dir())
     timer.mark("model cache directory")
-    universe_hashes = resolve_universe(lib, raw_query)
+    universe_result = resolve_universe_details(lib, raw_query, case_sensitive=case_sensitive)
+    universe_hashes = universe_result.hashes
     timer.mark("universe resolution")
     result_df = df[df["hash"].astype(str).isin(universe_hashes)].copy()
     timer.mark("database filtering")
@@ -257,6 +378,8 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             source_type=source_type,
             model_cache_dir=model_cache_dir,
             timings=timer.events,
+            rg_command=universe_result.rg_command,
+            rg_cache_hit=universe_result.rg_cache_hit,
         )
 
     idx_path = lib.config_path / "semantic-embeddings.feather"
@@ -265,7 +388,8 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         if idx_path.exists()
         else pd.DataFrame(columns=["hash", "source", "embedding"])
     )
-    source_idx_count = len(idx_df[idx_df.source == source_type]) if not idx_df.empty else 0
+    source_idx, cached_hashes = _source_embedding_index(idx_df, source_type)
+    source_idx_count = len(source_idx)
     timer.mark("embedding cache load")
 
     to_embed = []
@@ -273,8 +397,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
 
     for _, row in result_df.iterrows():
         h = str(row.hash)
-        match = idx_df[(idx_df.hash == h) & (idx_df.source == source_type)]
-        if match.empty:
+        if h not in cached_hashes:
             if source_type in ["text", "text-4k"]:
                 from ..document import Document
 
@@ -299,36 +422,33 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             source_type=source_type,
             model_cache_dir=model_cache_dir,
             timings=timer.events,
+            rg_command=universe_result.rg_command,
+            rg_cache_hit=universe_result.rg_cache_hit,
         )
 
     if to_embed:
         model = get_transformer_model()
         timer.mark("transformer model load")
-        new_rows = []
-        for row in to_embed:
-            if source_type in ["text", "text-4k"]:
-                from ..document import Document
-
-                doc = Document(lib.abspath(row.path))
-                doc.hash = str(row.hash)
-                txt_p = doc.text_path(lib.text_dir_path, lib.config.extractor)
-                window = 4000 if source_type == "text-4k" else 2000
-                text = txt_p.read_text(encoding="utf-8", errors="ignore")[:window]
-            else:
-                text = f"{row.title}. {row.author}."
-
-            emb = model.encode(text, show_progress_bar=False).tolist()
-            new_rows.append({"hash": str(row.hash), "source": source_type, "embedding": emb})
+        embed_hashes, embed_texts = _prepare_embedding_texts(lib, to_embed, source_type)
+        timer.mark("missing embedding text preparation")
+        embeddings = model.encode(embed_texts, batch_size=32, show_progress_bar=False)
+        embedding_values = _as_embedding_list(embeddings)
+        new_rows = [
+            {"hash": h, "source": source_type, "embedding": emb}
+            for h, emb in zip(embed_hashes, embedding_values)
+        ]
         timer.mark("missing embedding generation")
 
         idx_df = pd.concat([idx_df, pd.DataFrame(new_rows)]).drop_duplicates(
             ["hash", "source"], keep="last"
         )
         idx_df.reset_index(drop=True).to_feather(idx_path)
-        source_idx_count = len(idx_df[idx_df.source == source_type])
+        source_idx, cached_hashes = _source_embedding_index(idx_df, source_type)
+        source_idx_count = len(source_idx)
         timer.mark("embedding cache write")
 
-    relevant_idx = idx_df[(idx_df.hash.isin(result_df.hash.astype(str))) & (idx_df.source == source_type)]
+    result_hashes = set(result_df.hash.astype(str))
+    relevant_idx = source_idx[source_idx.hash.astype(str).isin(result_hashes)]
     cached_embedding_count = max(0, len(relevant_idx) - len(to_embed))
     timer.mark("relevant embedding selection")
     if relevant_idx.empty:
@@ -345,6 +465,9 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             source_type=source_type,
             model_cache_dir=model_cache_dir,
             timings=timer.events,
+            embedding_work_count=len(to_embed),
+            rg_command=universe_result.rg_command,
+            rg_cache_hit=universe_result.rg_cache_hit,
         )
 
     import hdbscan
@@ -362,7 +485,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
             min_dist=0.1,
             n_components=2,
             metric="cosine",
-            random_state=42,
+            n_jobs=-1,
         )
         coords = reducer.fit_transform(embeddings)
     timer.mark("UMAP projection")
@@ -427,4 +550,7 @@ def analyze_semantic(lib, raw_query: str, source_type: str = "title") -> Semanti
         cluster_summary=cluster_summary,
         cluster_themes=cluster_themes,
         timings=timer.events,
+        embedding_work_count=len(to_embed),
+        rg_command=universe_result.rg_command,
+        rg_cache_hit=universe_result.rg_cache_hit,
     )

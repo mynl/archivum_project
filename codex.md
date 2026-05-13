@@ -74,6 +74,7 @@ Important current features:
 - Status and health views.
 - Report Studio with `.qmd` source files, Pandoc HTML rendering, Quarto PDF rendering, and artifact caching.
 - Split-horizon access control based on client IP, with admin and read-only modes.
+- Network and Semantic Discovery with shared query/ripgrep universe resolution, verbose timing logs, semantic embedding caches, and importer-style status reporting.
 
 When adding or changing web interface or core user-facing behavior, update:
 
@@ -92,6 +93,22 @@ Important implementation details:
 - `/ingest/preview` replaces the old ad hoc `Normalize Names` / `Generate Tag` buttons. Do not reintroduce separate tag/name preview logic unless it delegates to the same library helper.
 - `/ingest/commit` calls `Library.import_staged_document(...)`, reruns the importer, then saves through `update_library(save=True)`, shards the document, writes import audit files, and extracts text for new PDFs.
 - Previewed tags are advisory. The importer resets the library tag allocator during `map_tags()`, computes `proposed_tag`, and writes it into `ported_df`; the tag is only locked down when commit saves the library. If the library changes between preview and commit, the committed tag may differ.
+
+## Network And Semantic Notes
+
+The Network page shares universe resolution between the social graph and semantic galaxy.
+
+Important implementation details:
+
+- `src/archivum/search/universe.py` is the shared resolver. Prefer `resolve_universe_details(...)` when route or analytics code needs diagnostic metadata. It returns selected hashes plus the displayed ripgrep command and cache-hit state.
+- Queries can combine a querexfuzz part and an `rg` part, but the user often runs one or the other in practice. Keep the combined behavior working, but optimize the common single-mode paths.
+- Network-page ripgrep searches are case-insensitive by default. The Options menu has a `Case sensitive rg` checkbox that sends `case=sensitive`; the resolver omits `-i` only for that mode. Cache keys include case sensitivity.
+- Verbose social and semantic responses should include the displayed ripgrep command and cache hit/miss when an `rg` clause is present.
+- Semantic analysis uses `all-MiniLM-L6-v2`, cached under `BASE_DIR / "models" / "sentence-transformers"`, and stores per-paper embeddings in the library semantic cache.
+- Full-text semantic sources currently support title/metadata, first 2,000 characters, and first 4,000 characters. Preserve the existing source labels when changing routes or templates.
+- The Flask app starts background semantic warmups so first interactive semantic use is less likely to pay transformer/UMAP setup costs.
+- UMAP is intentionally allowed to use available cores; do not add a fixed `random_state` unless reproducibility is explicitly more important than latency, because that can force serial behavior in UMAP.
+- Verbose timing logs are user-visible and useful for performance triage. Keep spans for universe resolution, embedding cache load/lookup, model load, missing embedding generation, cache write, UMAP, HDBSCAN, cluster summaries, serialization, and browser fetch/parse/render timings.
 
 ## Safety Rules
 
