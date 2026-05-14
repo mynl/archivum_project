@@ -15,6 +15,7 @@ May 14
     2. From network: adds cluster info and picture thereof with categories and detail within (two pictures) ?matplotlib / svg; same basic logic
 5. Update README
 6. Update docs (documentation)
+7. 
 
 
 ****
