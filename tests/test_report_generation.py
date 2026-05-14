@@ -47,12 +47,16 @@ def test_query_report_respects_no_abstracts(tmp_path):
         title="Query Report",
         include_abstract=False,
         query="q Smith",
+        web_links=True,
     )
 
     text = out_path.read_text(encoding="utf-8")
-    assert "Smith2024" in text
+    assert "**[Smith2024](</view/Smith2024>){target=\"_blank\"}**" in text
     assert "## Query" in text
     assert "\n\n> " not in text
+    assert "<a " not in text
+    assert "href=" not in text
+    assert "</a>" not in text
 
 
 def test_semantic_report_writes_svg_assets_and_groups_background_last(tmp_path):
@@ -106,9 +110,15 @@ def test_semantic_report_writes_svg_assets_and_groups_background_last(tmp_path):
     assert "![Semantic cluster overview](/reports/asset/semantic-report-semantic-hulls.svg)" in text
     assert "![Semantic galaxy map](/reports/asset/semantic-report-semantic-galaxy.svg)" in text
     assert "Related terms:" in text
-    assert "cluster-summary-table" in text
+    assert "| Cluster | Theme | Papers | Representative samples |" in text
+    assert "| :-------- | :------ | -------: | :----------------------- |" in text
+    assert "| 1 | Risk Measures | 2 | Alpha Paper; Beta Paper |" in text
     assert "## Cluster Description" in text
+    assert "| Cluster | Theme | Papers | Expanded description |" in text
+    assert "| :-------- | :------ | -------: | :--------------------- |" in text
     assert "Expanded description" in text
+    for raw_html in ("<table", "<thead", "<tbody", "<tr", "<td", "<ul", "<li", "<strong>"):
+        assert raw_html not in text
     assert (tmp_path / "semantic-report-semantic-hulls.svg").exists()
     assert (tmp_path / "semantic-report-semantic-galaxy.svg").exists()
     assert text.index("### 1: Risk Measures") < text.index("### Lone Star")

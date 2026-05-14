@@ -10,13 +10,15 @@ May 14
     3. Network ->  to query, csv, bibtex, bibtex-ex
   Bibtex-ex include mendeley file name if any, cluster no and name, coords (prob membership?) from network
   CSV includes same extra columns
-4. Report
+4. DONE Report
     1. From query
     2. From network: adds cluster info and picture thereof with categories and detail within (two pictures) ?matplotlib / svg; same basic logic
     Drop down button, default (with abstracts), option no abstracts
 5. DONE Update README
 6. Update docs (documentation)
 
+
+Issues: reports - image links don't work for PDF output. 
 
 ****
 

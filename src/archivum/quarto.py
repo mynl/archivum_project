@@ -67,6 +67,29 @@ def sanitize_for_latex(text: str) -> str:
     return "".join(ch for ch in text if ord(ch) >= 32 or ch in '\n\r\t')
 
 
+def _markdown_link(label: object, target: object, *, target_blank: bool = True) -> str:
+    clean_label = str(label or "").replace("[", "\\[").replace("]", "\\]")
+    clean_target = str(target or "").replace("\\", "/").replace(")", "%29")
+    attrs = '{target="_blank"}' if target_blank else ""
+    return f"[{clean_label}](<{clean_target}>){attrs}"
+
+
+def _markdown_table_cell(value: object) -> str:
+    text = clean_latex(str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.replace("|", "\\|")
+
+
+def _markdown_pipe_table(headers: list[str], alignments: list[str], rows: list[list[object]]) -> str:
+    lines = [
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join(alignments) + " |",
+    ]
+    for row in rows:
+        lines.append("| " + " | ".join(_markdown_table_cell(cell) for cell in row) + " |")
+    return "\n".join(lines)
+
+
 def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | None = None, abstract: bool = True, web_links: bool = False) -> str:
     """
     Format a single reference line for QMD output.
@@ -87,14 +110,14 @@ def format_qmd_reference_line(lib: object, row: pd.Series, paras: list[int] | No
 
     # Document link - the Tag is now the link
     if web_links:
-        tag_link = f'**<a target="_blank" href="/view/{tag}">{tag}</a>**'
+        tag_link = f"**{_markdown_link(tag, f'/view/{tag}')}**"
     else:
         doc_path = None
         if hasattr(row, "path") and pd.notna(row.path):
             doc_path = lib.abspath(row.path)
         
         if doc_path and doc_path.exists():
-            tag_link = f'**<a target="_blank" href="{doc_path}">{tag}</a>**'
+            tag_link = f"**{_markdown_link(tag, doc_path)}**"
         else:
             tag_link = f'**{tag}**'
 
@@ -564,56 +587,42 @@ def _cluster_word_list(result, cluster_id: int, limit: int = 14) -> str:
     return ", ".join(counts.head(limit).index.astype(str).tolist())
 
 
-def _cluster_summary_html(result) -> str:
-    lines = [
-        '<table class="cluster-summary-table">',
-        "<colgroup>",
-        '<col class="cluster-col">',
-        '<col class="theme-col">',
-        '<col class="count-col">',
-        '<col class="sample-col">',
-        "</colgroup>",
-        "<thead><tr><th>Cluster</th><th>Theme</th><th>Papers</th><th>Representative samples</th></tr></thead>",
-        "<tbody>",
-    ]
+def _cluster_summary_markdown(result) -> str:
+    rows = []
     for cluster in result.cluster_summary:
-        samples = "".join(f"<li>{clean_latex(str(s))}</li>" for s in cluster.get("samples", []))
-        lines.append(
-            "<tr>"
-            f"<td>{cluster['number']}</td>"
-            f"<td><strong>{cluster['name']}</strong></td>"
-            f"<td>{cluster['count']}</td>"
-            f"<td><ul>{samples}</ul></td>"
-            "</tr>"
+        samples = "; ".join(clean_latex(str(s)) for s in cluster.get("samples", []))
+        rows.append(
+            [
+                cluster["number"],
+                cluster["name"],
+                cluster["count"],
+                samples,
+            ]
         )
-    lines.extend(["</tbody>", "</table>"])
-    return "\n".join(lines)
+    return _markdown_pipe_table(
+        ["Cluster", "Theme", "Papers", "Representative samples"],
+        [":--------", ":------", "-------:", ":-----------------------"],
+        rows,
+    )
 
 
-def _cluster_description_html(result) -> str:
-    lines = [
-        '<table class="cluster-summary-table">',
-        "<colgroup>",
-        '<col class="cluster-col">',
-        '<col class="theme-col">',
-        '<col class="count-col">',
-        '<col class="sample-col">',
-        "</colgroup>",
-        "<thead><tr><th>Cluster</th><th>Theme</th><th>Papers</th><th>Expanded description</th></tr></thead>",
-        "<tbody>",
-    ]
+def _cluster_description_markdown(result) -> str:
+    rows = []
     for cluster in result.cluster_summary:
         description = _cluster_word_list(result, int(cluster["id"])) or ""
-        lines.append(
-            "<tr>"
-            f"<td>{cluster['number']}</td>"
-            f"<td><strong>{cluster['name']}</strong></td>"
-            f"<td>{cluster['count']}</td>"
-            f"<td>{description}</td>"
-            "</tr>"
+        rows.append(
+            [
+                cluster["number"],
+                cluster["name"],
+                cluster["count"],
+                description,
+            ]
         )
-    lines.extend(["</tbody>", "</table>"])
-    return "\n".join(lines)
+    return _markdown_pipe_table(
+        ["Cluster", "Theme", "Papers", "Expanded description"],
+        [":--------", ":------", "-------:", ":---------------------"],
+        rows,
+    )
 
 
 def generate_semantic_qmd_report(
@@ -662,9 +671,9 @@ def generate_semantic_qmd_report(
         "## Cluster Summary",
         "",
     ])
-    lines.append(_cluster_summary_html(result))
+    lines.append(_cluster_summary_markdown(result))
     lines.extend(["", "## Cluster Description", ""])
-    lines.append(_cluster_description_html(result))
+    lines.append(_cluster_description_markdown(result))
     lines.extend(["", "---", "", "## References", ""])
 
     ordered_clusters = [(int(c["id"]), f"{c['number']}: {c['name']}") for c in result.cluster_summary]
@@ -734,10 +743,14 @@ def generate_social_qmd_report(
         "|---|---:|",
     ])
     for author in top_authors:
-        lines.append(f"| {author.get('label', author.get('id', ''))} | {author.get('weight', 0)} |")
+        lines.append(
+            f"| {_markdown_table_cell(author.get('label', author.get('id', '')))} | {_markdown_table_cell(author.get('weight', 0))} |"
+        )
     lines.extend(["", "## Top Collaborations", "", "| Authors | Shared papers |", "|---|---:|"])
     for source, target, edge in top_edges:
-        lines.append(f"| {source} / {target} | {edge.get('weight', 0)} |")
+        lines.append(
+            f"| {_markdown_table_cell(f'{source} / {target}')} | {_markdown_table_cell(edge.get('weight', 0))} |"
+        )
     lines.extend(["", "---", "", "## References", ""])
     for _, row in pdf.iterrows():
         lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract, web_links=web_links))

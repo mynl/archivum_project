@@ -350,6 +350,7 @@ Enhanced Report Studio and Network report generation:
   - semantic galaxy labels now show only tags, allowing more sampled labels without title clutter;
   - semantic report images now appear after `## Analysis` under `## Visualizations`.
 - Semantic reports now add `## Cluster Description` after `## Cluster Summary`, with a table matching the summary layout and an expanded description column; the same expanded terms remain duplicated in the References cluster sections.
+- Generated Studio report `.qmd` now avoids raw HTML in report content: semantic summary/description tables are QMD pipe tables, and report document links use Pandoc markdown link syntax with attributes instead of `<a>` tags.
 - Report images are embedded through `/reports/asset/<asset-name>` so Pandoc-rendered HTML can load them correctly from `/reports/view/<id>`.
 - Report HTML styling now improves tables, headings, horizontal rules, cluster summary column widths, and removes image borders.
 - Report generation now writes sidecar recipe metadata `<slug>.report.json`.
@@ -383,7 +384,7 @@ uv run --extra test pytest -q
 
 Results:
 
-- Report generation tests: 5 passed after the Cluster Description addition.
+- Report generation tests: 5 passed after the pure-QMD table/link conversion.
 - Focused report/UI tests: 6 passed.
 - Fast web suite: 4 passed.
 - Default pytest selection: 30 passed, 21 skipped.
