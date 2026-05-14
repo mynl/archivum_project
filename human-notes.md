@@ -1,3 +1,25 @@
+May 14
+
+# Ideas
+
+1. Create new library from bibtex - what is shared etc?
+2. Create a test library
+3. Export
+    1. From query -> csv, bibtex, bibtex-ex
+    2. Ripgrep -> to query, csv, bibtex, bibtex-ex
+    3. Network ->  to query, csv, bibtex, bibtex-ex
+  Bibtex-ex include mendeley file name if any, cluster no and name, coords (prob membership?) from network
+  CSV includes same extra columns
+4. Report
+    1. From query
+    2. From network: adds cluster info and picture thereof with categories and detail within (two pictures) ?matplotlib / svg; same basic logic
+5. Update README
+6. Update docs (documentation)
+
+
+****
+
+
 May 13
 
 # Archivum Improvement Roadmap

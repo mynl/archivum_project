@@ -2,6 +2,8 @@
 
 This file is for future Codex sessions in this repository. Read it at the start of a session, along with `GEMINI.md`, before making code changes.
 
+Keep it updated with changes to code (add at end along with date).
+
 ## Startup Checks
 
 Always confirm the shell is actually in the repository before running repo-sensitive commands. A previous Codex tool call started in `C:\` even though the intended working directory was `C:\temp\GitHub\archivum_project`.
