@@ -5,8 +5,12 @@ from pathlib import Path
 import re
 import pandas as pd
 import logging
+import math
+import textwrap
 
 from .bibtex import dict_to_bibtex
+from .analytics.semantic import SEMANTIC_PALETTE
+from .utilities import clean_latex
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +210,10 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path,
     if 'path' not in pdf.columns and 'tag' in pdf.columns:
         try:
             extra_info = lib.ref_doc_df.merge(lib.doc_df, on=["hash", "version"], how="inner")
-            pdf = pdf.merge(extra_info[['tag', 'path', 'hash']], on="tag", how="left")
+            merge_cols = ["tag", "path"]
+            if "hash" not in pdf.columns:
+                merge_cols.append("hash")
+            pdf = pdf.merge(extra_info[merge_cols], on="tag", how="left")
         except Exception as e:
             logger.warning(f"Failed to merge file info for report: {e}")
 
@@ -254,6 +261,488 @@ def generate_qmd_report(lib: object, df: pd.DataFrame, out_path: Path,
     lines.append(":::")
     lines.append("")
 
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _report_asset_name(out_path: Path, suffix: str) -> str:
+    return f"{out_path.stem}-{suffix}.svg"
+
+
+def _report_asset_link(asset_name: str) -> str:
+    return f"/reports/asset/{asset_name}"
+
+
+def _wrap_label(text: object, width: int = 18, max_lines: int = 3) -> str:
+    clean = clean_latex(str(text or "")).strip()
+    if not clean:
+        return ""
+    lines = textwrap.wrap(clean, width=width, break_long_words=False, break_on_hyphens=False)
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1].rstrip(".") + "..."
+    return "\n".join(lines)
+
+
+def _save_figure(fig, path: Path) -> None:
+    fig.savefig(path, format="svg", bbox_inches="tight")
+    fig.clear()
+
+
+def _prepare_report_rows(lib: object, df: pd.DataFrame) -> pd.DataFrame:
+    pdf = df.copy()
+    if "tag" not in pdf.columns:
+        pdf["tag"] = "Unknown"
+    if "path" not in pdf.columns and "tag" in pdf.columns:
+        try:
+            extra_info = lib.ref_doc_df.merge(lib.doc_df, on=["hash", "version"], how="inner")
+            merge_cols = ["tag", "path"]
+            if "hash" not in pdf.columns:
+                merge_cols.append("hash")
+            pdf = pdf.merge(extra_info[merge_cols], on="tag", how="left")
+        except Exception as e:
+            logger.warning(f"Failed to merge file info for report: {e}")
+    return pdf
+
+
+def _sort_report_rows(df: pd.DataFrame) -> pd.DataFrame:
+    pdf = df.copy()
+    sort_cols = []
+    if "author" in pdf.columns:
+        def get_sort_author(s):
+            if not isinstance(s, str) or not s:
+                return ""
+            return s.split(" and ")[0].split(",")[0].strip("{}")
+        pdf["_sort_author"] = pdf["author"].apply(get_sort_author)
+        sort_cols.append("_sort_author")
+    if "year" in pdf.columns:
+        sort_cols.append("year")
+    if "tag" in pdf.columns:
+        sort_cols.append("tag")
+    if sort_cols:
+        pdf = pdf.sort_values(sort_cols)
+    return pdf.drop(columns=["_sort_author"], errors="ignore")
+
+
+def _convex_hull(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
+    unique = sorted(set((float(x), float(y)) for x, y in points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower = []
+    for p in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    return lower[:-1] + upper[:-1]
+
+
+def _semantic_point_records(result) -> list[dict]:
+    records = []
+    for i, (_, row_idx) in enumerate(result.relevant_idx.iterrows()):
+        matches = result.result_df[result.result_df.hash.astype(str) == str(row_idx.hash)]
+        if matches.empty:
+            continue
+        meta = matches.iloc[0]
+        cid = int(result.cluster_labels[i])
+        cluster_number = ""
+        for cs in result.cluster_summary:
+            if cs["id"] == cid:
+                cluster_number = cs["number"]
+                break
+        records.append(
+            {
+                "hash": str(row_idx.hash),
+                "x": float(result.coords[i][0]),
+                "y": float(result.coords[i][1]),
+                "cluster_id": cid,
+                "cluster_number": cluster_number,
+                "cluster_name": result.cluster_themes.get(cid, "Lone Star"),
+                "color": SEMANTIC_PALETTE[cid % len(SEMANTIC_PALETTE)] if cid >= 0 else "#adb5bd",
+                "tag": str(meta.get("tag", "")),
+                "title": clean_latex(str(meta.get("title", ""))),
+                "author": str(meta.get("author", "")),
+                "year": str(meta.get("year", "")),
+            }
+        )
+    return records
+
+
+def _plot_semantic_hulls(result, out_path: Path) -> str:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+
+    records = _semantic_point_records(result)
+    asset_name = _report_asset_name(out_path, "semantic-hulls")
+    fig_path = out_path.parent / asset_name
+    fig, ax = plt.subplots(figsize=(10, 7))
+    ax.set_facecolor("#f8f9fa")
+    ax.axis("off")
+
+    for cluster in result.cluster_summary:
+        cid = int(cluster["id"])
+        pts = [(r["x"], r["y"]) for r in records if r["cluster_id"] == cid]
+        if not pts:
+            continue
+        color = cluster["color"]
+        if len(pts) >= 3:
+            hull = _convex_hull(pts)
+            patch = Polygon(hull, closed=True, facecolor=color, edgecolor=color, alpha=0.16, linewidth=2.0)
+            ax.add_patch(patch)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        ax.scatter(xs, ys, s=18, color=color, alpha=0.65, linewidths=0)
+        ax.text(
+            sum(xs) / len(xs),
+            sum(ys) / len(ys),
+            _wrap_label(f"{cluster['number']}: {cluster['name']}", width=15, max_lines=3),
+            ha="center",
+            va="center",
+            fontsize=6.5,
+            fontweight="normal",
+            color="#000000",
+            linespacing=1.1,
+        )
+
+    ax.set_title("Semantic Cluster Overview", fontsize=12, fontweight="bold", color="#000000")
+    _save_figure(fig, fig_path)
+    plt.close(fig)
+    return asset_name
+
+
+def _plot_semantic_galaxy(result, out_path: Path) -> str:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    records = _semantic_point_records(result)
+    asset_name = _report_asset_name(out_path, "semantic-galaxy")
+    fig_path = out_path.parent / asset_name
+    fig, ax = plt.subplots(figsize=(11, 8))
+    ax.set_facecolor("#f8f9fa")
+    ax.axis("off")
+
+    background = [r for r in records if r["cluster_id"] < 0]
+    if background:
+        collection = ax.scatter(
+            [r["x"] for r in background],
+            [r["y"] for r in background],
+            s=22,
+            color="#adb5bd",
+            alpha=0.45,
+            label="Lone Star",
+            linewidths=0,
+        )
+        try:
+            collection.set_urls([f"/view/{r['tag']}" for r in background])
+        except Exception:
+            pass
+
+    for cluster in result.cluster_summary:
+        cid = int(cluster["id"])
+        pts = [r for r in records if r["cluster_id"] == cid]
+        if not pts:
+            continue
+        collection = ax.scatter(
+            [r["x"] for r in pts],
+            [r["y"] for r in pts],
+            s=34,
+            color=cluster["color"],
+            alpha=0.82,
+            label=f"{cluster['number']}: {cluster['name']}",
+            linewidths=0.3,
+            edgecolors="white",
+        )
+        try:
+            collection.set_urls([f"/view/{r['tag']}" for r in pts])
+        except Exception:
+            pass
+        for row in pts[:8]:
+            label = _wrap_label(row["tag"], width=10, max_lines=1)
+            ax.text(
+                row["x"],
+                row["y"],
+                label,
+                fontsize=4.5,
+                color="#000000",
+                alpha=0.92,
+                linespacing=1.05,
+                bbox={"boxstyle": "round,pad=0.16", "facecolor": "white", "edgecolor": "none", "alpha": 0.72},
+            )
+
+    ax.set_title("Semantic Galaxy Map", fontsize=12, fontweight="bold", color="#000000")
+    _save_figure(fig, fig_path)
+    plt.close(fig)
+    return asset_name
+
+
+def _plot_social_network(result, out_path: Path) -> str:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import networkx as nx
+
+    asset_name = _report_asset_name(out_path, "social-network")
+    fig_path = out_path.parent / asset_name
+    graph = nx.Graph()
+    for node in result.nodes:
+        data = node.get("data", {})
+        graph.add_node(data.get("id"), **data)
+    for (source, target), edge in result.edges.items():
+        graph.add_edge(source, target, weight=int(edge.get("weight", 1)), papers=edge.get("papers", []))
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax.set_facecolor("#f8f9fa")
+    ax.axis("off")
+    if graph.number_of_nodes() == 0:
+        ax.text(0.5, 0.5, "No social graph data", ha="center", va="center", transform=ax.transAxes)
+        _save_figure(fig, fig_path)
+        plt.close(fig)
+        return asset_name
+
+    pos = nx.spring_layout(graph, seed=42, k=1 / math.sqrt(max(1, graph.number_of_nodes())))
+    weights = [graph.nodes[n].get("weight", 1) for n in graph.nodes]
+    node_sizes = [120 + min(1250, w * 70) for w in weights]
+    edge_widths = [0.7 + min(5.0, graph.edges[e].get("weight", 1) * 0.7) for e in graph.edges]
+    nx.draw_networkx_edges(graph, pos, ax=ax, width=edge_widths, edge_color="#adb5bd", alpha=0.38)
+    nx.draw_networkx_nodes(
+        graph,
+        pos,
+        ax=ax,
+        node_size=node_sizes,
+        node_color="#0d6efd",
+        alpha=0.78,
+        linewidths=1.0,
+        edgecolors="white",
+    )
+    labels = {n: _wrap_label(n, width=11, max_lines=5) for n in graph.nodes}
+    nx.draw_networkx_labels(
+        graph,
+        pos,
+        labels=labels,
+        ax=ax,
+        font_size=5.4,
+        font_color="#000000",
+    )
+    ax.set_title("Social Network", fontsize=12, fontweight="bold", color="#000000")
+    _save_figure(fig, fig_path)
+    plt.close(fig)
+    return asset_name
+
+
+def _cluster_word_list(result, cluster_id: int, limit: int = 14) -> str:
+    cluster_hashes = [
+        str(result.relevant_idx.iloc[i].hash)
+        for i, label in enumerate(result.cluster_labels)
+        if int(label) == cluster_id
+    ]
+    if not cluster_hashes:
+        return ""
+    titles = result.result_df[result.result_df.hash.astype(str).isin(cluster_hashes)].title.dropna().astype(str)
+    words = []
+    stop_words = {
+        "the", "and", "for", "with", "from", "that", "this", "into", "using",
+        "based", "model", "models", "paper", "study", "analysis", "approach",
+        "results", "data", "risk", "risks",
+    }
+    for title in titles:
+        tokens = re.findall(r"\b[a-z][a-z-]{3,}\b", clean_latex(title).lower())
+        words.extend([w for w in tokens if w not in stop_words])
+    counts = pd.Series(words).value_counts()
+    return ", ".join(counts.head(limit).index.astype(str).tolist())
+
+
+def _cluster_summary_html(result) -> str:
+    lines = [
+        '<table class="cluster-summary-table">',
+        "<colgroup>",
+        '<col class="cluster-col">',
+        '<col class="theme-col">',
+        '<col class="count-col">',
+        '<col class="sample-col">',
+        "</colgroup>",
+        "<thead><tr><th>Cluster</th><th>Theme</th><th>Papers</th><th>Representative samples</th></tr></thead>",
+        "<tbody>",
+    ]
+    for cluster in result.cluster_summary:
+        samples = "".join(f"<li>{clean_latex(str(s))}</li>" for s in cluster.get("samples", []))
+        lines.append(
+            "<tr>"
+            f"<td>{cluster['number']}</td>"
+            f"<td><strong>{cluster['name']}</strong></td>"
+            f"<td>{cluster['count']}</td>"
+            f"<td><ul>{samples}</ul></td>"
+            "</tr>"
+        )
+    lines.extend(["</tbody>", "</table>"])
+    return "\n".join(lines)
+
+
+def _cluster_description_html(result) -> str:
+    lines = [
+        '<table class="cluster-summary-table">',
+        "<colgroup>",
+        '<col class="cluster-col">',
+        '<col class="theme-col">',
+        '<col class="count-col">',
+        '<col class="sample-col">',
+        "</colgroup>",
+        "<thead><tr><th>Cluster</th><th>Theme</th><th>Papers</th><th>Expanded description</th></tr></thead>",
+        "<tbody>",
+    ]
+    for cluster in result.cluster_summary:
+        description = _cluster_word_list(result, int(cluster["id"])) or ""
+        lines.append(
+            "<tr>"
+            f"<td>{cluster['number']}</td>"
+            f"<td><strong>{cluster['name']}</strong></td>"
+            f"<td>{cluster['count']}</td>"
+            f"<td>{description}</td>"
+            "</tr>"
+        )
+    lines.extend(["</tbody>", "</table>"])
+    return "\n".join(lines)
+
+
+def generate_semantic_qmd_report(
+    lib: object,
+    result,
+    out_path: Path,
+    *,
+    title: str = "Archivum Semantic Report",
+    intro_text: str = "",
+    include_abstract: bool = True,
+    query: str = "",
+    web_links: bool = False,
+) -> None:
+    if result.result_df.empty:
+        out_path.write_text("No results found.", encoding="utf-8")
+        return
+
+    pdf = _prepare_report_rows(lib, result.result_df)
+    hash_to_cluster = {}
+    for i, (_, row) in enumerate(result.relevant_idx.iterrows()):
+        hash_to_cluster[str(row.hash)] = int(result.cluster_labels[i])
+    pdf["_cluster_id"] = pdf["hash"].astype(str).map(hash_to_cluster).fillna(-1).astype(int)
+
+    hull_asset = _plot_semantic_hulls(result, out_path)
+    galaxy_asset = _plot_semantic_galaxy(result, out_path)
+
+    header = build_studio_header(title, lib.config.bibtex_file, getattr(lib.config, "csl_file", DEFAULT_CSL))
+    lines = [header]
+    if intro_text:
+        lines.extend(["# Introduction", intro_text, ""])
+    lines.extend([
+        "## Analysis",
+        f"- Query: `{query}`",
+        f"- Semantic source: `{result.source_type}`",
+        f"- Matched papers: {len(result.result_df)}",
+        f"- Rendered papers: {len(result.relevant_idx)}",
+        f"- Omitted papers: {len(result.omitted_hashes)}",
+        f"- Clusters: {len(result.cluster_summary)}",
+        "",
+        "## Visualizations",
+        "",
+        f"![Semantic cluster overview]({_report_asset_link(hull_asset)})",
+        "",
+        f"![Semantic galaxy map]({_report_asset_link(galaxy_asset)})",
+        "",
+        "## Cluster Summary",
+        "",
+    ])
+    lines.append(_cluster_summary_html(result))
+    lines.extend(["", "## Cluster Description", ""])
+    lines.append(_cluster_description_html(result))
+    lines.extend(["", "---", "", "## References", ""])
+
+    ordered_clusters = [(int(c["id"]), f"{c['number']}: {c['name']}") for c in result.cluster_summary]
+    ordered_clusters.append((-1, "Lone Star"))
+    for cid, heading in ordered_clusters:
+        group = pdf[pdf["_cluster_id"] == cid]
+        if group.empty:
+            continue
+        lines.extend([f"### {heading}", ""])
+        word_list = _cluster_word_list(result, cid)
+        if word_list:
+            lines.extend([f"**Related terms:** {word_list}", ""])
+        for _, row in _sort_report_rows(group).iterrows():
+            lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract, web_links=web_links))
+            lines.append("")
+
+    lines.extend(["", "## Bibliography", "", "::: {#refs}", ":::", ""])
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def generate_social_qmd_report(
+    lib: object,
+    result,
+    out_path: Path,
+    *,
+    title: str = "Archivum Social Network Report",
+    intro_text: str = "",
+    include_abstract: bool = True,
+    query: str = "",
+    web_links: bool = False,
+) -> None:
+    if result.result_df.empty:
+        out_path.write_text("No results found.", encoding="utf-8")
+        return
+
+    social_asset = _plot_social_network(result, out_path)
+    pdf = _sort_report_rows(_prepare_report_rows(lib, result.result_df))
+    top_authors = sorted(
+        [n.get("data", {}) for n in result.nodes],
+        key=lambda d: int(d.get("weight", 0)),
+        reverse=True,
+    )[:20]
+    top_edges = sorted(
+        [(source, target, data) for (source, target), data in result.edges.items()],
+        key=lambda item: int(item[2].get("weight", 0)),
+        reverse=True,
+    )[:20]
+
+    header = build_studio_header(title, lib.config.bibtex_file, getattr(lib.config, "csl_file", DEFAULT_CSL))
+    lines = [header]
+    if intro_text:
+        lines.extend(["# Introduction", intro_text, ""])
+    lines.extend([
+        "## Analysis",
+        f"- Query: `{query}`",
+        f"- Papers: {len(result.result_df)}",
+        f"- Authors: {len(result.nodes)}",
+        f"- Collaborations: {len(result.edges)}",
+        "",
+        "## Social Network",
+        "",
+        f"![Social network]({_report_asset_link(social_asset)})",
+        "",
+        "## Top Authors",
+        "",
+        "| Author | Papers |",
+        "|---|---:|",
+    ])
+    for author in top_authors:
+        lines.append(f"| {author.get('label', author.get('id', ''))} | {author.get('weight', 0)} |")
+    lines.extend(["", "## Top Collaborations", "", "| Authors | Shared papers |", "|---|---:|"])
+    for source, target, edge in top_edges:
+        lines.append(f"| {source} / {target} | {edge.get('weight', 0)} |")
+    lines.extend(["", "---", "", "## References", ""])
+    for _, row in pdf.iterrows():
+        lines.append(format_qmd_reference_line(lib, row, abstract=include_abstract, web_links=web_links))
+        lines.append("")
+    lines.extend(["", "## Bibliography", "", "::: {#refs}", ":::", ""])
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
 

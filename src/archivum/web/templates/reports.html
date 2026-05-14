@@ -10,11 +10,16 @@
     <div class="col-md-5">
         <div class="card shadow-sm border-0 bg-white h-100">
             <div class="card-header bg-primary text-white py-3">
-                <h5 class="card-title mb-0"><i class="bi bi-magic me-2"></i>Report Studio</h5>
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-magic me-2"></i>{{ 'Edit Report Recipe' if edit_id else 'Report Studio' }}
+                </h5>
             </div>
             <div class="card-body p-4">
                 <form id="report-form" hx-post="{{ url_for('main.reports_generate') }}" hx-swap="none" hx-on::after-request="handleGenerateResponse(event)">
                     <input type="hidden" name="query" value="{{ query }}">
+                    <input type="hidden" name="source" value="{{ source | default('query') }}">
+                    <input type="hidden" name="semantic_source" value="{{ semantic_source | default('title') }}">
+                    <input type="hidden" name="case" value="{{ case_mode | default('insensitive') }}">
                     
                     <div class="mb-3">
                         <label class="form-label fw-bold small text-uppercase">Source Query</label>
@@ -22,26 +27,56 @@
                     </div>
 
                     <div class="mb-3">
+                        <label class="form-label fw-bold small text-uppercase">Report Source</label>
+                        <div class="d-flex flex-wrap gap-2 small">
+                            <span class="badge bg-light text-dark border">{{ source | default('query') }}</span>
+                            {% if source | default('query') == 'semantic' %}
+                            <span class="badge bg-light text-dark border">semantic source: {{ semantic_source | default('title') }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small text-uppercase">Reference Detail</label>
+                        <div class="btn-group w-100" role="group" aria-label="Reference detail">
+                            <input type="radio" class="btn-check" name="include_abstract" id="abstract-on" value="1" autocomplete="off" {% if include_abstract | default(true) %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="abstract-on">
+                                <i class="bi bi-card-text me-1"></i> Abstracts
+                            </label>
+                            <input type="radio" class="btn-check" name="include_abstract" id="abstract-off" value="0" autocomplete="off" {% if not (include_abstract | default(true)) %}checked{% endif %}>
+                            <label class="btn btn-outline-secondary" for="abstract-off">
+                                <i class="bi bi-list-ul me-1"></i> No Abstracts
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <label for="title" class="form-label fw-bold small text-uppercase">Report Title</label>
-                        <input type="text" id="title" name="title" class="form-control" placeholder="e.g., Wang Review 2026" required onkeyup="syncFilename()">
+                        <input type="text" id="title" name="title" class="form-control" placeholder="e.g., Wang Review 2026" required onkeyup="syncFilename()" value="{{ edit_title }}">
                     </div>
 
                     <div class="mb-3">
                         <label for="filename" class="form-label fw-bold small text-uppercase">Filename (Slug)</label>
                         <div class="input-group input-group-sm">
-                            <input type="text" id="filename" name="filename" class="form-control font-monospace" placeholder="auto-generated">
+                            <input type="text" id="filename" name="filename" class="form-control font-monospace" placeholder="auto-generated" value="{{ edit_filename }}">
                             <span class="input-group-text">.qmd</span>
                         </div>
+                        {% if edit_id %}
+                        <div class="form-text">Keep this slug to regenerate the existing report, or change it to create a new report.</div>
+                        {% endif %}
                     </div>
 
                     <div class="mb-4">
                         <label for="intro" class="form-label fw-bold small text-uppercase">Introduction / Research Notes</label>
-                        <textarea id="intro" name="intro" class="form-control" rows="8" placeholder="Markdown supported. Explain the context or goals of this extract..."></textarea>
+                        <textarea id="intro" name="intro" class="form-control" rows="8" placeholder="Markdown supported. Explain the context or goals of this extract...">{{ edit_intro }}</textarea>
+                        {% if edit_id %}
+                        <div class="form-text">Regeneration uses the saved recipe and can overwrite manual edits made directly in the QMD if the slug is unchanged.</div>
+                        {% endif %}
                     </div>
 
                     <div class="d-grid">
                         <button type="submit" class="btn btn-primary btn-lg shadow-sm">
-                            <span class="indicator-label"><i class="bi bi-file-earmark-plus me-2"></i>Generate Report</span>
+                            <span class="indicator-label"><i class="bi bi-file-earmark-plus me-2"></i>{{ 'Regenerate Report' if edit_id else 'Generate Report' }}</span>
                             <span class="htmx-indicator spinner-border spinner-border-sm ms-2" role="status"></span>
                         </button>
                     </div>
@@ -73,11 +108,22 @@
                             <tr id="report-row-{{ report.id }}">
                                 <td class="ps-4 small text-muted">{{ report.date }}</td>
                                 <td>
-                                    <div class="fw-bold text-dark">{{ report.id.replace('-', ' ').title() }}</div>
-                                    <div class="small text-muted font-monospace" style="font-size: 0.7rem;">{{ report.name }}</div>
+                                    <div class="fw-bold text-dark">{{ report.title }}</div>
+                                    <div class="small text-muted font-monospace" style="font-size: 0.7rem;">
+                                        {{ report.name }}{% if report.source %} · {{ report.source }}{% endif %}
+                                    </div>
                                 </td>
                                 <td class="text-end pe-4">
                                     <div class="btn-group btn-group-sm shadow-sm">
+                                        {% if is_admin and report.has_meta %}
+                                        <a href="{{ url_for('main.reports_page', edit=report.id) }}" class="btn btn-outline-success" title="Reload Report Studio from saved recipe">
+                                            <i class="bi bi-pencil-square me-1"></i> Edit
+                                        </a>
+                                        {% elif is_admin %}
+                                        <button class="btn btn-outline-secondary disabled opacity-50" disabled title="No saved report metadata for this older report">
+                                            <i class="bi bi-pencil-square me-1"></i> Edit
+                                        </button>
+                                        {% endif %}
                                         <a href="{{ url_for('main.reports_view', report_id=report.id) }}" class="btn btn-outline-primary" title="View Integrated HTML">
                                             <i class="bi bi-eye-fill me-1"></i> HTML
                                         </a>
@@ -179,6 +225,7 @@ function handleGenerateResponse(evt) {
         margin-bottom: 1.5rem; 
     }
     .report-body h2 { font-weight: 700; margin-top: 2.5rem; color: #444; border-bottom-width: 1px; }
+    .report-body h3 { font-size: 1.15rem; margin-top: 2rem; border-bottom-width: 1px; }
     
     .report-body code { background: #f8f9fa; padding: 0.2em 0.4em; border-radius: 3px; font-size: 0.9em; }
     
@@ -194,6 +241,17 @@ function handleGenerateResponse(evt) {
     
     /* References styling */
     .report-body p { margin-bottom: 1rem; }
+    .report-body hr { margin: 2rem 0; border-top: 2px solid #dee2e6; opacity: 1; }
+    .report-body img { max-width: 100%; height: auto; display: block; margin: 1rem auto 2rem; background: transparent; }
+    .report-body table { width: 100%; border-collapse: collapse; margin: 1rem 0 2rem; font-family: 'Inter', system-ui, -apple-system, sans-serif; font-size: 0.9rem; }
+    .report-body th { border-bottom: 2px solid #adb5bd; padding: 0.55rem 0.65rem; text-align: left; background: #f8f9fa; }
+    .report-body td { border-bottom: 1px solid #dee2e6; padding: 0.55rem 0.65rem; vertical-align: top; }
+    .report-body .cluster-summary-table { table-layout: fixed; }
+    .report-body .cluster-summary-table .cluster-col { width: 4.5rem; }
+    .report-body .cluster-summary-table .theme-col { width: 22%; }
+    .report-body .cluster-summary-table .count-col { width: 5rem; }
+    .report-body .cluster-summary-table .sample-col { width: auto; }
+    .report-body .cluster-summary-table ul { margin: 0; padding-left: 1.1rem; }
     .report-body a { text-decoration: none; color: var(--primary-color); }
     .report-body a:hover { text-decoration: underline; }
 </style>

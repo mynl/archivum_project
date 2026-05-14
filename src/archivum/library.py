@@ -87,7 +87,6 @@ class Library(LibraryBase):
 
         self.exports_dir_path = self.config_path / "exports"
         self.exports_dir_path.mkdir(parents=True, exist_ok=True)
-        self._cleanup_exports()
 
         # State for auto-reload
         self.needs_reload = False

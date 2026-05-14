@@ -20,6 +20,7 @@ dependencies = [
     "ipython",
     "latexcodec",
     "lark",
+    "matplotlib",
     "nameparser",
     "networkx",
     "numpy",

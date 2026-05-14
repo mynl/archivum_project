@@ -72,6 +72,12 @@
         {% set id_prefix = 'net' %}
         {% set input_id = 'network-search' %}
         {% include "components/export_button.html" with context %}
+
+        {% set id_prefix = 'net' %}
+        {% set onclick_report = 'openNetworkReport()' %}
+        {% set disabled = true %}
+        {% set disabled_class = 'opacity-50' %}
+        {% include "components/report_button.html" %}
         
         <!-- Options Dropdown -->
         <div class="dropdown">
@@ -392,6 +398,7 @@
                     exportToggle.classList.remove('opacity-50', 'btn-outline-info');
                     exportToggle.classList.add('btn-info');
                 }
+                enableNetworkReport();
 
                 if (verbosity === 'verbose') {
                     const totalFinished = performance.now();
@@ -417,6 +424,32 @@
             btn.disabled = false;
             loader.classList.add('d-none');
         }
+    }
+
+    function enableNetworkReport() {
+        const reportBtn = document.getElementById('net-report-btn');
+        [reportBtn].forEach((btn) => {
+            if (!btn) return;
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+        });
+    }
+
+    function openNetworkReport() {
+        if (!currentData || !currentData.mode) return;
+        const queryInput = document.getElementById('network-search');
+        const query = queryInput ? queryInput.value.trim() : '';
+        if (!query) return;
+        const source = currentData.mode === 'semantic' ? 'semantic' : 'social';
+        const semanticSource = document.getElementById('semantic-source-input').value;
+        const caseSensitive = document.getElementById('network-case-sensitive')?.checked || false;
+        const params = new URLSearchParams({
+            source: source,
+            q: query,
+            semantic_source: semanticSource,
+            case: caseSensitive ? 'sensitive' : 'insensitive',
+        });
+        window.location.href = `{{ url_for('main.reports_page') }}?${params.toString()}`;
     }
 
     function renderSocialGraph(data) {

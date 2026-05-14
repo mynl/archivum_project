@@ -104,6 +104,33 @@ def test_authors_screen_selects_author(client, sample_author):
 
 @pytest.mark.web
 @pytest.mark.route
+@pytest.mark.active_library
+def test_report_entrypoints_render(client):
+    with logged_step("query-report-button"):
+        query_page = assert_ok_html(client.get("/"), context="query report button")
+        assert 'id="query-report-btn"' in query_page
+        assert "openReportStudio()" in query_page
+
+    with logged_step("network-report-button"):
+        response = client.get("/network")
+        assert response.status_code == 200
+        network_page = response.get_data(as_text=True)
+        assert "traceback" not in network_page.lower()
+        assert 'id="net-report-btn"' in network_page
+        assert "openNetworkReport()" in network_page
+
+    with logged_step("report-studio-source-fields"):
+        reports_page = assert_ok_html(
+            client.get("/reports", query_string={"source": "semantic", "q": "q top 5 recent", "semantic_source": "title", "abstract": "0"}),
+            context="report studio source fields",
+        )
+        assert 'name="source" value="semantic"' in reports_page
+        assert 'name="include_abstract"' in reports_page
+        assert 'id="abstract-off" value="0"' in reports_page
+
+
+@pytest.mark.web
+@pytest.mark.route
 @pytest.mark.network
 @pytest.mark.slow
 @pytest.mark.active_library

@@ -50,12 +50,9 @@
             <i class="bi bi-dice-5 me-1"></i> Random
         </button>
 
-        {% if is_admin %}
-        <button class="btn btn-outline-success px-3 shadow-sm"
-                onclick="openReportStudio()">
-            <i class="bi bi-journal-plus me-1"></i> Report
-        </button>
-        {% endif %}
+        {% set id_prefix = 'query' %}
+        {% set onclick_report = 'openReportStudio()' %}
+        {% include "components/report_button.html" %}
 
         <!-- Export Button -->
         <button id="search-export-btn" 
@@ -66,7 +63,6 @@
         </button>
 
         <!-- Options Dropdown -->
-        {% set id_prefix = 'query' %}
         {% set base_url = url_for('main.search') %}
         {% set include_selector = '#search-input' %}
         {% set target_selector = '#results' %}
@@ -82,7 +78,7 @@
     function openReportStudio() {
         const queryInput = document.getElementById('search-input');
         const query = queryInput ? queryInput.value.trim() : '';
-        window.location.href = `{{ url_for('main.reports_page') }}?q=${encodeURIComponent(query)}`;
+        window.location.href = `{{ url_for('main.reports_page') }}?source=query&q=${encodeURIComponent(query)}`;
     }
 
     function clearInput(id) {

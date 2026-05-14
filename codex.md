@@ -324,3 +324,72 @@ Results:
 - Default pytest selection: 6 passed, 15 skipped.
 
 Note: the slow semantic route run did not need to load/download the transformer because the library's `semantic-embeddings.feather` already had the needed paper embeddings. The first semantic route still took about a minute, likely from cold UMAP/Numba setup.
+
+## README And Report Studio Update - 2026-05-14
+
+Updated `README.md` to reflect the current 2026 Archivum CLI/web workflow:
+
+- Rewrote Quick Start, requirements, core workflows, web interface, data model, configuration, development/test, and safety notes.
+- Corrected stale command names and examples, using PowerShell and live `archivum --help` command names.
+- Added current testing guidance for `.\scripts\Test-ArchivumWeb.ps1`.
+
+Enhanced Report Studio and Network report generation:
+
+- Added `matplotlib` as an explicit dependency and updated `uv.lock`.
+- Added shared Report buttons for Query and Network. Abstract/no-abstract selection now lives on the Report Studio page.
+- Query reports keep existing behavior with an abstract toggle.
+- Network reports support:
+  - Social reports generated server-side from `analyze_social_network(...)` using NetworkX/Matplotlib SVG.
+  - Semantic reports generated server-side from `analyze_semantic(...)` using Matplotlib SVG.
+- Semantic reports write two SVGs:
+  - cluster hull overview, excluding background/noise, labeled with cluster number and short theme;
+  - galaxy map with sampled paper labels and no legend.
+- Social graph SVG uses wrapped black labels with transparent label backgrounds.
+- Follow-up graphics/layout refinements:
+  - social graph labels now wrap narrower, use slightly larger black text, and the social image appears after the Analysis section under `## Social Network`;
+  - semantic galaxy labels now show only tags, allowing more sampled labels without title clutter;
+  - semantic report images now appear after `## Analysis` under `## Visualizations`.
+- Semantic reports now add `## Cluster Description` after `## Cluster Summary`, with a table matching the summary layout and an expanded description column; the same expanded terms remain duplicated in the References cluster sections.
+- Report images are embedded through `/reports/asset/<asset-name>` so Pandoc-rendered HTML can load them correctly from `/reports/view/<id>`.
+- Report HTML styling now improves tables, headings, horizontal rules, cluster summary column widths, and removes image borders.
+- Report generation now writes sidecar recipe metadata `<slug>.report.json`.
+- Reports gallery has an Edit button:
+  - enabled when sidecar metadata exists;
+  - disabled/greyed for older reports without metadata.
+- Edit reloads Report Studio with title, filename slug, intro, query/source settings, semantic source, case mode, and abstract setting. Keeping the slug regenerates the same report; changing it creates a new report.
+- Trash deletes `.qmd`, `.html`, `.pdf`, `.report.json`, and owned report SVGs.
+- Removed automatic export cleanup from `Library.__init__()`; old report/export files are no longer deleted on library load.
+
+Important behavior notes:
+
+- Existing old reports are not backfilled with `.report.json`.
+- Raw QMD edits remain separate; regenerating via Report Studio can overwrite manual QMD edits if the same slug is used.
+- Do not add a "clear cache" or bulk report cleanup feature unless explicitly requested.
+
+New/updated tests:
+
+- Added `tests/test_report_generation.py` for QMD/SVG generation, abstract toggle, report metadata round-trip, and no automatic export cleanup.
+- Extended `tests/web/test_routes.py` to cover Query/Network Report buttons and Report Studio source fields.
+
+Validated commands:
+
+```powershell
+uv lock
+uv run --extra test pytest tests/test_report_generation.py -q
+uv run --extra test pytest tests/test_report_generation.py tests/web/test_routes.py::test_report_entrypoints_render -q
+.\scripts\Test-ArchivumWeb.ps1 -Mode Fast
+uv run --extra test pytest -q
+```
+
+Results:
+
+- Report generation tests: 5 passed after the Cluster Description addition.
+- Focused report/UI tests: 6 passed.
+- Fast web suite: 4 passed.
+- Default pytest selection: 30 passed, 21 skipped.
+
+Known warnings/notes:
+
+- `greater_tables` still emits a Pandas future warning.
+- Git status still warns about inaccessible pytest cache directories.
+- `human-notes.md` had unrelated pre-existing modifications during this work.

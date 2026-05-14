@@ -13,9 +13,9 @@ May 14
 4. Report
     1. From query
     2. From network: adds cluster info and picture thereof with categories and detail within (two pictures) ?matplotlib / svg; same basic logic
-5. Update README
+    Drop down button, default (with abstracts), option no abstracts
+5. DONE Update README
 6. Update docs (documentation)
-7. 
 
 
 ****
