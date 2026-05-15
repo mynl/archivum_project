@@ -6,7 +6,7 @@ Keep it updated with changes to code (add at end along with date).
 
 ## Startup Checks
 
-Always confirm the shell is actually in the repository before running repo-sensitive commands. A previous Codex tool call started in `C:\` even though the intended working directory was `C:\temp\GitHub\archivum_project`.
+Always confirm the shell is actually in the repository before running repo-sensitive commands. A previous Codex tool call started in `C:\` even though the intended working directory was `C:\S\TELOS\Python\archivum_project`.
 
 Use PowerShell:
 
@@ -237,7 +237,7 @@ Follow-up dependency work was implemented after the handoff above:
   - `pybtex`
   - `networkx`
 - `scripts/Test-ArchivumWeb.ps1` now defaults back to `uv run --extra test pytest`.
-- The runner sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` so `rustfuzz` builds with Python 3.13 and PyO3 0.20.
+- The runner no longer sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY`; `rustfuzz` now builds without that compatibility flag.
 - Test search phrase changed from `risk measure` to `spectral risk measure`.
 - The temporary ripgrep `-g 0*.md` restriction was removed.
 
@@ -245,7 +245,6 @@ Validated commands:
 
 ```powershell
 uv lock
-$env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY = "1"
 uv run --extra test python -c "from rustfuzz import FuzzyMatcherMultiHi; from querexfuzz.core import Querexfuzz; import uber_shell; print('ok')"
 .\scripts\Test-ArchivumWeb.ps1 -Mode Fast
 .\scripts\Test-ArchivumWeb.ps1 -Mode Slow
@@ -272,7 +271,6 @@ Added semantic/network analysis dependencies to `pyproject.toml` and `uv.lock`:
 Validated imports:
 
 ```powershell
-$env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY = "1"
 uv run --extra test python -c "import hdbscan, umap, sentence_transformers; print('semantic deps ok')"
 ```
 
@@ -394,3 +392,26 @@ Known warnings/notes:
 - `greater_tables` still emits a Pandas future warning.
 - Git status still warns about inaccessible pytest cache directories.
 - `human-notes.md` had unrelated pre-existing modifications during this work.
+
+## Rustfuzz And Network Report Update - 2026-05-15
+
+- `rustfuzz` was updated in `uv.lock` from Git commit `b20f5112` / version `0.1.0` to commit `744d7ae4` / version `0.2.0`.
+- The updated `rustfuzz` uses a newer PyO3 and builds/imports without setting `PYO3_USE_ABI3_FORWARD_COMPATIBILITY`.
+- Removed the old `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` export from `scripts/Test-ArchivumWeb.ps1`.
+- Network report `.qmd` files now embed local SVG filenames so Quarto PDF output can find image assets from the exports directory; integrated HTML views rewrite those image sources to `/reports/asset/<asset-name>` when served.
+- Network report Matplotlib plots no longer include internal titles; surrounding markdown captions/headings provide the titles.
+- Network report table data uses the report body font and normal weight, while table headers remain bold sans-serif.
+- Semantic galaxy report labels are selected with spacing-aware filtering to reduce overlapping labels.
+
+Validated commands:
+
+```powershell
+uv lock --upgrade-package rustfuzz
+uv run --extra test python -c "from rustfuzz import FuzzyMatcherMultiHi; import rustfuzz; print(getattr(rustfuzz, '__version__', 'no-version')); print(FuzzyMatcherMultiHi)"
+uv run --extra test pytest tests/test_report_generation.py -q
+```
+
+Results:
+
+- `rustfuzz` built and imported without `PYO3_USE_ABI3_FORWARD_COMPATIBILITY`.
+- Focused report generation tests: 8 passed.

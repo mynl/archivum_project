@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
@@ -2617,8 +2617,8 @@ wheels = [
 
 [[package]]
 name = "rustfuzz"
-version = "0.1.0"
-source = { git = "https://github.com/mynl/rustfuzz.git#b20f5112c9fef0e820c10e474dcbc6ea0aa6e9ff" }
+version = "0.2.0"
+source = { git = "https://github.com/mynl/rustfuzz.git#744d7ae4dac32848a6907f4fcd233c1c3d90075a" }
 
 [[package]]
 name = "safetensors"

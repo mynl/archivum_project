@@ -43,6 +43,28 @@ def _write_report_meta(lib, out_path, *, title, filename, intro, raw_query, sour
     meta_path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
     return data
 
+
+def _rewrite_report_asset_srcs(lib, report_id, html_content):
+    exports_root = lib.exports_dir_path.resolve()
+
+    def repl(match):
+        prefix, quote, raw_src = match.groups()
+        src = raw_src.strip()
+        if not src or src.startswith(("/", "http://", "https://", "data:", "#")):
+            return match.group(0)
+        asset_name = src.replace("\\", "/").split("/")[-1]
+        if not asset_name.startswith(f"{report_id}-"):
+            return match.group(0)
+        if Path(asset_name).suffix.lower() not in {".svg", ".png", ".jpg", ".jpeg"}:
+            return match.group(0)
+        asset_path = (exports_root / asset_name).resolve()
+        if exports_root not in asset_path.parents or not asset_path.exists():
+            return match.group(0)
+        rewritten = url_for("main.reports_asset", asset_name=asset_name)
+        return f"{prefix}{quote}{rewritten}{quote}"
+
+    return re.sub(r"(\bsrc=)([\"'])([^\"']+)\2", repl, html_content)
+
 @bp.route('/reports')
 def reports_page():
     lib = LibraryContext.get()
@@ -223,6 +245,7 @@ def reports_view(report_id):
     if html_path.exists() and html_path.stat().st_mtime >= qmd_path.stat().st_mtime:
         try:
             html_content = html_path.read_text(encoding='utf-8')
+            html_content = _rewrite_report_asset_srcs(lib, report_id, html_content)
             title = report_id.replace('-', ' ').title()
             return render_template('reports.html', lib=lib, view_mode=True, report_html=html_content, report_title=title)
         except Exception as e:
@@ -233,7 +256,7 @@ def reports_view(report_id):
         # Explicitly set encoding='utf-8' for Windows compatibility.
         cmd = ['pandoc', str(qmd_path), '--citeproc', '-t', 'html']
         res = subprocess.run(cmd, capture_output=True, text=True, check=True, encoding='utf-8')
-        html_content = res.stdout
+        html_content = _rewrite_report_asset_srcs(lib, report_id, res.stdout)
         
         # Save to cache
         try:

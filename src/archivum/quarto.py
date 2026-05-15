@@ -292,7 +292,7 @@ def _report_asset_name(out_path: Path, suffix: str) -> str:
 
 
 def _report_asset_link(asset_name: str) -> str:
-    return f"/reports/asset/{asset_name}"
+    return asset_name
 
 
 def _wrap_label(text: object, width: int = 18, max_lines: int = 3) -> str:
@@ -437,10 +437,49 @@ def _plot_semantic_hulls(result, out_path: Path) -> str:
             linespacing=1.1,
         )
 
-    ax.set_title("Semantic Cluster Overview", fontsize=12, fontweight="bold", color="#000000")
     _save_figure(fig, fig_path)
     plt.close(fig)
     return asset_name
+
+
+def _select_spaced_semantic_labels(
+    records: list[dict],
+    cluster_summary: list[dict],
+    *,
+    min_distance: float = 0.055,
+    per_cluster: int = 8,
+    total: int = 80,
+) -> list[dict]:
+    candidates = [r for r in records if int(r["cluster_id"]) >= 0 and r.get("tag")]
+    if not candidates:
+        return []
+
+    xs = [float(r["x"]) for r in candidates]
+    ys = [float(r["y"]) for r in candidates]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    x_span = max(max_x - min_x, 1e-9)
+    y_span = max(max_y - min_y, 1e-9)
+    accepted_points: list[tuple[float, float]] = []
+    selected: list[dict] = []
+
+    def norm(row: dict) -> tuple[float, float]:
+        return ((float(row["x"]) - min_x) / x_span, (float(row["y"]) - min_y) / y_span)
+
+    for cluster in cluster_summary:
+        cid = int(cluster["id"])
+        accepted_in_cluster = 0
+        for row in [r for r in candidates if int(r["cluster_id"]) == cid]:
+            if len(selected) >= total:
+                return selected
+            if accepted_in_cluster >= per_cluster:
+                break
+            point = norm(row)
+            if all(math.dist(point, other) >= min_distance for other in accepted_points):
+                selected.append(row)
+                accepted_points.append(point)
+                accepted_in_cluster += 1
+    return selected
 
 
 def _plot_semantic_galaxy(result, out_path: Path) -> str:
@@ -472,6 +511,8 @@ def _plot_semantic_galaxy(result, out_path: Path) -> str:
         except Exception:
             pass
 
+    label_hashes = {row["hash"] for row in _select_spaced_semantic_labels(records, result.cluster_summary)}
+
     for cluster in result.cluster_summary:
         cid = int(cluster["id"])
         pts = [r for r in records if r["cluster_id"] == cid]
@@ -491,7 +532,7 @@ def _plot_semantic_galaxy(result, out_path: Path) -> str:
             collection.set_urls([f"/view/{r['tag']}" for r in pts])
         except Exception:
             pass
-        for row in pts[:8]:
+        for row in [p for p in pts if p["hash"] in label_hashes]:
             label = _wrap_label(row["tag"], width=10, max_lines=1)
             ax.text(
                 row["x"],
@@ -504,7 +545,6 @@ def _plot_semantic_galaxy(result, out_path: Path) -> str:
                 bbox={"boxstyle": "round,pad=0.16", "facecolor": "white", "edgecolor": "none", "alpha": 0.72},
             )
 
-    ax.set_title("Semantic Galaxy Map", fontsize=12, fontweight="bold", color="#000000")
     _save_figure(fig, fig_path)
     plt.close(fig)
     return asset_name
@@ -559,7 +599,6 @@ def _plot_social_network(result, out_path: Path) -> str:
         font_size=5.4,
         font_color="#000000",
     )
-    ax.set_title("Social Network", fontsize=12, fontweight="bold", color="#000000")
     _save_figure(fig, fig_path)
     plt.close(fig)
     return asset_name

@@ -10,7 +10,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$env:PYO3_USE_ABI3_FORWARD_COMPATIBILITY = "1"
 
 function Write-Step {
     param([string]$Message)

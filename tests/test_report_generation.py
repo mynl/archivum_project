@@ -3,7 +3,9 @@ from __future__ import annotations
 import inspect
 import json
 import types
+from pathlib import Path
 
+from flask import Blueprint, Flask
 import numpy as np
 import pandas as pd
 
@@ -107,12 +109,14 @@ def test_semantic_report_writes_svg_assets_and_groups_background_last(tmp_path):
     )
 
     text = out_path.read_text(encoding="utf-8")
-    assert "![Semantic cluster overview](/reports/asset/semantic-report-semantic-hulls.svg)" in text
-    assert "![Semantic galaxy map](/reports/asset/semantic-report-semantic-galaxy.svg)" in text
+    assert "![Semantic cluster overview](semantic-report-semantic-hulls.svg)" in text
+    assert "![Semantic galaxy map](semantic-report-semantic-galaxy.svg)" in text
+    assert "/reports/asset/" not in text
     assert "Related terms:" in text
     assert "| Cluster | Theme | Papers | Representative samples |" in text
     assert "| :-------- | :------ | -------: | :----------------------- |" in text
     assert "| 1 | Risk Measures | 2 | Alpha Paper; Beta Paper |" in text
+    assert "| **1** |" not in text
     assert "## Cluster Description" in text
     assert "| Cluster | Theme | Papers | Expanded description |" in text
     assert "| :-------- | :------ | -------: | :--------------------- |" in text
@@ -146,10 +150,73 @@ def test_social_report_writes_svg_and_summary(tmp_path):
     generate_social_qmd_report(lib, result, out_path, title="Social Report", query="q Smith")
 
     text = out_path.read_text(encoding="utf-8")
-    assert "![Social network](/reports/asset/social-report-social-network.svg)" in text
+    assert "![Social network](social-report-social-network.svg)" in text
+    assert "/reports/asset/" not in text
     assert "## Top Authors" in text
     assert "## Top Collaborations" in text
+    assert "| **Smith, A** |" not in text
     assert (tmp_path / "social-report-social-network.svg").exists()
+
+
+def test_report_asset_src_rewrite_handles_local_and_cached_fragments(tmp_path):
+    from archivum.web.routes.reports import _rewrite_report_asset_srcs
+
+    lib = types.SimpleNamespace(exports_dir_path=tmp_path)
+    (tmp_path / "semantic-report-semantic-galaxy.svg").write_text("<svg />", encoding="utf-8")
+    app = Flask(__name__)
+    bp = Blueprint("main", __name__)
+
+    @bp.route("/reports/asset/<path:asset_name>")
+    def reports_asset(asset_name):
+        return asset_name
+
+    app.register_blueprint(bp)
+    html = (
+        '<p><img src="semantic-report-semantic-galaxy.svg" /></p>'
+        '<p><img src="/reports/asset/semantic-report-semantic-hulls.svg" /></p>'
+        '<p><img src="other-report-semantic-galaxy.svg" /></p>'
+    )
+
+    with app.test_request_context():
+        rewritten = _rewrite_report_asset_srcs(lib, "semantic-report", html)
+
+    assert 'src="/reports/asset/semantic-report-semantic-galaxy.svg"' in rewritten
+    assert 'src="/reports/asset/semantic-report-semantic-hulls.svg"' in rewritten
+    assert 'src="other-report-semantic-galaxy.svg"' in rewritten
+    assert '.svg""' not in rewritten
+
+
+def test_semantic_label_selection_is_spacing_sensitive():
+    from archivum.quarto import _select_spaced_semantic_labels
+
+    records = [
+        {"hash": "h1", "tag": "A", "x": 0.00, "y": 0.00, "cluster_id": 0},
+        {"hash": "h2", "tag": "B", "x": 0.01, "y": 0.00, "cluster_id": 0},
+        {"hash": "h3", "tag": "C", "x": 0.02, "y": 0.00, "cluster_id": 0},
+        {"hash": "h4", "tag": "D", "x": 1.00, "y": 1.00, "cluster_id": 0},
+        {"hash": "h5", "tag": "Noise", "x": 2.00, "y": 2.00, "cluster_id": -1},
+    ]
+
+    selected = _select_spaced_semantic_labels(
+        records,
+        [{"id": 0, "number": 1, "name": "Dense", "count": 4}],
+        min_distance=0.05,
+        per_cluster=8,
+        total=80,
+    )
+
+    assert [row["hash"] for row in selected] == ["h1", "h4"]
+
+
+def test_report_table_body_uses_base_document_font():
+    template = Path("src/archivum/web/templates/reports.html").read_text(encoding="utf-8")
+
+    assert ".report-body th" in template
+    assert ".report-body td" in template
+    assert ".report-body th { border-bottom: 2px solid #adb5bd;" in template
+    assert "font-family: 'Inter', system-ui, -apple-system, sans-serif; font-weight: 700;" in template
+    assert ".report-body td { border-bottom: 1px solid #dee2e6;" in template
+    assert "font-family: inherit; font-weight: 400;" in template
 
 
 def test_library_init_does_not_auto_cleanup_exports():
