@@ -40,7 +40,7 @@ from rich.table import Table
 
 # for uber loop
 from uber_shell import UberShell  # type: ignore[import-untyped]
-from rustfuzz import FuzzyMatcherMultiHi  # type: ignore[import-untyped]
+from skimmatch import FuzzyMatcherMultiHi  # type: ignore[import-untyped]
 from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
 from .library import Library
@@ -271,9 +271,9 @@ def make_query_completer_static(df):
     )
 
 
-class RustFuzzyCompleter(Completer):
+class SkimMatchCompleter(Completer):
     def __init__(self, get_candidates_func):
-        """Handle prompt_toolkit fuzzy matching using my Rust fzf-like matcher."""
+        """Handle prompt_toolkit skim matching using my Rust fzf-like matcher."""
         self.get_candidates = get_candidates_func
 
     def get_completions(self, document, complete_event):
@@ -321,7 +321,7 @@ class RustFuzzyCompleter(Completer):
 
         # match
         indices, scores, highlights = matcher.query(pattern, top_k=25)
-        logger.debug("rustfuzz returns indices count = %s", len(indices))
+        logger.debug("skimmatch returns indices count = %s", len(indices))
 
         # Calculate safe start position
         # prompt_toolkit discards completions if start_position goes out of bounds
@@ -2716,14 +2716,14 @@ def uber(lib_name="", auto_open=True, debug=False):
     # completers['tt'] = FuzzyCompleter(WordCompleter(LibraryContext.get_library_tag_titles, ignore_case=True,
     #                                         sentence=True, WORD=False, match_middle=True))
     # completers['title'] = FuzzyCompleter(AllTitlesCompleter())
-    completers["tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["f"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["edit-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["delete-tag"] = RustFuzzyCompleter(LibraryContext.get_library_tags)
-    completers["title"] = RustFuzzyCompleter(LibraryContext.get_library_titles)
-    completers["tt"] = RustFuzzyCompleter(LibraryContext.get_library_tag_titles)
-    completers["hash"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
-    completers["link-doc"] = RustFuzzyCompleter(LibraryContext.get_library_hashes)
+    completers["tag"] = SkimMatchCompleter(LibraryContext.get_library_tags)
+    completers["f"] = SkimMatchCompleter(LibraryContext.get_library_tags)
+    completers["edit-tag"] = SkimMatchCompleter(LibraryContext.get_library_tags)
+    completers["delete-tag"] = SkimMatchCompleter(LibraryContext.get_library_tags)
+    completers["title"] = SkimMatchCompleter(LibraryContext.get_library_titles)
+    completers["tt"] = SkimMatchCompleter(LibraryContext.get_library_tag_titles)
+    completers["hash"] = SkimMatchCompleter(LibraryContext.get_library_hashes)
+    completers["link-doc"] = SkimMatchCompleter(LibraryContext.get_library_hashes)
 
     query_completer = WordCompleter(
         ["-d", "--database", "doc", "ref", "ref-doc", "database"],
@@ -2765,7 +2765,7 @@ def uber(lib_name="", auto_open=True, debug=False):
             click.secho("\n[External changes detected. Reloading library...]", fg="yellow", bold=True)
             lib.reset()
             LibraryContext.refresh()
-            # Note: RustFuzzyCompleter uses get_candidates_func which calls 
+            # Note: SkimMatchCompleter uses get_candidates_func which calls
             # LibraryContext.get_library_tags etc. Since we just cleared the 
             # candidates in refresh(), they will be rebuilt on next tab press.
 

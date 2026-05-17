@@ -19,10 +19,10 @@ git status --short
 Expected repository root:
 
 ```text
-C:/temp/GitHub/archivum_project
+ C:\S\TELOS\Python\archivum_project
 ```
 
-If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir `C:\temp\GitHub\archivum_project` to tool calls.
+If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir ` C:\S\TELOS\Python\archivum_project` to tool calls.
 
 ## User Preferences
 

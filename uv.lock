@@ -87,8 +87,8 @@ dependencies = [
     { name = "querexfuzz" },
     { name = "rapidfuzz" },
     { name = "requests" },
-    { name = "rustfuzz" },
     { name = "sentence-transformers" },
+    { name = "skimmatch" },
     { name = "tqdm" },
     { name = "tzlocal" },
     { name = "uber-shell" },
@@ -148,13 +148,13 @@ requires-dist = [
     { name = "pytest-playwright", marker = "extra == 'test'" },
     { name = "python-levenshtein" },
     { name = "pyyaml" },
-    { name = "querexfuzz", git = "https://github.com/mynl/querexfuzz_project.git" },
+    { name = "querexfuzz" },
     { name = "rapidfuzz" },
     { name = "recommonmark", marker = "extra == 'dev'" },
     { name = "requests" },
-    { name = "rustfuzz", git = "https://github.com/mynl/rustfuzz.git" },
     { name = "sentence-transformers" },
     { name = "setuptools", marker = "extra == 'dev'", specifier = ">=62.3.2" },
+    { name = "skimmatch" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = "<8.0.0" },
     { name = "sphinx-click", marker = "extra == 'dev'" },
     { name = "sphinx-copybutton", marker = "extra == 'dev'" },
@@ -2360,14 +2360,20 @@ wheels = [
 
 [[package]]
 name = "querexfuzz"
-version = "0.1.0"
-source = { git = "https://github.com/mynl/querexfuzz_project.git#d94361d88e5ffc9cd2222371b601fbfeab4cd2c3" }
+version = "2.0.3"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "lark" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
+    { name = "skimmatch" },
+    { name = "tzlocal" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/2a/afad3c8d6abd8deb54b9b044800f1bae2d204266c4dd740aa5bcbd834f01/querexfuzz-2.0.3.tar.gz", hash = "sha256:52a3989231c588a3e251f3a8a3a956dfe9be638669d460824ff98a8e11295ac3", size = 18596, upload-time = "2026-05-17T16:08:57.857Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/5a/00/fe49a5630678e5d3cda8b3e06087188c74faea6f43d1ac44e3ef5c470aab/querexfuzz-2.0.3-py3-none-any.whl", hash = "sha256:43872c0db1222307ceddb133e945f7315b517ebb945d701464d98061af947247", size = 14714, upload-time = "2026-05-17T16:08:56.419Z" },
 ]
 
 [[package]]
@@ -2616,11 +2622,6 @@ wheels = [
 ]
 
 [[package]]
-name = "rustfuzz"
-version = "0.2.0"
-source = { git = "https://github.com/mynl/rustfuzz.git#744d7ae4dac32848a6907f4fcd233c1c3d90075a" }
-
-[[package]]
 name = "safetensors"
 version = "0.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2781,6 +2782,16 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "skimmatch"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6b/f0/ca14d5adf150f80359670e9d05cdcfc536f42bcfa5884ced82f2fa7fa765/skimmatch-0.2.0.tar.gz", hash = "sha256:33301d0b5a062b0479f5dffe02ca1b456692f87c0f65192ac3d92ca09292c618", size = 1725460, upload-time = "2026-05-17T08:50:37.719Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3a/cc/103ffb7f87db07424021f437a212b5a0dc16014e8533d818d0a023affcb5/skimmatch-0.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:a2c8ad972388c6deac42f4aa3ea1568224515e45dae25531dbc56acbfed9a93e", size = 269416, upload-time = "2026-05-17T08:50:35.184Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/a6/d703538c0505fcfd556a39582d4229491f610db25547ea3eaae66f2ba4a3/skimmatch-0.2.0-cp314-cp314-win_amd64.whl", hash = "sha256:195a4d257c4636d88020e9428d32b3664dd1984c5d70d32ca8f4e34764a0c61e", size = 269215, upload-time = "2026-05-17T08:50:36.474Z" },
 ]
 
 [[package]]

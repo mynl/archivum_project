@@ -263,8 +263,7 @@ Run focused web tests through the project runner:
 .\scripts\Test-ArchivumWeb.ps1 -Mode All
 ```
 
-The runner sets `PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1` for the Rust-backed
-dependencies and defaults to `uv run --extra test pytest`.
+The runner defaults to `uv run --extra test pytest`.
 
 Direct pytest examples:
 
