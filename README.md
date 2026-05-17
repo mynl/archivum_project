@@ -255,6 +255,10 @@ uv lock
 uv sync --extra test
 ```
 
+`pyproject.toml` owns the package version. Bump `project.version` after every
+code change using semantic versioning; `archivum.__version__` reads the installed
+package metadata at runtime.
+
 Run focused web tests through the project runner:
 
 ```powershell

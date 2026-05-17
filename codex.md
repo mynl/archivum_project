@@ -19,10 +19,10 @@ git status --short
 Expected repository root:
 
 ```text
- C:\S\TELOS\Python\archivum_project
+C:\S\TELOS\Python\archivum_project
 ```
 
-If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir ` C:\S\TELOS\Python\archivum_project` to tool calls.
+If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir `C:\S\TELOS\Python\archivum_project` to tool calls.
 
 ## User Preferences
 
@@ -151,6 +151,7 @@ Use `rg` first when searching files or text.
 - Prefer existing project patterns over new abstractions.
 - Keep edits tightly scoped.
 - Add tests in proportion to risk and blast radius.
+- `pyproject.toml` owns the package version. Bump `project.version` after each code change using semantic versioning; `src/archivum/__init__.py` reads `__version__` from `importlib.metadata`.
 - Use structured parsers/APIs where available instead of ad hoc text manipulation.
 - For frontend work, preserve the existing Bootstrap/HTMX style and high-density operational UI.
 - Avoid touching real library data unless the task explicitly requires it.

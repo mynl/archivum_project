@@ -60,6 +60,7 @@ wheels = [
 
 [[package]]
 name = "archivum"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "arxiv" },

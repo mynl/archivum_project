@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-dynamic = ["version"]
+version = "2.1.0"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
@@ -65,9 +65,6 @@ archivum = [
     "web/static/img/*",
     "configurations/*.yaml",
 ]
-
-[tool.setuptools.dynamic]
-version = { attr = "archivum.__version__" }
 
 [project.scripts]
 archivum = "archivum.cli:entry"

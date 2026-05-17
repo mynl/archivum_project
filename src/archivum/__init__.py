@@ -2,42 +2,22 @@
 archivum project.
 ===================
 
-v 1.1
-    Text extraction
-    rg 
-
-v 1.0.0
-    Alpha release
-    Uses querexfuzz with config files for each table; deleted unneeded files
-    Added hashing capability
-    Added Library.history
-
-v 0.9.0
-    New file layout
-
-v 0.8.0
-    LibraryBase
-    Work on import_bibtex
-    Creator for Config class
-
-v 0.7.0
-    moved to Library having a qd function in place of older fGT
-
-v 0.6.0
-    added self discovery for great2 uber uber
-    updated stand alone uber
-v 0.5.0
-
 """
 import sys
 import os
+from importlib.metadata import PackageNotFoundError, version
 import yaml
 from pathlib import Path
 
 __appname__ = "archivum"
 __author__ = "Stephen J. Mildenhall"
-__version__ = "2.0.0"
-__date__ = "2026-02-07"
+
+# pyproject.toml owns the package version; this mirrors installed metadata.
+try:
+    __version__ = version(__appname__)
+except PackageNotFoundError:
+    __version__ = "0+unknown"
+
 
 
 def _get_local_folder() -> Path:
