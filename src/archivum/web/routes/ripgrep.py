@@ -3,9 +3,11 @@ from ..services.ripgrep import (
     RipgrepSearchOptions,
     export_ripgrep_csv,
     get_cached_ripgrep_search,
+    ripgrep_export_dataframe,
     stream_ripgrep_search,
     warm_ripgrep_cache,
 )
+from ..services.exports import export_dataframe_to_bibtex
 
 @bp.route('/ripgrep')
 def ripgrep_page():
@@ -41,4 +43,16 @@ def rg_export_csv():
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
     return export_ripgrep_csv(lib, query)
+
+
+@bp.route('/rg-export-bibtex')
+def rg_export_bibtex():
+    query = request.args.get('q', '').strip()
+    plus = request.args.get('plus') == '1'
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    export_df = ripgrep_export_dataframe(lib, query)
+    if isinstance(export_df, tuple):
+        return export_df
+    return export_dataframe_to_bibtex(export_df, lib, plus=plus)
 

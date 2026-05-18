@@ -2,28 +2,38 @@
 <div id="{{ id_prefix }}-export-container" class="btn-group shadow-sm">
     <button id="{{ id_prefix }}-export-btn" 
             onclick="handleExportToQuery('{{ id_prefix }}', '{{ input_id }}')"
-            class="btn btn-outline-info px-4 opacity-50" 
-            disabled
+            class="btn btn-outline-secondary px-4{% if not enabled|default(false) %} opacity-50{% endif %}" 
+            {% if not enabled|default(false) %}disabled{% endif %}
             title="Export documents to Query screen">
         Export
     </button>
     <button id="{{ id_prefix }}-export-toggle"
             type="button" 
-            class="btn btn-outline-info dropdown-toggle dropdown-toggle-split opacity-50" 
+            class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split{% if not enabled|default(false) %} opacity-50{% endif %}" 
             data-bs-toggle="dropdown" 
             aria-expanded="false" 
-            disabled>
+            {% if not enabled|default(false) %}disabled{% endif %}>
         <span class="visually-hidden">Toggle Dropdown</span>
     </button>
     <ul class="dropdown-menu">
         <li><a class="dropdown-item" href="#" onclick="handleExportToQuery('{{ id_prefix }}', '{{ input_id }}')">To Query (Max 500)</a></li>
         <li><a class="dropdown-item" href="#" onclick="handleExportToCSV('{{ id_prefix }}', '{{ input_id }}')">To CSV (All matches)</a></li>
+        <li><a class="dropdown-item" href="#" onclick="handleExportToBibTeX('{{ id_prefix }}', '{{ input_id }}')">To BibTeX</a></li>
+        <li><a class="dropdown-item" href="#" onclick="handleExportToBibTeXPlus('{{ id_prefix }}', '{{ input_id }}')">To BibTeX+</a></li>
     </ul>
 </div>
 
 <script>
     if (typeof handleExportToQuery !== 'function') {
         window.handleExportToQuery = function(idPrefix, inputId) {
+            const input = document.getElementById(inputId);
+            const inputQuery = input ? input.value.trim() : '';
+            if (idPrefix === 'query') {
+                if (!inputQuery) return;
+                window.location.href = `{{ url_for('main.index') }}?q=${encodeURIComponent(inputQuery)}`;
+                return;
+            }
+
             const btn = document.getElementById(`${idPrefix}-export-btn`);
             const hashes = btn.dataset.hashes;
             if (!hashes) return;
@@ -35,14 +45,39 @@
 
     if (typeof handleExportToCSV !== 'function') {
         window.handleExportToCSV = function(idPrefix, inputId) {
-            const btn = document.getElementById(`${idPrefix}-export-btn`);
-            const hashes = btn.dataset.hashes;
-            if (!hashes) return;
-
             const input = document.getElementById(inputId);
-            const query = input ? input.value : '';
-            const url = `{{ url_for('main.rg_export_csv') }}?q=${encodeURIComponent(query)}`;
+            const query = input ? input.value.trim() : '';
+            if (!query) return;
+            const endpoint = idPrefix === 'query'
+                ? `{{ url_for('main.search_export_csv') }}`
+                : `{{ url_for('main.rg_export_csv') }}`;
+            const url = `${endpoint}?q=${encodeURIComponent(query)}`;
             window.location.href = url;
+        };
+    }
+
+    if (typeof handleExportToBibTeX !== 'function') {
+        window.handleExportToBibTeX = function(idPrefix, inputId) {
+            handleExportBibTeXDownload(idPrefix, inputId, false);
+        };
+    }
+
+    if (typeof handleExportToBibTeXPlus !== 'function') {
+        window.handleExportToBibTeXPlus = function(idPrefix, inputId) {
+            handleExportBibTeXDownload(idPrefix, inputId, true);
+        };
+    }
+
+    if (typeof handleExportBibTeXDownload !== 'function') {
+        window.handleExportBibTeXDownload = function(idPrefix, inputId, plus) {
+            const input = document.getElementById(inputId);
+            const query = input ? input.value.trim() : '';
+            if (!query) return;
+            const endpoint = idPrefix === 'query'
+                ? `{{ url_for('main.search_export_bibtex') }}`
+                : `{{ url_for('main.rg_export_bibtex') }}`;
+            const plusArg = plus ? '&plus=1' : '';
+            window.location.href = `${endpoint}?q=${encodeURIComponent(query)}${plusArg}`;
         };
     }
 </script>

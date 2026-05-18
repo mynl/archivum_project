@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 import html
 import logging
@@ -7,10 +6,11 @@ import re
 import subprocess
 import time
 
-from flask import render_template, send_file
+from flask import render_template
 import pandas as pd
 
 from ..cache import get_hash_meta_cache, get_rg_cache_item, set_rg_cache_item
+from .exports import export_dataframe_to_csv, query_export_filename
 
 
 logger = logging.getLogger(__name__)
@@ -159,6 +159,15 @@ def stream_ripgrep_search(lib, options: RipgrepSearchOptions):
 
 
 def export_ripgrep_csv(lib, query):
+    export_df = ripgrep_export_dataframe(lib, query)
+    if isinstance(export_df, tuple):
+        return export_df
+
+    return export_dataframe_to_csv(export_df, query_export_filename(query))
+
+
+def ripgrep_export_dataframe(lib, query):
+    """Return the full ripgrep export dataframe for CSV and BibTeX exports."""
     is_regex = any(c in query for c in r".*+?^$|()[]{}")
     args = ["-n", "-H"]
     if not is_regex:
@@ -208,16 +217,7 @@ def export_ripgrep_csv(lib, query):
     cols = ["tag", "author", "title", "year", "publisher", "journal", "type", "matches", "path", "hash"]
     existing_cols = [c for c in cols if c in export_df.columns]
     remaining = [c for c in export_df.columns if c not in existing_cols]
-    export_df = export_df[existing_cols + remaining]
-
-    date_str = datetime.now().strftime("%m-%d")
-    clean_q = re.sub(r"[^a-zA-Z0-9]+", "-", query).strip("-")[:30]
-    filename = f"arc-{date_str}-{clean_q}.csv"
-
-    temp_path = Path("temp") / filename
-    export_df.to_csv(temp_path, index=False, encoding="utf-8-sig")
-
-    return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+    return export_df[existing_cols + remaining]
 
 
 def _render_export_button(id_prefix, hashes, input_id="rg-input"):

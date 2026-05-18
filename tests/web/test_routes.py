@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from urllib.parse import quote
 
 import pytest
@@ -40,6 +41,8 @@ def test_query_screen_recent_read_and_hash_prefix(client, sample_hash_prefix):
     with logged_step("query-page"):
         page = assert_ok_html(client.get("/"), context="query page")
         assert 'id="search-input"' in page
+        assert "To BibTeX" in page
+        assert "To BibTeX+" in page
 
     for name, query, interpreted, expected in scenarios:
         with logged_step("query-search", scenario=name, query=query):
@@ -75,6 +78,8 @@ def test_ripgrep_summary_counts_and_details(client, risk_measure_query):
     with logged_step("ripgrep-page"):
         page = assert_ok_html(client.get("/ripgrep"), context="ripgrep page")
         assert 'id="rg-input"' in page
+        assert "To BibTeX" in page
+        assert "To BibTeX+" in page
 
     scenarios = [
         ("summary", {"q": risk_measure_query, "summary": "true"}, "Chronological Summary"),
@@ -101,6 +106,25 @@ def test_ripgrep_summary_counts_and_details(client, risk_measure_query):
 
     if not saw_match:
         pytest.skip(f"No ripgrep matches found for {risk_measure_query!r} in active library.")
+
+
+@pytest.mark.web
+@pytest.mark.route
+@pytest.mark.active_library
+def test_query_bibtex_exports_download(client):
+    with logged_step("query-bibtex-export"):
+        response = client.get("/search-export-bibtex", query_string={"q": "q top 5 recent"})
+        assert response.status_code == 200
+        assert "arc-bibtex-export.bib" in response.headers["Content-Disposition"]
+        assert response.get_data(as_text=True).lstrip().startswith("@")
+
+    with logged_step("query-bibtex-plus-export"):
+        response = client.get("/search-export-bibtex", query_string={"q": "q top 5 recent", "plus": "1"})
+        assert response.status_code == 200
+        assert "arc-bibtex-plus-export.bib" in response.headers["Content-Disposition"]
+        bibtex = response.get_data(as_text=True)
+        assert bibtex.lstrip().startswith("@")
+        assert re.search(r"\bhash\s+=", bibtex) or re.search(r"\bfile\s+=", bibtex)
 
 
 @pytest.mark.web
@@ -139,6 +163,8 @@ def test_report_entrypoints_render(client):
         assert "traceback" not in network_page.lower()
         assert 'id="net-report-btn"' in network_page
         assert "openNetworkReport()" in network_page
+        assert "To BibTeX" in network_page
+        assert "To BibTeX+" in network_page
 
     with logged_step("report-studio-source-fields"):
         reports_page = assert_ok_html(

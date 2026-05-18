@@ -1,5 +1,10 @@
 from .shared import *
 from ...search.query import QUERY_HELP_TEXT
+from ..services.exports import (
+    export_dataframe_to_bibtex,
+    export_dataframe_to_csv,
+    query_export_filename,
+)
 
 @bp.route('/')
 def index():
@@ -152,18 +157,31 @@ def search_export_csv():
         if not isinstance(export_df, pd.DataFrame) or export_df.empty:
             return "No matches found to export.", 400
 
-        # Filename generation: arc-MM-DD-shortened-query.csv
-        date_str = datetime.now().strftime("%m-%d")
-        clean_q = re.sub(r'[^a-zA-Z0-9]+', '-', raw_query).strip('-')[:30]
-        filename = f"arc-{date_str}-{clean_q}.csv"
-
-        # Save to temp and send
-        temp_path = Path("temp") / filename
-        export_df.to_csv(temp_path, index=False, encoding='utf-8-sig') # BOM for Excel
-        
-        return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+        return export_dataframe_to_csv(export_df, query_export_filename(raw_query))
     except Exception as e:
         logger.error(f"Search export error: {e}")
+        return str(e), 500
+
+
+@bp.route('/search-export-bibtex')
+def search_export_bibtex():
+    raw_query = request.args.get('q', '').strip()
+    plus = request.args.get('plus') == '1'
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query:
+        return "No query provided.", 400
+
+    try:
+        spec = normalize_query(raw_query, default_limit=50, recent=True)
+        export_df = lib.database.querex(spec.expression)
+
+        if not isinstance(export_df, pd.DataFrame) or export_df.empty:
+            return "No matches found to export.", 400
+
+        return export_dataframe_to_bibtex(export_df, lib, plus=plus)
+    except Exception as e:
+        logger.error(f"Search BibTeX export error: {e}")
         return str(e), 500
 
 

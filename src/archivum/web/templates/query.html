@@ -57,13 +57,10 @@
         {% set onclick_report = 'openReportStudio()' %}
         {% include "components/report_button.html" %}
 
-        <!-- Export Button -->
-        <button id="search-export-btn" 
-                class="btn btn-outline-info px-3 shadow-sm"
-                onclick="exportQueryToCSV()"
-                title="Export results to CSV">
-            <i class="bi bi-file-earmark-spreadsheet me-1"></i> CSV
-        </button>
+        {% set id_prefix = 'query' %}
+        {% set input_id = 'search-input' %}
+        {% set enabled = true %}
+        {% include "components/export_button.html" with context %}
 
         <!-- Options Dropdown -->
         {% set base_url = url_for('main.search') %}
@@ -116,14 +113,6 @@
             input.value = `q top 25 select year, * hash ~ ^${hex} order by -year`;
             htmx.trigger(input, 'keyup');
         }
-    }
-
-    function exportQueryToCSV() {
-        const input = document.getElementById('search-input');
-        const query = input ? input.value.trim() : '';
-        if (!query) return;
-        
-        window.location.href = `{{ url_for('main.search_export_csv') }}?q=${encodeURIComponent(query)}`;
     }
 
     // Deep-linking support

@@ -30,7 +30,7 @@ from .trie import Trie
 from .utilities import TagAllocator
 from .config import load_configuration
 from .library_base import LibraryBase
-from .bibtex import dict_to_bibtex
+from .bibtex import dict_to_bibtex, rows_to_bibtex
 from .hasher import hash_many3 as hash_many
 from .document import Document, extract_text_for_paths
 from .enhancements import (
@@ -1050,16 +1050,10 @@ class Library(LibraryBase):
         bibtex_path = Path(bibtex_path).absolute()
 
         # make the text for the bibtex file
-        ans = []
         # Use ref_columns as the whitelist
         allowed_fields = self.config.ref_columns
-
-        for _, row in self.ref_df.iterrows():
-            ans.append(dict_to_bibtex(row, allowed_fields=allowed_fields))
-
-        # Remove empty entries if any (dict_to_bibtex returns empty string on failure)
-        ans = [i for i in ans if i]
-        txt = "\n\n".join(ans)
+        txt = rows_to_bibtex(self.ref_df, allowed_fields=allowed_fields)
+        entry_count = txt.count("\n@") + (1 if txt else 0)
 
         # backup existing
         if bibtex_path.exists():
@@ -1070,7 +1064,7 @@ class Library(LibraryBase):
 
         # write out
         bibtex_path.write_text(txt, encoding="utf-8")
-        logger.info("Wrote %s bibtex entries to %s", len(ans), bibtex_path)
+        logger.info("Wrote %s bibtex entries to %s", entry_count, bibtex_path)
 
         # create a link to the config location...but remember the version in the
         # library folder is king.

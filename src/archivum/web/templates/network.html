@@ -428,14 +428,14 @@
                 const exportToggle = document.getElementById('net-export-toggle');
                 if (exportBtn && data.hashes) {
                     exportBtn.disabled = false;
-                    exportBtn.classList.remove('opacity-50', 'btn-outline-info');
-                    exportBtn.classList.add('btn-info');
+                    exportBtn.classList.remove('opacity-50', 'btn-outline-secondary');
+                    exportBtn.classList.add('btn-secondary');
                     exportBtn.dataset.hashes = data.hashes;
                 }
                 if (exportToggle) {
                     exportToggle.disabled = false;
-                    exportToggle.classList.remove('opacity-50', 'btn-outline-info');
-                    exportToggle.classList.add('btn-info');
+                    exportToggle.classList.remove('opacity-50', 'btn-outline-secondary');
+                    exportToggle.classList.add('btn-secondary');
                 }
                 enableNetworkReport();
 
@@ -843,7 +843,8 @@
     // Override component export logic for Network-specific features
     window.handleExportToCSV = function(idPrefix, inputId) {
         const input = document.getElementById(inputId);
-        const query = input ? input.value : '';
+        const query = input ? input.value.trim() : '';
+        if (!query) return;
         
         if (currentData && currentData.mode === 'semantic') {
             const source = document.getElementById('semantic-source-input').value;
@@ -854,6 +855,28 @@
             window.location.href = url;
         }
     };
+
+    window.handleExportToBibTeX = function(idPrefix, inputId) {
+        handleNetworkBibTeXExport(inputId, false);
+    };
+
+    window.handleExportToBibTeXPlus = function(idPrefix, inputId) {
+        handleNetworkBibTeXExport(inputId, true);
+    };
+
+    function handleNetworkBibTeXExport(inputId, plus) {
+        const input = document.getElementById(inputId);
+        const query = input ? input.value.trim() : '';
+        if (!query) return;
+        const plusArg = plus ? '&plus=1' : '';
+
+        if (currentData && currentData.mode === 'semantic') {
+            const source = document.getElementById('semantic-source-input').value;
+            window.location.href = `{{ url_for('main.semantic_export_bibtex') }}?q=${encodeURIComponent(query)}&source=${source}${plusArg}`;
+        } else {
+            window.location.href = `{{ url_for('main.rg_export_bibtex') }}?q=${encodeURIComponent(query)}${plusArg}`;
+        }
+    }
 </script>
 
 <style>

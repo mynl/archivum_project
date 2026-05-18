@@ -3,6 +3,11 @@ from ..services.network import (
     get_semantic_network_payload,
     get_social_network_payload,
 )
+from ..services.exports import (
+    export_dataframe_to_bibtex,
+    export_dataframe_to_csv,
+    galaxy_export_filename,
+)
 
 @bp.route('/network')
 def network_page():
@@ -64,15 +69,28 @@ def semantic_export_csv():
             return "No cached embeddings for this set.", 400
         export_df = result.to_export_dataframe()
 
-        # Filename
-        date_str = datetime.now().strftime("%m-%d")
-        clean_q = re.sub(r'[^a-zA-Z0-9]+', '-', raw_query).strip('-')[:30]
-        filename = f"arc-galaxy-{date_str}-{clean_q}.csv"
-
-        temp_path = Path("temp") / filename
-        export_df.to_csv(temp_path, index=False, encoding='utf-8-sig')
-        
-        return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+        return export_dataframe_to_csv(export_df, galaxy_export_filename(raw_query))
     except Exception as e:
         logger.error(f"Semantic export error: {e}")
+        return str(e), 500
+
+
+@bp.route('/semantic-export-bibtex')
+def semantic_export_bibtex():
+    raw_query = request.args.get('q', '').strip()
+    source_type = request.args.get('source', 'title')
+    plus = request.args.get('plus') == '1'
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    if not raw_query: return "No query provided.", 400
+
+    try:
+        result = analyze_semantic(lib, raw_query, source_type)
+        if result.result_df.empty:
+            return "No matches found.", 400
+        if result.relevant_idx.empty:
+            return "No cached embeddings for this set.", 400
+        return export_dataframe_to_bibtex(result.to_export_dataframe(), lib, plus=plus)
+    except Exception as e:
+        logger.error(f"Semantic BibTeX export error: {e}")
         return str(e), 500
