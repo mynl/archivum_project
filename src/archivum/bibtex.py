@@ -9,7 +9,7 @@ import logging
 import re
 from pathlib import Path
 from textwrap import wrap
-from typing import Any, List
+from typing import Any, Callable, Iterable, List
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -42,9 +42,46 @@ def sanitize_for_latex(val: Any) -> str:
     return s
 
 
-def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
+BIBTEX_ALLOWED_TYPES = {
+    "article",
+    "book",
+    "techreport",
+    "misc",
+    "incollection",
+    "unpublished",
+    "inproceedings",
+    "phdthesis",
+}
+
+
+def format_mendeley_file(path: Any) -> str:
+    """
+    Format a path using Mendeley's BibTeX file-field convention.
+
+    Windows paths are rendered as ``:C\\:/path/to/file.pdf:pdf``. Non-Windows
+    paths keep their absolute/relative POSIX form and still include the final
+    file type segment.
+    """
+    if path is None or pd.isna(path):
+        return ""
+
+    p = Path(path)
+    suffix = p.suffix.lower().lstrip(".") or "pdf"
+    posix_path = p.as_posix()
+
+    if p.drive:
+        return f":{p.drive[0]}\\:{posix_path[2:]}:{suffix}"
+    if re.match(r"^[A-Za-z]:/", posix_path):
+        return f":{posix_path[0]}\\:{posix_path[2:]}:{suffix}"
+    return f":{posix_path}:{suffix}"
+
+
+def dict_to_bibtex(data: Any, allowed_fields: List[str] = None, raw_fields: Iterable[str] = None) -> str:
     """
     Converts a dict-like object to a sanitized BibTeX string.
+
+    ``raw_fields`` bypasses LaTeX sanitization for fields where the literal
+    value matters, such as Mendeley ``file`` paths.
     """
     if data is None:
         return ""
@@ -62,7 +99,10 @@ def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
 
     # Standard header fields
     bib_type = str(data.get('type', 'article')).lower()
+    if bib_type not in BIBTEX_ALLOWED_TYPES:
+        bib_type = "misc"
     cite_key = str(data.get('tag', 'unknown'))
+    raw_fields = set(raw_fields or [])
 
     # Determine which fields to process
     if allowed_fields:
@@ -81,7 +121,7 @@ def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
         if pd.isna(v) or str(v).strip() in ("", "nan"):
             continue
         
-        sanitized_v = sanitize_for_latex(v)
+        sanitized_v = str(v) if k in raw_fields else sanitize_for_latex(v)
         if sanitized_v:
             # Title preservation: wrap in double braces if it's a title/journal
             # but ONLY if not already braced.
@@ -103,6 +143,71 @@ def dict_to_bibtex(data: Any, allowed_fields: List[str] = None) -> str:
     lines.append("}")
 
     return "\n".join(lines)
+
+
+def rows_to_bibtex(
+    rows: Any,
+    allowed_fields: List[str] = None,
+    *,
+    include_hash: bool = False,
+    include_file: bool = False,
+    path_resolver: Callable[[Any], Path] | None = None,
+) -> str:
+    """
+    Convert dataframe-like rows to BibTeX text using ``dict_to_bibtex``.
+
+    This is the shared path for library-level and ad hoc web exports. The
+    optional ``include_hash`` and ``include_file`` flags produce Archivum's
+    enriched BibTeX+ export without changing normal library BibTeX output.
+    """
+    if rows is None:
+        return ""
+
+    if isinstance(rows, pd.DataFrame):
+        source = _dedupe_bibtex_dataframe(rows)
+        records = [row.to_dict() for _, row in source.iterrows()]
+    else:
+        records = []
+        for row in rows:
+            if hasattr(row, "to_dict"):
+                row = row.to_dict()
+            if hasattr(row, "_asdict"):
+                row = row._asdict()
+            if isinstance(row, dict):
+                records.append(row)
+
+    fields = list(allowed_fields or [])
+    raw_fields = set()
+    if include_hash and "hash" not in fields:
+        fields.append("hash")
+    if include_file:
+        if "file" not in fields:
+            fields.append("file")
+        raw_fields.add("file")
+
+    entries = []
+    for record in records:
+        record = dict(record)
+        if include_file and record.get("path"):
+            file_path = record["path"]
+            if path_resolver is not None:
+                file_path = path_resolver(file_path)
+            record["file"] = format_mendeley_file(file_path)
+        entry = dict_to_bibtex(record, allowed_fields=fields, raw_fields=raw_fields)
+        if entry:
+            entries.append(entry)
+    return "\n\n".join(entries)
+
+
+def _dedupe_bibtex_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Avoid duplicate BibTeX entries from exploded author/database rows."""
+    for column in ("tag", "hash"):
+        if column in df.columns:
+            present = df[column].notna() & (df[column].astype(str).str.strip() != "")
+            keyed = df[present].drop_duplicates(subset=[column], keep="first")
+            unkeyed = df[~present]
+            return pd.concat([keyed, unkeyed], ignore_index=True)
+    return df
 
 
 def bibtex_to_dict(bibtex_str: str) -> dict[str, dict[str, str]]:
@@ -245,4 +350,3 @@ def dict_to_bibtex_crossref(data: Any) -> str:
     lines.append("}")
 
     return "\n".join(lines)
-

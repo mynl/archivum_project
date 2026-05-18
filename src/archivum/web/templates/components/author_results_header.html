@@ -1,0 +1,31 @@
+<div id="author-results-header"{% if oob_header|default(true) %} hx-swap-oob="true"{% endif %} class="d-flex flex-wrap align-items-center gap-2 mb-4">
+    <h4 class="mb-0 fw-bold me-auto"><i class="bi bi-person-fill me-2"></i>{{ author }}</h4>
+    <button class="btn btn-info px-4 fw-bold shadow-sm" onclick="exportAuthorToQuery({{ author|tojson }})">
+        Export
+    </button>
+    <div class="dropdown">
+        <button class="btn btn-outline-secondary px-3 shadow-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+            <i class="bi bi-gear-fill me-1"></i> Options
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm" style="min-width: 200px;">
+            <li><h6 class="dropdown-header text-uppercase small pb-1">View Mode</h6></li>
+            {% for mode, label in view_modes %}
+                <li>
+                    <div class="dropdown-item py-1">
+                        <div class="form-check">
+                            <input class="form-check-input"
+                                   type="radio"
+                                   name="author-view-mode"
+                                   id="author-mode-{{ mode }}"
+                                   value="{{ mode }}"
+                                   {% if view_mode == mode %}checked{% endif %}
+                                   hx-get="{{ url_for('main.author_search', author=author, view_mode=mode) }}"
+                                   hx-target="#author-results">
+                            <label class="form-check-label small w-100 cursor-pointer" for="author-mode-{{ mode }}">{{ label }}</label>
+                        </div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+</div>

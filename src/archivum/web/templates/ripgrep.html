@@ -13,15 +13,15 @@
         if (exportBtn) {
             exportBtn.disabled = true;
             exportBtn.classList.add('opacity-50');
-            exportBtn.classList.remove('btn-info');
-            exportBtn.classList.add('btn-outline-info');
+            exportBtn.classList.remove('btn-secondary');
+            exportBtn.classList.add('btn-outline-secondary');
             exportBtn.dataset.hashes = '';
         }
         if (exportToggle) {
             exportToggle.disabled = true;
             exportToggle.classList.add('opacity-50');
-            exportToggle.classList.remove('btn-info');
-            exportToggle.classList.add('btn-outline-info');
+            exportToggle.classList.remove('btn-secondary');
+            exportToggle.classList.add('btn-outline-secondary');
         }
     }
 
@@ -56,6 +56,36 @@
         tableElement.dataset.sortCol = colIdx;
         tableElement.dataset.sortDir = isAsc ? 'desc' : 'asc';
     }
+
+    function updateRipgrepFeedback() {
+        const input = document.getElementById('rg-input');
+        const feedback = document.getElementById('rg-feedback');
+        if (!input || !feedback) return;
+
+        const query = input.value.trim();
+        feedback.classList.remove('is-ok', 'is-error');
+        if (!query) {
+            feedback.textContent = 'Press Enter or choose Summary, Counts, or Details to search document text.';
+            return;
+        }
+
+        try {
+            new RegExp(query);
+            feedback.classList.add('is-ok');
+            feedback.textContent = 'Regex looks valid. Press Enter or choose a search mode.';
+        } catch (err) {
+            feedback.classList.add('is-error');
+            feedback.textContent = `Regex syntax issue - ${err.message}`;
+        }
+    }
+
+    window.addEventListener('load', () => {
+        const input = document.getElementById('rg-input');
+        if (input) {
+            input.addEventListener('input', updateRipgrepFeedback);
+            updateRipgrepFeedback();
+        }
+    });
 </script>
 
 <div class="container-fluid py-3">
@@ -66,7 +96,7 @@
                 <input type="text" 
                        id="rg-input" 
                        name="q" 
-                       placeholder="Full-text search (ripgrep)..." 
+                       placeholder="Ripgrep full-text search..."
                        hx-get="{{ url_for('main.rg_search') }}" 
                        hx-trigger="keyup[key=='Enter']" 
                        hx-target="#rg-stream-sink" 
@@ -80,6 +110,9 @@
                        spellcheck="false"
                        autofocus>
                 <i class="bi bi-x-circle clear-input" onclick="clearInput('rg-input')"></i>
+            </div>
+            <div id="rg-feedback" class="query-feedback">
+                Press Enter or choose Summary, Counts, or Details to search document text.
             </div>
         </div>
     </div>
@@ -195,9 +228,7 @@
     <!-- Stats will be injected here via OOB swap -->
 </div>
 
-<div id="rg-results">
-    <p class="text-muted">Press Enter or click Execute to search document text...</p>
-</div>
+<div id="rg-results"></div>
 
 <div id="rg-more-container" class="text-center my-4" style="display: none;">
     <!-- More button will be injected here via OOB swap -->

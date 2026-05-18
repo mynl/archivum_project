@@ -3,6 +3,13 @@ from ..cli import LibraryContext
 
 def create_app():
     app = Flask(__name__)
+    try:
+        from ..analytics.semantic import warm_semantic_projection, warm_transformer_model
+
+        warm_semantic_projection(background=True)
+        warm_transformer_model(background=True)
+    except Exception:
+        app.logger.warning("Could not start semantic warmup.", exc_info=True)
     
     # Import routes after app is created to avoid circular imports
     from . import routes

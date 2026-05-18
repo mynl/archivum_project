@@ -4,51 +4,67 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-dynamic = ["version"]
+version = "2.2.2"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "arxiv",
     "blake3",
     "click",
     "flask",
     "greater_tables",
+    "hdbscan",
+    "ipython",
     "latexcodec",
+    "lark",
+    "matplotlib",
     "nameparser",
+    "networkx",
     "numpy",
     "pandas",
     "pendulum",
     "prompt_toolkit",
+    "pybtex",
     "pyarrow",
     "pymupdf",   # fitz
     "pypdf",
     "python_Levenshtein",
     "pyyaml",
+    "querexfuzz",
     "rapidfuzz",
     "requests",
-    "rustfuzz",
+    "skimmatch",
+    "sentence-transformers",
     "tqdm",
-    "uber_shell",
+    "tzlocal",
+    "umap-learn",
+    "uber-shell>=1.1.0",
     "waitress",
+    "watchdog",
 ]
 
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Utilities"
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["archivum"]
+include = ["archivum", "archivum.*"]
 
-[tool.setuptools.dynamic]
-version = { attr = "archivum.__version__" }
+[tool.setuptools.package-data]
+archivum = [
+    "web/templates/*.html",
+    "web/templates/components/*.html",
+    "web/static/*",
+    "web/static/icon/*",
+    "web/static/img/*",
+    "configurations/*.yaml",
+]
 
 [project.scripts]
 archivum = "archivum.cli:entry"
@@ -62,20 +78,33 @@ archivum = "archivum.cli:entry"
 
 [project.optional-dependencies]
 dev = [
-    "docutils",
-    "jupyter-sphinx",
-    "nbsphinx",
-    "pickleshare",
-    "recommonmark",
+    "roman",
     "setuptools>=62.3.2",
     "sphinx-click",
     "sphinx-copybutton",
-    "sphinx-multitoc-numbering",
-    "sphinx-rtd-dark-mode",
-    "sphinx-toggleprompt",
-    "sphinx<8.0.0",
-    "sphinxcontrib-bibtex",
+    "sphinx-rtd-theme",
+    "sphinx>=8.1,<9",
+]
+test = [
+    "pytest",
+    "pytest-playwright",
 ]
 
 [tool.ruff]
 extend-ignore = ["E501", "E701", "E702"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "active_library: requires a configured Archivum library",
+    "browser: browser-level smoke tests",
+    "network: network analysis tests",
+    "route: Flask route tests",
+    "semantic: semantic analysis tests",
+    "slow: slower integration tests",
+    "web: web interface tests",
+]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+cache_dir = "temp/pytest-cache"

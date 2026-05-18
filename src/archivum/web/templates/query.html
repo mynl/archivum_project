@@ -9,7 +9,7 @@
                 <input type="text" 
                        id="search-input" 
                        name="q" 
-                       placeholder="Search references (tag, f query, q query)..." 
+                       placeholder="Query references..."
                        hx-get="{{ url_for('main.search') }}" 
                        hx-trigger="keyup changed delay:250ms, search-trigger from:body" 
                        hx-target="#results" 
@@ -19,6 +19,9 @@
                        spellcheck="false"
                        autofocus>
                 <i class="bi bi-x-circle clear-input" onclick="clearInput('search-input')"></i>
+            </div>
+            <div id="query-feedback" class="query-feedback">
+                Start typing for fuzzy match or enter querex string for recent top 50 or q querex string.
             </div>
         </div>
     </div>
@@ -50,23 +53,16 @@
             <i class="bi bi-dice-5 me-1"></i> Random
         </button>
 
-        {% if is_admin %}
-        <button class="btn btn-outline-success px-3 shadow-sm"
-                onclick="openReportStudio()">
-            <i class="bi bi-journal-plus me-1"></i> Report
-        </button>
-        {% endif %}
+        {% set id_prefix = 'query' %}
+        {% set onclick_report = 'openReportStudio()' %}
+        {% include "components/report_button.html" %}
 
-        <!-- Export Button -->
-        <button id="search-export-btn" 
-                class="btn btn-outline-info px-3 shadow-sm"
-                onclick="exportQueryToCSV()"
-                title="Export results to CSV">
-            <i class="bi bi-file-earmark-spreadsheet me-1"></i> CSV
-        </button>
+        {% set id_prefix = 'query' %}
+        {% set input_id = 'search-input' %}
+        {% set enabled = true %}
+        {% include "components/export_button.html" with context %}
 
         <!-- Options Dropdown -->
-        {% set id_prefix = 'query' %}
         {% set base_url = url_for('main.search') %}
         {% set include_selector = '#search-input' %}
         {% set target_selector = '#results' %}
@@ -82,7 +78,7 @@
     function openReportStudio() {
         const queryInput = document.getElementById('search-input');
         const query = queryInput ? queryInput.value.trim() : '';
-        window.location.href = `{{ url_for('main.reports_page') }}?q=${encodeURIComponent(query)}`;
+        window.location.href = `{{ url_for('main.reports_page') }}?source=query&q=${encodeURIComponent(query)}`;
     }
 
     function clearInput(id) {
@@ -119,14 +115,6 @@
         }
     }
 
-    function exportQueryToCSV() {
-        const input = document.getElementById('search-input');
-        const query = input ? input.value.trim() : '';
-        if (!query) return;
-        
-        window.location.href = `{{ url_for('main.search_export_csv') }}?q=${encodeURIComponent(query)}`;
-    }
-
     // Deep-linking support
     window.addEventListener('load', () => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -143,10 +131,6 @@
 </script>
 
 <div id="results" class="mt-4 shadow-sm rounded bg-white overflow-hidden">
-    <!-- Results will be loaded here via HTMX -->
-    <div class="p-4">
-        <p class="text-muted">Start typing to search (optional prefix 'f' or 'q')...</p>
-    </div>
 </div>
 
 {% include "components/edit_modal.html" %}

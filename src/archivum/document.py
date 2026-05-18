@@ -25,7 +25,7 @@ from tqdm import tqdm
 from .arxiv import lookup_arxiv
 from .crossref import lookup_doi, search as lookup_xref_search
 from .utilities import sanitize_windows_component
-from .bibtex import dict_to_bibtex_crossref
+from .bibtex import dict_to_bibtex_crossref, format_mendeley_file
 from .hasher import hash_many3
 
 logger = logging.getLogger(__name__)
@@ -99,6 +99,7 @@ class Document:
     def process(self):
         """
         Orchestrates the discovery pipeline by prioritizing evidence:
+
         1. Gather: Collect raw info from Filename, PDF Metadata, and Visual OCR.
         2. Prioritized Enhance: Attempt lookup using a found DOI or ArXiv ID. If successful,
            accept the result as definitive.
@@ -719,9 +720,7 @@ class Document:
         p = self._new_doc_path or self.doc_path
         p = p.absolute()
         # Windows Mendeley style path
-        mendeley_file = (
-            f":{p.drive[0]}\\:{str(p.as_posix())[2:]}:{p.suffix[1:]}"
-        )
+        mendeley_file = format_mendeley_file(p)
         lines.append(f"  file = {{{mendeley_file}}},")
 
         lines.append("}")
@@ -843,5 +842,3 @@ def elaborate_duplicates(lib, duplicates, trim=True):
     missing_refs = docs.loc[~docs.path.isin(dr.path)]
     # result
     return refs, missing_refs
-
-

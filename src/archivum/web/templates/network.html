@@ -10,6 +10,7 @@
                        id="network-search" 
                        placeholder="Unified Search: e.g., q author ~ /Wang/ rg risk"
                        onkeyup="handleSearchKey(event)"
+                       oninput="updateNetworkFeedback()"
                        autocapitalize="none"
                        autocorrect="off"
                        spellcheck="false"
@@ -72,6 +73,12 @@
         {% set id_prefix = 'net' %}
         {% set input_id = 'network-search' %}
         {% include "components/export_button.html" with context %}
+
+        {% set id_prefix = 'net' %}
+        {% set onclick_report = 'openNetworkReport()' %}
+        {% set disabled = true %}
+        {% set disabled_class = 'opacity-50' %}
+        {% include "components/report_button.html" %}
         
         <!-- Options Dropdown -->
         <div class="dropdown">
@@ -82,14 +89,21 @@
                 <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2">Verbosity</h6></li>
                 <li>
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="radio" name="verbosity" id="verb-minimal" value="minimal" checked>
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-minimal" value="minimal">
                         <label class="form-check-label small" for="verb-minimal">Minimal</label>
                     </div>
                 </li>
                 <li>
                     <div class="form-check">
-                        <input class="form-check-input" type="radio" name="verbosity" id="verb-verbose" value="verbose">
+                        <input class="form-check-input" type="radio" name="verbosity" id="verb-verbose" value="verbose" checked>
                         <label class="form-check-label small" for="verb-verbose">Verbose</label>
+                    </div>
+                </li>
+                <li><h6 class="dropdown-header px-0 text-uppercase small pb-2 border-bottom mb-2 mt-3">Ripgrep</h6></li>
+                <li>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="network-case-sensitive">
+                        <label class="form-check-label small" for="network-case-sensitive">Case sensitive rg</label>
                     </div>
                 </li>
             </ul>
@@ -100,11 +114,11 @@
         </div>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div id="network-status-area" class="small text-muted font-monospace overflow-auto bg-light border rounded p-2" style="height: 5rem; width: 60%;">
+    <div class="mb-3">
+        <div id="network-status-area" class="small text-muted font-monospace overflow-auto bg-light border rounded p-2 w-100" style="height: 5rem;">
             Enter "q querex rg regex" to begin analysis...
         </div>
-        <div id="network-stats" class="text-end text-secondary small fw-medium">
+        <div id="network-stats" class="text-end text-secondary small fw-medium mt-2">
             <!-- Stats will be injected here -->
         </div>
     </div>
@@ -216,6 +230,7 @@
     let currentData = null;
 
     function handleSearchKey(e) {
+        updateNetworkFeedback();
         if (e.key === 'Enter') {
             const lastMode = (currentData && currentData.mode) ? currentData.mode : 'social';
             executeSearch(lastMode);
@@ -226,6 +241,43 @@
         const input = document.getElementById('network-search');
         input.value = '';
         input.focus();
+        updateNetworkFeedback();
+    }
+
+    function splitNetworkUniverse(raw) {
+        const text = raw.trim();
+        const rgSplit = text.match(/^(.*?)\s+rg\s+([\s\S]*)$/i);
+        if (rgSplit) {
+            let qPart = rgSplit[1].trim();
+            if (qPart.toLowerCase().startsWith('q ')) qPart = qPart.slice(2).trim();
+            return { q: qPart, rg: rgSplit[2].trim() };
+        }
+        if (text.toLowerCase().startsWith('q ')) return { q: text.slice(2).trim(), rg: '' };
+        if (text.toLowerCase().startsWith('rg ')) return { q: '', rg: text.slice(3).trim() };
+        return { q: text, rg: '' };
+    }
+
+    function updateNetworkFeedback() {
+        const input = document.getElementById('network-search');
+        const statusArea = document.getElementById('network-status-area');
+        if (!input || !statusArea) return;
+
+        const query = input.value.trim();
+        if (!query) {
+            statusArea.textContent = 'Enter "q querex rg regex" to begin analysis...';
+            return;
+        }
+
+        const parts = splitNetworkUniverse(query);
+        if (parts.q && parts.rg) {
+            statusArea.textContent = `Querex universe: ${parts.q}; ripgrep filter: ${parts.rg}`;
+        } else if (parts.rg) {
+            statusArea.textContent = `Ripgrep universe: ${parts.rg}`;
+        } else if (query.toLowerCase().startsWith('q ')) {
+            statusArea.textContent = `Querex universe: ${parts.q}`;
+        } else {
+            statusArea.textContent = `Query universe: ${parts.q}`;
+        }
     }
 
     function executeReadHistory() {
@@ -256,19 +308,57 @@
         const source = document.getElementById('semantic-source-input').value;
         
         const verbosityInput = document.querySelector('input[name="verbosity"]:checked');
-        const verbosity = verbosityInput ? verbosityInput.value : 'minimal';
+        const verbosity = verbosityInput ? verbosityInput.value : 'verbose';
+        const caseSensitive = document.getElementById('network-case-sensitive')?.checked || false;
+        const caseParam = caseSensitive ? '&case=sensitive' : '';
         
         const semanticTable = document.getElementById('semantic-details');
         const socialControls = document.getElementById('social-controls');
         const cyContainer = document.getElementById('cy-container');
         const infoContainer = document.getElementById('info-container');
         const statusArea = document.getElementById('network-status-area');
+        let progressTimer = null;
+        const prependStatus = (message) => {
+            statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${message}<br>` + statusArea.innerHTML;
+        };
+        const formatSeconds = (start, end) => `${((end - start) / 1000.0).toFixed(3)}s`;
         
         btn.disabled = true;
         loader.classList.remove('d-none');
         
         const methodLabel = mode === 'social' ? 'Social Connections' : (source === 'title' ? 'Semantic (Title)' : 'Semantic (Text)');
         statusArea.innerHTML = `<i class="bi bi-cpu me-2"></i> Initializing for ${methodLabel}...`;
+        if (mode === 'semantic' && source !== 'title') {
+            prependStatus('<i class="bi bi-info-circle me-2"></i> Full-text semantic mode may generate missing embeddings before mapping.');
+        }
+        if (mode === 'semantic' && verbosity === 'verbose') {
+            const startedAt = Date.now();
+            const phases = [
+                'resolving query universe',
+                'checking embedding cache',
+                'loading the transformer model if needed',
+                'generating missing embeddings when needed',
+                'writing embedding cache updates',
+                'projecting points into 2D',
+                'detecting clusters',
+                'rendering graph payload'
+            ];
+            let phaseIndex = 0;
+            progressTimer = window.setInterval(() => {
+                const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+                const phase = phases[Math.min(phaseIndex, phases.length - 1)];
+                const existing = document.getElementById('semantic-progress-line');
+                const html = `<i class="bi bi-hourglass-split me-2"></i> Semantic analysis running for ${elapsed}s; ${phase}...`;
+                if (existing) {
+                    existing.innerHTML = html;
+                } else {
+                    statusArea.innerHTML = `<div id="semantic-progress-line">${html}</div>` + statusArea.innerHTML;
+                }
+                if (elapsed % 8 === 0 && phaseIndex < phases.length - 1) {
+                    phaseIndex += 1;
+                }
+            }, 1000);
+        }
 
         // Toggle UI elements based on mode
         if (mode === 'semantic') {
@@ -284,16 +374,27 @@
         }
 
         try {
+            const browserStarted = performance.now();
             const url = mode === 'social' 
-                ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}&verbosity=${verbosity}`
-                : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}&verbosity=${verbosity}`;
+                ? `{{ url_for('main.network_data') }}?q=${encodeURIComponent(query)}&verbosity=${verbosity}${caseParam}`
+                : `{{ url_for('main.semantic_data') }}?q=${encodeURIComponent(query)}&source=${source}&verbosity=${verbosity}${caseParam}`;
             
             const response = await fetch(url);
+            const responseReceived = performance.now();
             const data = await response.json();
+            const jsonParsed = performance.now();
             currentData = { ...data, mode: mode };
             
             if (data.status_msg) {
-                statusArea.innerHTML = `[${new Date().toLocaleTimeString()}] ${data.status_msg}<br>` + statusArea.innerHTML;
+                prependStatus(data.status_msg);
+            }
+            if (mode === 'semantic' && data.embedding_work_count > 0) {
+                prependStatus(
+                    `<i class="bi bi-exclamation-triangle me-2"></i> Generated ${data.embedding_work_count} missing ${source} embeddings; large first runs can take a while.`
+                );
+            }
+            if (Array.isArray(data.log_messages)) {
+                data.log_messages.slice().reverse().forEach(msg => prependStatus(msg));
             }
 
             if (data.error) {
@@ -302,6 +403,7 @@
                 document.getElementById('network-stats').innerHTML = '<span class="text-danger">No matches found.</span>';
                 if (cy) cy.elements().remove();
             } else {
+                const renderStarted = performance.now();
                 if (mode === 'social') {
                     renderSocialGraph(data);
                 } else {
@@ -309,6 +411,7 @@
                     populateGalaxyTable(data.elements);
                     populateClusterSummary(data.clusters || []);
                 }
+                const renderFinished = performance.now();
                 
                 // Update stats
                 const authorCount = data.nodes ? data.nodes.length : (data.authors || 0);
@@ -325,14 +428,25 @@
                 const exportToggle = document.getElementById('net-export-toggle');
                 if (exportBtn && data.hashes) {
                     exportBtn.disabled = false;
-                    exportBtn.classList.remove('opacity-50', 'btn-outline-info');
-                    exportBtn.classList.add('btn-info');
+                    exportBtn.classList.remove('opacity-50', 'btn-outline-secondary');
+                    exportBtn.classList.add('btn-secondary');
                     exportBtn.dataset.hashes = data.hashes;
                 }
                 if (exportToggle) {
                     exportToggle.disabled = false;
-                    exportToggle.classList.remove('opacity-50', 'btn-outline-info');
-                    exportToggle.classList.add('btn-info');
+                    exportToggle.classList.remove('opacity-50', 'btn-outline-secondary');
+                    exportToggle.classList.add('btn-secondary');
+                }
+                enableNetworkReport();
+
+                if (verbosity === 'verbose') {
+                    const totalFinished = performance.now();
+                    [
+                        `Browser timing: fetch response ${formatSeconds(browserStarted, responseReceived)}`,
+                        `Browser timing: JSON parse ${formatSeconds(responseReceived, jsonParsed)}`,
+                        `Browser timing: graph render ${formatSeconds(renderStarted, renderFinished)}`,
+                        `Browser timing: total ${formatSeconds(browserStarted, totalFinished)}`
+                    ].reverse().forEach((message) => prependStatus(message));
                 }
             }
 
@@ -341,9 +455,40 @@
             statusArea.innerHTML = `<span class="text-danger">Analysis failed: ${err.message}</span>`;
             alert("Analysis failed. See console for details.");
         } finally {
+            if (progressTimer) {
+                window.clearInterval(progressTimer);
+                const existing = document.getElementById('semantic-progress-line');
+                if (existing) existing.remove();
+            }
             btn.disabled = false;
             loader.classList.add('d-none');
         }
+    }
+
+    function enableNetworkReport() {
+        const reportBtn = document.getElementById('net-report-btn');
+        [reportBtn].forEach((btn) => {
+            if (!btn) return;
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+        });
+    }
+
+    function openNetworkReport() {
+        if (!currentData || !currentData.mode) return;
+        const queryInput = document.getElementById('network-search');
+        const query = queryInput ? queryInput.value.trim() : '';
+        if (!query) return;
+        const source = currentData.mode === 'semantic' ? 'semantic' : 'social';
+        const semanticSource = document.getElementById('semantic-source-input').value;
+        const caseSensitive = document.getElementById('network-case-sensitive')?.checked || false;
+        const params = new URLSearchParams({
+            source: source,
+            q: query,
+            semantic_source: semanticSource,
+            case: caseSensitive ? 'sensitive' : 'insensitive',
+        });
+        window.location.href = `{{ url_for('main.reports_page') }}?${params.toString()}`;
     }
 
     function renderSocialGraph(data) {
@@ -543,6 +688,23 @@
         }
     }
 
+    function scrollRowWithinContainer(row) {
+        const container = row.closest('.overflow-auto');
+        if (!container) return;
+
+        const rowTop = row.offsetTop;
+        const rowBottom = rowTop + row.offsetHeight;
+        const visibleTop = container.scrollTop;
+        const visibleBottom = visibleTop + container.clientHeight;
+
+        if (rowTop < visibleTop || rowBottom > visibleBottom) {
+            container.scrollTo({
+                top: Math.max(0, rowTop - (container.clientHeight / 2) + (row.offsetHeight / 2)),
+                behavior: 'smooth',
+            });
+        }
+    }
+
     function updateFilters() {
         if (!cy) return;
         
@@ -667,7 +829,7 @@
         if (row) {
             document.querySelectorAll('#galaxy-table tr').forEach(r => r.classList.remove('table-primary'));
             row.classList.add('table-primary');
-            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            scrollRowWithinContainer(row);
         }
     }
 
@@ -675,12 +837,14 @@
         if (typeof initSearchInput === 'function') {
             initSearchInput('network-search');
         }
+        updateNetworkFeedback();
     });
 
     // Override component export logic for Network-specific features
     window.handleExportToCSV = function(idPrefix, inputId) {
         const input = document.getElementById(inputId);
-        const query = input ? input.value : '';
+        const query = input ? input.value.trim() : '';
+        if (!query) return;
         
         if (currentData && currentData.mode === 'semantic') {
             const source = document.getElementById('semantic-source-input').value;
@@ -691,6 +855,28 @@
             window.location.href = url;
         }
     };
+
+    window.handleExportToBibTeX = function(idPrefix, inputId) {
+        handleNetworkBibTeXExport(inputId, false);
+    };
+
+    window.handleExportToBibTeXPlus = function(idPrefix, inputId) {
+        handleNetworkBibTeXExport(inputId, true);
+    };
+
+    function handleNetworkBibTeXExport(inputId, plus) {
+        const input = document.getElementById(inputId);
+        const query = input ? input.value.trim() : '';
+        if (!query) return;
+        const plusArg = plus ? '&plus=1' : '';
+
+        if (currentData && currentData.mode === 'semantic') {
+            const source = document.getElementById('semantic-source-input').value;
+            window.location.href = `{{ url_for('main.semantic_export_bibtex') }}?q=${encodeURIComponent(query)}&source=${source}${plusArg}`;
+        } else {
+            window.location.href = `{{ url_for('main.rg_export_bibtex') }}?q=${encodeURIComponent(query)}${plusArg}`;
+        }
+    }
 </script>
 
 <style>

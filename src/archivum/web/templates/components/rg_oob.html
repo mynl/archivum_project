@@ -1,0 +1,4 @@
+<div{% if target_id %} id="{{ target_id }}"{% endif %}
+     hx-swap-oob="{{ swap|default('true') }}"
+     {% if classes %}class="{{ classes }}"{% endif %}
+     {% if style %}style="{{ style }}"{% endif %}>{{ content|safe }}</div>

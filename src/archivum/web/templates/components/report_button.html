@@ -1,0 +1,8 @@
+{% if is_admin %}
+<button id="{{ id_prefix }}-report-btn"
+        class="btn btn-outline-success px-3 shadow-sm {{ disabled_class | default('') }}"
+        {% if disabled | default(false) %}disabled{% endif %}
+        onclick="{{ onclick_report }}; return false;">
+    <i class="bi bi-journal-plus me-1"></i> Report
+</button>
+{% endif %}

@@ -39,6 +39,29 @@ header img {
     box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.1);
 }
 
+.query-feedback {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: #6c757d;
+    font-family: SFMono-Regular, Consolas, monospace;
+    font-size: 0.70rem;
+    line-height: 1.25;
+    min-height: 1.2rem;
+    overflow: hidden;
+    padding: 0.25rem 0.125rem 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.query-feedback.is-ok {
+    color: #495057;
+}
+
+.query-feedback.is-error {
+    color: #b02a37;
+}
+
 /* 2b. Search Wrapper & Clear Icon */
 .search-wrapper {
     position: relative;
@@ -277,4 +300,26 @@ mark {
 
 .animate-pulse {
     animation: pulse-opacity 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Stable compact rows for large sidebar indexes such as Authors and Edit tags. */
+.sidebar-index-list {
+    overflow-y: auto;
+}
+
+.sidebar-index-item {
+    box-sizing: border-box;
+    min-height: 2rem;
+    line-height: 1.2;
+    flex-shrink: 0;
+    font-size: 0.82rem;
+    padding: 0.45rem 0.75rem;
+    overflow: hidden;
+}
+
+.sidebar-index-item .sidebar-index-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }

@@ -28,6 +28,7 @@
                 <a class="nav-link py-1 px-0 text-dark" href="#query">Query Syntax</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-simple">Simple Filters</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-advanced">Advanced Querexfuzz</a>
+                <a class="nav-link py-1 px-0 text-dark" href="#bibtex">BibTeX Format</a>
                 <a class="nav-link py-1 px-0 text-dark" href="#screens">Screen Guide</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-query">Query Page</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-network">Network & Discovery</a>
@@ -93,11 +94,11 @@
 
         <section id="query" class="mb-5">
             <h3 class="fw-bold mb-3">Query Syntax</h3>
-            <p>The primary search bar on the <strong>Query</strong> page is powered by <code>querexfuzz</code>. It supports three distinct modes of interaction.</p>
+            <p>The primary search bar on the <strong>Query</strong> page is powered by <code>querexfuzz</code>. A small live status line below the input shows the exact expression that will be run.</p>
             
             <div id="query-simple" class="mb-4">
-                <h5 class="fw-bold text-primary">1. Simple Filters & Shortcuts</h5>
-                <p>For quick lookups, you can use these intuitive patterns:</p>
+                <h5 class="fw-bold text-primary">1. Live Query Interpretation</h5>
+                <p>For quick lookups, plain text becomes a fuzzy <code>#</code> search. Explicit querexfuzz syntax is limited to the 50 most recent published matches by default.</p>
                 <table class="table table-sm table-bordered bg-white small mb-3">
                     <thead class="bg-light">
                         <tr>
@@ -108,46 +109,89 @@
                     <tbody>
                         <tr>
                             <td><code>keyword</code></td>
-                            <td>Matches a word or regex against the <strong>tag</strong> field.</td>
-                        </tr>
-                        <tr>
-                            <td><code>/pattern with spaces/</code></td>
-                            <td>Use slashes for patterns containing spaces or complex characters. This follows <strong>Perl-style</strong> regular expression syntax.</td>
+                            <td>Runs as <code># keyword</code> for fast fuzzy matching.</td>
                         </tr>
                         <tr>
                             <td><code>!AuthorName</code></td>
-                            <td>Prefix with <code>!</code> to quickly search for an <strong>author</strong>.</td>
+                            <td>Runs as <code>recent top 50 !AuthorName</code>.</td>
                         </tr>
                         <tr>
                             <td><code>field ~ pattern</code></td>
-                            <td>Generic field filter. Patterns are regex by default. Case insensitive.</td>
+                            <td>Runs as <code>recent top 50 field ~ pattern</code>.</td>
                         </tr>
                         <tr>
-                            <td><code>year ~ 2024</code></td>
-                            <td>Matches papers from the year 2024.</td>
+                            <td><code>year &gt; 2020</code></td>
+                            <td>Runs as <code>recent top 50 year &gt; 2020</code>.</td>
                         </tr>
                         <tr>
-                            <td><code>journal ~ Nature</code></td>
-                            <td>Matches papers published in Nature.</td>
+                            <td><code>q top 20 recent</code></td>
+                            <td>Runs exactly as <code>top 20 recent</code>.</td>
                         </tr>
                     </tbody>
                 </table>
-                <p class="small text-muted"><i class="bi bi-info-circle me-1"></i> You can combine filters with <code>and</code>, <code>or</code>, and <code>!</code> (NOT). For example: <code>!Smith and year ~ 2023</code></p>
+                <p class="small text-muted"><i class="bi bi-info-circle me-1"></i> Querex symbols are <code>#</code>, <code>~</code>, <code>=</code>, <code>&lt;</code>, <code>&gt;</code>, and <code>!</code>. Use <code>q</code> when you do not want automatic <code>recent top 50</code> wrapping.</p>
             </div>
 
             <div id="query-advanced" class="mb-4">
                 <h5 class="fw-bold text-primary">2. Full Querexfuzz (Prefix: <code>q</code>)</h5>
-                <p>Prefix your query with <code>q</code> to access the full power of the engine, including projection and fuzzy scoring.</p>
+                <p>Prefix your query with <code>q</code> to pass an expression through unchanged.</p>
                 <div class="bg-dark text-light p-3 rounded font-monospace small mb-3">
                     q select year, author, title author ~ /Wang, R/ and year > 2019 order by -year
                 </div>
                 <ul class="small">
-                    <li><strong>Fuzzy Search</strong>: Use <code>#</code> for fast, Rust-powered fuzzy matching. <code>q # machine learning</code></li>
+                    <li><strong>Fuzzy Search</strong>: Use <code>#</code> for fast skimmatch fuzzy matching. <code>q # machine learning</code></li>
                     <li><strong>Projection</strong>: Control which columns are returned using <code>select col1, col2</code>.</li>
                     <li><strong>Sorting</strong>: Use <code>order by field</code> or <code>order by -field</code> for descending.</li>
-                    <li><strong>Limits</strong>: Append <code>top 50</code> to restrict result size.</li>
+                    <li><strong>Limits</strong>: Add <code>top 50</code> to restrict result size.</li>
                 </ul>
                 <p class="small">For the complete grammar, visit the <a href="https://github.com/mynl/querexfuzz_project" target="_blank">Querexfuzz Project</a>.</p>
+            </div>
+        </section>
+
+        <section id="bibtex" class="mb-5">
+            <h3 class="fw-bold mb-3">BibTeX Format</h3>
+            <p>Archivum stores bibliographic metadata in a deliberately narrow BibTeX-compatible shape. Keeping entry types and fields normalized makes imports safer, keeps Feather tables predictable, and reduces BibTeX synchronization noise.</p>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Entry Types</h5>
+                <p class="small text-muted">Use one of these types for new or edited records:</p>
+                <div class="bg-light border rounded p-3 font-monospace small">
+                    article, book, techreport, misc, incollection, unpublished,
+                    inproceedings, phdthesis
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Supported Fields</h5>
+                <p class="small text-muted">Restrict BibTeX fields to the following set unless a specific import requires a temporary exception:</p>
+                <div class="bg-light border rounded p-3 font-monospace small">
+                    tag, type, title, year, author, journal, volume, number,
+                    month, pages, booktitle, editor, edition, doi, isbn,
+                    publisher, institution, address, url, archivePrefix,
+                    arxivId, eprint
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Conventions</h5>
+                <ul class="small">
+                    <li><strong>Tag</strong>: The BibTeX key is the Archivum tag. Keep it stable after import because links, citations, reports, and document mappings use it as the reference identity.</li>
+                    <li><strong>Type</strong>: Store the entry type without the leading <code>@</code> in editable metadata, for example <code>article</code> rather than <code>@article</code>.</li>
+                    <li><strong>Authors and editors</strong>: Use BibTeX <code>and</code> between names. Prefer canonical names that match the library's author normalization.</li>
+                    <li><strong>Dates</strong>: Keep <code>year</code> as a four-digit year when known. Use <code>month</code> only when it is bibliographically meaningful.</li>
+                    <li><strong>Identifiers</strong>: Prefer DOI, ISBN, URL, and arXiv fields over embedding identifiers in titles or notes.</li>
+                    <li><strong>Document paths</strong>: Do not add Mendeley-style file fields manually; Archivum maintains document links through the ref-doc table and importer workflow.</li>
+                </ul>
+            </div>
+
+            <div class="bg-dark text-light p-3 rounded font-monospace small">
+@article{Wang2024,<br>
+&nbsp;&nbsp;author = {Wang, Ruodu and Smith, Jane},<br>
+&nbsp;&nbsp;title = {Spectral Risk Measures},<br>
+&nbsp;&nbsp;year = {2024},<br>
+&nbsp;&nbsp;journal = {Insurance Mathematics and Economics},<br>
+&nbsp;&nbsp;doi = {10.0000/example}<br>
+}
             </div>
         </section>
 
@@ -158,7 +202,7 @@
                 <h5 class="fw-bold"><i class="bi bi-search me-2"></i>Query Page</h5>
                 <p>The default landing page for searching your library.</p>
                 <ul>
-                    <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type.</li>
+                    <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type, and the live status line shows the interpreted querexfuzz expression.</li>
                     <li><strong>Quick Actions</strong>:
                         <ul>
                             <li><strong>Recent</strong>: Dropdown to quickly view the last 50, 100, or 250 items added.</li>
@@ -167,7 +211,7 @@
                         </ul>
                     </li>
                     <li><strong>View Modes</strong>: Toggle between <strong>List</strong>, <strong>Verbose</strong> (all metadata), and <strong>Table</strong>.</li>
-                    <li><strong>CSV Export</strong>: Download your current search results as an Excel-compatible CSV file.</li>
+                    <li><strong>Exports</strong>: Download the current result set as CSV, BibTeX, or BibTeX+ from the Export menu. BibTeX+ adds Archivum document hashes and Mendeley-style <code>file</code> fields when a matched document path is available.</li>
                 </ul>
             </div>
 
@@ -181,16 +225,20 @@
                     <li><strong>Weighting</strong>: Author nodes are sized by the total number of papers they have in the current search universe.</li>
                     <li><strong>Connectivity</strong>: Edges connect authors who appear on the same paper. Edge thickness indicates the number of collaborations.</li>
                     <li><strong>Interaction</strong>: Click an author to see their papers. Double-click to "Rebase" the graph onto that author.</li>
+                    <li><strong>Ripgrep Universe</strong>: Searches using <code>rg</code> are case insensitive by default, matching the Ripgrep page behavior. Use <strong>Options &rarr; Case sensitive rg</strong> when exact case matters.</li>
+                    <li><strong>Live Interpretation</strong>: The status box shows whether the current text is a raw query universe, a <code>q</code> querex universe, an <code>rg</code> full-text universe, or a combined <code>q ... rg ...</code> universe.</li>
                 </ul>
 
                 <h6 class="fw-bold text-success small">2. Semantic Galaxy (Thematic Clustering)</h6>
                 <p class="small">Uses Machine Learning to project your papers into a 2D "Galaxy" where distance represents semantic similarity.</p>
                 <ul class="small">
                     <li><strong>Embedding</strong>: Papers are converted into high-dimensional vectors (384-D) using the <code>all-MiniLM-L6-v2</code> transformer model.</li>
-                    <li><strong>Projection (UMAP)</strong>: These vectors are flattened into 2D coordinates using <strong>UMAP</strong>, preserving local and global structures.</li>
+                    <li><strong>Cache</strong>: Embeddings are cached per library and source, so repeated runs usually reuse existing vectors. First runs, new documents, or longer full-text windows may need to encode missing papers.</li>
+                    <li><strong>Projection (UMAP)</strong>: These vectors are flattened into 2D coordinates using <strong>UMAP</strong>, preserving local and global structures while using available CPU cores.</li>
                     <li><strong>Clustering (HDBSCAN)</strong>: <strong>HDBSCAN</strong> automatically identifies dense "Constellations" of related papers.</li>
-                    <li><strong>Lone Stars</strong>: Points colored grey represent "Noise"—papers that don't statistically fit into any specific cluster.</li>
-                    <li><strong>Sources</strong>: Analysis can be run against <strong>Titles</strong> or the first 2,000 characters of <strong>Full Text</strong> extracts.</li>
+                    <li><strong>Lone Stars</strong>: Points colored grey represent "Noise"-papers that don't statistically fit into any specific cluster.</li>
+                    <li><strong>Sources</strong>: Analysis can be run against <strong>Title &amp; Metadata</strong>, the first 2,000 characters of <strong>Full Text</strong>, or the first 4,000 characters of <strong>Full Text</strong>.</li>
+                    <li><strong>Verbose Logs</strong>: Verbose mode reports timing spans for universe resolution, embedding cache lookup, model load, missing embedding generation, UMAP, clustering, serialization, and browser rendering. When an <code>rg</code> clause is used, it also shows the ripgrep command and cache hit/miss.</li>
                 </ul>
             </div>
 
@@ -199,9 +247,10 @@
                 <p>Search inside the actual text of your PDF collection.</p>
                 <ul>
                     <li><strong>Streaming Results</strong>: Matches are streamed to the browser in real-time.</li>
+                    <li><strong>Regex Feedback</strong>: The small status line below the input checks whether the typed pattern is valid JavaScript regex syntax before running ripgrep.</li>
                     <li><strong>Context Control</strong>: Specify how many lines of context to show before and after matches.</li>
                     <li><strong>Summary Mode</strong>: Groups matches by year and author to provide statistical insights into your library's content.</li>
-                    <li><strong>Export Top 50</strong>: Quickly export the most relevant papers from your Ripgrep results back to the Query screen for further analysis or report generation.</li>
+                    <li><strong>Exports</strong>: Send the top hash-limited matches to Query, or download all matches as CSV, BibTeX, or BibTeX+ from the Export menu.</li>
                 </ul>
             </div>
 
@@ -212,7 +261,7 @@
                     <li><strong>Integrated View</strong>: Research reports are rendered as HTML fragments using <strong>Pandoc</strong> and embedded directly within the Archivum interface.</li>
                     <li><strong>Archival PDFs</strong>: (Admin only) Generate professional-grade PDFs using <strong>Quarto + Tectonic</strong> with <code>scrartcl</code> styling (A4, 10pt font).</li>
                     <li><strong>Markdown Support</strong>: Add introductions and research notes to your reports using standard Markdown syntax.</li>
-                    <li><strong>Smart Caching</strong>: Rendered HTML and PDF artifacts are cached in the library's <code>exports/</code> directory. If a report is viewed or downloaded again, Archivum serves the cached version instantly unless the source <code>.qmd</code> file has been modified.</li>
+                    <li><strong>Smart Caching</strong>: Rendered HTML, PDF artifacts, and report images are cached in the library's <code>exports/</code> directory. If a report is viewed or downloaded again, Archivum serves the cached version instantly unless the source <code>.qmd</code> file has been modified.</li>
                     <li><strong>Raw Source</strong>: Access the raw <code>.qmd</code> file for manual editing or custom publication workflows.</li>
                 </ul>
             </div>
@@ -223,8 +272,11 @@
                 <p>Import new documents or BibTeX entries into the library.</p>
                 <ul>
                     <li><strong>Source</strong>: Paste BibTeX, provide a local path, or enter a URL (including Arxiv/DOI support).</li>
-                    <li><strong>Workbench</strong>: Verify metadata discovery, hash matching, and tag allocation before committing.</li>
-                    <li><strong>Duplicate Detection</strong>: Archivum will warn you if the content hash already exists in the library.</li>
+                    <li><strong>Workbench</strong>: Edit the source BibTeX while viewing the staged document and metadata candidates.</li>
+                    <li><strong>Import Preview</strong>: The preview runs the real BibTeX importer without saving. It shows the BibTeX that will be produced after author Trie normalization and tag allocation.</li>
+                    <li><strong>Tag Allocation</strong>: Previewed tags are advisory. The final tag is recomputed when you click <strong>GO: Archive Document</strong> and is locked down only when the library update is saved.</li>
+                    <li><strong>Duplicate Detection</strong>: Archivum warns on matching hashes and blocks unsafe duplicate or merge-warning imports before committing.</li>
+                    <li><strong>Commit</strong>: Archive Document reruns the same import path, shards the document into the library store, writes import audit files, updates the Feather data, and extracts text for new PDFs.</li>
                 </ul>
             </div>
 
