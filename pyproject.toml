@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-version = "2.2.0"
+version = "2.2.2"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
@@ -78,19 +78,12 @@ archivum = "archivum.cli:entry"
 
 [project.optional-dependencies]
 dev = [
-    "docutils",
-    "jupyter-sphinx",
-    "nbsphinx",
-    "pickleshare",
-    "recommonmark",
+    "roman",
     "setuptools>=62.3.2",
     "sphinx-click",
     "sphinx-copybutton",
-    "sphinx-multitoc-numbering",
-    "sphinx-rtd-dark-mode",
-    "sphinx-toggleprompt",
-    "sphinx<8.0.0",
-    "sphinxcontrib-bibtex",
+    "sphinx-rtd-theme",
+    "sphinx>=8.1,<9",
 ]
 test = [
     "pytest",

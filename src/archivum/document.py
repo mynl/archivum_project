@@ -99,6 +99,7 @@ class Document:
     def process(self):
         """
         Orchestrates the discovery pipeline by prioritizing evidence:
+
         1. Gather: Collect raw info from Filename, PDF Metadata, and Visual OCR.
         2. Prioritized Enhance: Attempt lookup using a found DOI or ArXiv ID. If successful,
            accept the result as definitive.
@@ -841,4 +842,3 @@ def elaborate_duplicates(lib, duplicates, trim=True):
     missing_refs = docs.loc[~docs.path.isin(dr.path)]
     # result
     return refs, missing_refs
-

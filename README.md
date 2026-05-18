@@ -45,24 +45,24 @@ uv run archivum --help
 
 ## Quick Start
 
-List configured libraries:
+Start the Uber shell with the default library open:
 
 ```powershell
-uv run archivum list
+uv run archivum uber -a
 ```
 
-Open a library and make it current:
+The prompt shows the active library. Run library-aware commands there:
 
-```powershell
-uv run archivum library-open uber-library
+```text
+stats
+status
+library-config
 ```
 
-Inspect the current library:
+Open a specific library when starting Uber:
 
 ```powershell
-uv run archivum status
-uv run archivum stats
-uv run archivum library-config
+uv run archivum uber -l uber-library
 ```
 
 Launch the web interface:
@@ -85,30 +85,30 @@ uv run archivum serve uber-library --prod --address 0.0.0.0
 
 Search references with the query engine:
 
-```powershell
-uv run archivum q "title ~ /risk measure/ top 20"
-uv run archivum query
+```text
+q title ~ /risk measure/ top 20
+query
 ```
 
 Find by tag, title, or file hash:
 
-```powershell
-uv run archivum tag Wang2024 -o
-uv run archivum title "spectral risk"
-uv run archivum hash 100f150a -o
+```text
+tag Wang2024 -o
+title "spectral risk"
+hash 100f150a -o
 ```
 
 Search extracted document text with ripgrep:
 
-```powershell
-uv run archivum rg "spectral risk measure"
-uv run archivum rg "capital allocation" -i
+```text
+rg "spectral risk measure"
+rg "capital allocation" -i
 ```
 
 Check whether a local file already exists in the library:
 
-```powershell
-uv run archivum find-doc "C:\path\to\paper.pdf"
+```text
+find-doc "C:\path\to\paper.pdf"
 ```
 
 ### Import Documents
@@ -116,15 +116,15 @@ uv run archivum find-doc "C:\path\to\paper.pdf"
 Stage a folder of new documents. This hashes files, checks for duplicates,
 extracts metadata, and writes a review BibTeX file.
 
-```powershell
-uv run archivum stage-docs "C:\S\PDFs\Batch6"
+```text
+stage-docs "C:\S\PDFs\Batch6"
 ```
 
 Import a reviewed BibTeX file. Without `-x`, this is a dry run.
 
-```powershell
-uv run archivum import-bibtex "C:\S\PDFs\Batch6\bibtex-import.bib"
-uv run archivum import-bibtex "C:\S\PDFs\Batch6\bibtex-import.bib" -x
+```text
+import-bibtex "C:\S\PDFs\Batch6\bibtex-import.bib"
+import-bibtex "C:\S\PDFs\Batch6\bibtex-import.bib" -x
 ```
 
 Useful import options:
@@ -137,39 +137,39 @@ Useful import options:
 
 Link existing library objects when needed:
 
-```powershell
-uv run archivum link-doc 100f150a -x
-uv run archivum link-tag-hash Wang2024 100f150a
+```text
+link-doc 100f150a -x
+link-tag-hash Wang2024 100f150a
 ```
 
 ### Maintain A Library
 
 Audit structure without changing data:
 
-```powershell
-uv run archivum library-audit -v
+```text
+library-audit -v
 ```
 
 Validate and optionally fix specific structural issues:
 
-```powershell
-uv run archivum library-validate --task sharding
-uv run archivum library-validate --task sharding -x
-uv run archivum library-validate --task orphans -x
-uv run archivum library-validate --task missing
+```text
+library-validate --task sharding
+library-validate --task sharding -x
+library-validate --task orphans -x
+library-validate --task missing
 ```
 
 Manage extracted text:
 
-```powershell
-uv run archivum extract-text --help
+```text
+extract-text --help
 ```
 
 Edit or delete references deliberately:
 
-```powershell
-uv run archivum edit-tag Wang2024
-uv run archivum delete-tag Wang2024
+```text
+edit-tag Wang2024
+delete-tag Wang2024
 ```
 
 ## Web Interface
@@ -243,8 +243,8 @@ Important configured concepts:
 
 Use the CLI to inspect the active configuration:
 
-```powershell
-uv run archivum library-config
+```text
+library-config
 ```
 
 ## Development And Tests

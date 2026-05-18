@@ -453,9 +453,11 @@ class Bib2df_Incremental(LibraryBase):
         Parses file field created by Mendeley in order to discover them.
 
         Mendeley's internal file(s) field added to bibtex files. Looks like
-        a semicolon separated list of the form
-        :C\\:/S/new-papers/Blackwell/1953_Equivalent Comparisons of Experiments.pdf:pdf
-        Oddly, empty vfiles are ::
+        a semicolon separated list of the form::
+
+          :C\\:/S/new-papers/Blackwell/1953_Equivalent Comparisons of Experiments.pdf:pdf
+
+        Oddly, empty vfiles are represented as ``::``.
         """
         def proc_vfile(vf_drive, vf_name):
             """create correct absolute Path from vf_name, str from bibtex file."""
@@ -509,7 +511,8 @@ class Bib2df_Incremental(LibraryBase):
         Make the reference/document dataframe by matching vfiles to afiles.
 
         vfiles (virtual files) are references within the file field in the
-          mendeley bibtex file.
+        mendeley bibtex file.
+
         afiles are actual files that exist in the pdf_path directory.
         """
         # columns are ref_id=tag and afile name
