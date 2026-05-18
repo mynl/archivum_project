@@ -182,7 +182,8 @@ library.
 Current screens include:
 
 - Query: fast metadata search with recent/read/random shortcuts, list/table/
-  verbose modes, CSV export, and report handoff.
+  verbose modes, CSV export, report handoff, and live interpretation feedback
+  for plain-text fuzzy searches versus explicit querexfuzz expressions.
 - Ripgrep: streaming full-text search over extracted document text, summary and
   detail views, context controls, caching, and CSV export.
 - Authors: author-centered bibliography browsing.

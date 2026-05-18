@@ -5,6 +5,8 @@ base_cols:
   - journal
   - create
   - hash
+  - year
+  - type
 
 date_fields:
   - create
@@ -20,5 +22,5 @@ fuzzy:
   fields:
     - author
     - title
-  limit: 10
+  limit: 50
   score_col_name: score

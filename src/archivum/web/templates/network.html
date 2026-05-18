@@ -10,6 +10,7 @@
                        id="network-search" 
                        placeholder="Unified Search: e.g., q author ~ /Wang/ rg risk"
                        onkeyup="handleSearchKey(event)"
+                       oninput="updateNetworkFeedback()"
                        autocapitalize="none"
                        autocorrect="off"
                        spellcheck="false"
@@ -229,6 +230,7 @@
     let currentData = null;
 
     function handleSearchKey(e) {
+        updateNetworkFeedback();
         if (e.key === 'Enter') {
             const lastMode = (currentData && currentData.mode) ? currentData.mode : 'social';
             executeSearch(lastMode);
@@ -239,6 +241,43 @@
         const input = document.getElementById('network-search');
         input.value = '';
         input.focus();
+        updateNetworkFeedback();
+    }
+
+    function splitNetworkUniverse(raw) {
+        const text = raw.trim();
+        const rgSplit = text.match(/^(.*?)\s+rg\s+([\s\S]*)$/i);
+        if (rgSplit) {
+            let qPart = rgSplit[1].trim();
+            if (qPart.toLowerCase().startsWith('q ')) qPart = qPart.slice(2).trim();
+            return { q: qPart, rg: rgSplit[2].trim() };
+        }
+        if (text.toLowerCase().startsWith('q ')) return { q: text.slice(2).trim(), rg: '' };
+        if (text.toLowerCase().startsWith('rg ')) return { q: '', rg: text.slice(3).trim() };
+        return { q: text, rg: '' };
+    }
+
+    function updateNetworkFeedback() {
+        const input = document.getElementById('network-search');
+        const statusArea = document.getElementById('network-status-area');
+        if (!input || !statusArea) return;
+
+        const query = input.value.trim();
+        if (!query) {
+            statusArea.textContent = 'Enter "q querex rg regex" to begin analysis...';
+            return;
+        }
+
+        const parts = splitNetworkUniverse(query);
+        if (parts.q && parts.rg) {
+            statusArea.textContent = `Querex universe: ${parts.q}; ripgrep filter: ${parts.rg}`;
+        } else if (parts.rg) {
+            statusArea.textContent = `Ripgrep universe: ${parts.rg}`;
+        } else if (query.toLowerCase().startsWith('q ')) {
+            statusArea.textContent = `Querex universe: ${parts.q}`;
+        } else {
+            statusArea.textContent = `Query universe: ${parts.q}`;
+        }
     }
 
     function executeReadHistory() {
@@ -781,6 +820,7 @@
         if (typeof initSearchInput === 'function') {
             initSearchInput('network-search');
         }
+        updateNetworkFeedback();
     });
 
     // Override component export logic for Network-specific features

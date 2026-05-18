@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 
 
+QUERY_HELP_TEXT = "Start typing for fuzzy match or enter querex string for recent top 50 or q querex string."
+QUEREX_SYMBOLS = frozenset("#~=<>!")
+
+
 @dataclass(frozen=True)
 class QuerySpec:
     raw: str
@@ -14,9 +18,12 @@ def split_query(raw_query: str) -> tuple[str, str]:
     lower_query = raw.lower()
     if lower_query.startswith("q "):
         return "q", raw[2:].strip()
-    if lower_query.startswith("f "):
-        return "f", raw[2:].strip()
-    return "f", raw
+    return "raw", raw
+
+
+def has_querex_symbol(query: str) -> bool:
+    """Return True when query contains explicit querexfuzz syntax markers."""
+    return any(symbol in query for symbol in QUEREX_SYMBOLS)
 
 
 def normalize_query(
@@ -29,35 +36,24 @@ def normalize_query(
     fuzzy_projection: str | None = None,
     default_empty_pattern: str | None = None,
 ) -> QuerySpec:
-    """Convert a web search string into a querex expression."""
+    """Convert a web search string into the expression passed to querexfuzz."""
     kind, query = split_query(raw_query)
-    if fuzzy_projection is None:
-        fuzzy_projection = projection
-    if q_projection is None:
-        q_projection = projection
 
-    if kind == "f":
-        if not query and default_empty_pattern is not None:
-            query = default_empty_pattern
+    if not query and default_empty_pattern is not None:
+        query = default_empty_pattern
 
-        if query and query[0] != "!" and query.find("~") == -1:
-            prefix = ""
-            if recent:
-                prefix += "recent "
-            if default_limit is not None:
-                prefix += f"top {default_limit} "
-            expression = f"{prefix}select {fuzzy_projection} tag ~ {query}"
-        else:
-            expression = query
-            if "select" not in expression.lower():
-                expression = f"select {projection} " + expression
-            if default_limit is not None and "top" not in expression.lower():
-                expression = f"top {default_limit} " + expression
-            if recent and "recent" not in expression.lower():
-                expression = "recent " + expression
-    else:
+    if not query:
+        expression = ""
+    elif kind == "q":
         expression = query
-        if "select" not in expression.lower():
-            expression = f"select {q_projection} " + expression
+    elif has_querex_symbol(query):
+        prefix = ""
+        if recent:
+            prefix += "recent "
+        if default_limit is not None:
+            prefix += f"top {default_limit} "
+        expression = f"{prefix}{query}"
+    else:
+        expression = f"# {query}"
 
     return QuerySpec(raw=raw_query, kind=kind, query=query, expression=expression)

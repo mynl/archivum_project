@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-version = "2.1.0"
+version = "2.1.1"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"

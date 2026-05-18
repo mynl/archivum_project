@@ -1,4 +1,5 @@
 from .shared import *
+from ...search.query import QUERY_HELP_TEXT
 
 @bp.route('/')
 def index():
@@ -106,31 +107,32 @@ def search():
         return "No library open."
     
     if not raw_query:
-        return ""
+        return _render_query_feedback(QUERY_HELP_TEXT, state="muted")
 
     spec = normalize_query(
         raw_query,
         default_limit=50,
         recent=True,
-        projection="type, *",
-        q_projection="path, hash, type, *",
     )
 
     if not spec.query:
-        return ""
+        return _render_query_feedback(QUERY_HELP_TEXT, state="muted")
 
     try:
         df = lib.database
         result = df.querex(spec.expression)
         
         if not isinstance(result, pd.DataFrame):
-            return f"Query error: result is {type(result)}"
+            return _render_query_feedback(
+                f"{spec.expression} (query error: result is {type(result).__name__})",
+                state="error",
+            )
 
         view_mode = request.args.get('view_mode', 'list')
-        return render_search_results(result, view_mode=view_mode)
+        return _render_query_feedback(spec.expression, state="ok") + render_search_results(result, view_mode=view_mode)
     except Exception as e:
         logger.error(f"Search error: {e}")
-        return render_template('components/alert.html', level='danger', message=f"Error: {str(e)}", classes='error')
+        return _render_query_feedback(_query_error_message(spec.expression, e), state="error")
 
 
 @bp.route('/search-export-csv')
@@ -142,7 +144,7 @@ def search_export_csv():
         return "No query provided.", 400
 
     try:
-        spec = normalize_query(raw_query, default_limit=None, recent=False, projection="*")
+        spec = normalize_query(raw_query, default_limit=50, recent=True)
 
         df = lib.database
         export_df = df.querex(spec.expression)
@@ -163,3 +165,28 @@ def search_export_csv():
     except Exception as e:
         logger.error(f"Search export error: {e}")
         return str(e), 500
+
+
+def _render_query_feedback(message: str, *, state: str = "ok") -> str:
+    classes = {
+        "ok": "query-feedback is-ok",
+        "error": "query-feedback is-error",
+        "muted": "query-feedback",
+    }.get(state, "query-feedback")
+    return render_template(
+        "components/query_feedback.html",
+        message=message,
+        classes=classes,
+    )
+
+
+def _query_error_message(expression: str, error: Exception) -> str:
+    raw = str(error).replace("\n", " ").strip()
+    lowered = raw.lower()
+    if "unexpected end-of-input" in lowered:
+        return f"{expression} (incomplete query)"
+    if "failed to parse query:" in lowered:
+        marker = "Error:"
+        if marker in raw:
+            raw = raw.split(marker, 1)[1].strip()
+    return f"{expression} (syntax error: {raw})"

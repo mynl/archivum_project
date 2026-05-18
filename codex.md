@@ -72,6 +72,7 @@ Important current features:
 - Admin ingest workbench with real importer-backed BibTeX preview.
 - Search history for query inputs.
 - Query shortcuts for recent and random entries.
+- Query page live feedback shows the exact querexfuzz expression being run. Plain text becomes `# text`; querex-symbol input is wrapped as `recent top 50 ...`; `q ...` passes through unchanged.
 - CSV export.
 - Status and health views.
 - Report Studio with `.qmd` source files, Pandoc HTML rendering, Quarto PDF rendering, and artifact caching.

@@ -196,7 +196,6 @@ def reports_generate():
                 raw_query,
                 default_limit=50,
                 recent=True,
-                projection="path, hash, type, *",
                 default_empty_pattern=".",
             )
 

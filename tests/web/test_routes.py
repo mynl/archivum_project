@@ -16,16 +16,24 @@ logger = logging.getLogger("archivum.tests.web.routes")
 @pytest.mark.active_library
 def test_query_screen_recent_read_and_hash_prefix(client, sample_hash_prefix):
     scenarios = [
-        ("recent", "q top 50 recent", "results found"),
+        ("recent", "q top 50 recent", "top 50 recent", "results found"),
         (
             "read-history",
             "q top 50 select last_read, read_count, * where read_count > 0 order by -last_read",
+            "top 50 select last_read, read_count, * where read_count &gt; 0 order by -last_read",
             None,
         ),
         (
             "hash-prefix",
             f"q top 25 select year, * hash ~ ^{sample_hash_prefix} order by -year",
+            f"top 25 select year, * hash ~ ^{sample_hash_prefix} order by -year",
             "results found",
+        ),
+        (
+            "plain-fuzzy",
+            "spectral risk measure",
+            "# spectral risk measure",
+            None,
         ),
     ]
 
@@ -33,7 +41,7 @@ def test_query_screen_recent_read_and_hash_prefix(client, sample_hash_prefix):
         page = assert_ok_html(client.get("/"), context="query page")
         assert 'id="search-input"' in page
 
-    for name, query, expected in scenarios:
+    for name, query, interpreted, expected in scenarios:
         with logged_step("query-search", scenario=name, query=query):
             response = client.get(
                 "/search",
@@ -42,9 +50,22 @@ def test_query_screen_recent_read_and_hash_prefix(client, sample_hash_prefix):
             )
             html = assert_ok_html(response, context=f"query {name}")
             assert "Query error" not in html
+            assert 'id="query-feedback"' in html
+            assert interpreted in html
             if expected is not None:
                 assert expected in html
             logger.info("query scenario=%s bytes=%s", name, len(html))
+
+    with logged_step("query-search-incomplete", query="!"):
+        response = client.get(
+            "/search",
+            query_string={"q": "!"},
+            headers={"HX-Request": "true"},
+        )
+        html = assert_ok_html(response, context="query incomplete")
+        assert 'id="query-feedback"' in html
+        assert "(incomplete query)" in html or "(syntax error:" in html
+        assert "Unexpected end-of-input" not in html
 
 
 @pytest.mark.web

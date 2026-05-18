@@ -56,6 +56,36 @@
         tableElement.dataset.sortCol = colIdx;
         tableElement.dataset.sortDir = isAsc ? 'desc' : 'asc';
     }
+
+    function updateRipgrepFeedback() {
+        const input = document.getElementById('rg-input');
+        const feedback = document.getElementById('rg-feedback');
+        if (!input || !feedback) return;
+
+        const query = input.value.trim();
+        feedback.classList.remove('is-ok', 'is-error');
+        if (!query) {
+            feedback.textContent = 'Press Enter or choose Summary, Counts, or Details to search document text.';
+            return;
+        }
+
+        try {
+            new RegExp(query);
+            feedback.classList.add('is-ok');
+            feedback.textContent = 'Regex looks valid. Press Enter or choose a search mode.';
+        } catch (err) {
+            feedback.classList.add('is-error');
+            feedback.textContent = `Regex syntax issue - ${err.message}`;
+        }
+    }
+
+    window.addEventListener('load', () => {
+        const input = document.getElementById('rg-input');
+        if (input) {
+            input.addEventListener('input', updateRipgrepFeedback);
+            updateRipgrepFeedback();
+        }
+    });
 </script>
 
 <div class="container-fluid py-3">
@@ -80,6 +110,9 @@
                        spellcheck="false"
                        autofocus>
                 <i class="bi bi-x-circle clear-input" onclick="clearInput('rg-input')"></i>
+            </div>
+            <div id="rg-feedback" class="query-feedback">
+                Press Enter or choose Summary, Counts, or Details to search document text.
             </div>
         </div>
     </div>
