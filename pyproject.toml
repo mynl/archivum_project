@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-version = "2.2.2"
+version = "2.2.3"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
@@ -36,7 +36,7 @@ dependencies = [
     "querexfuzz",
     "rapidfuzz",
     "requests",
-    "skimmatch",
+    "skimmatch>=0.2.1",
     "sentence-transformers",
     "tqdm",
     "tzlocal",
