@@ -28,6 +28,7 @@
                 <a class="nav-link py-1 px-0 text-dark" href="#query">Query Syntax</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-simple">Simple Filters</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#query-advanced">Advanced Querexfuzz</a>
+                <a class="nav-link py-1 px-0 text-dark" href="#bibtex">BibTeX Format</a>
                 <a class="nav-link py-1 px-0 text-dark" href="#screens">Screen Guide</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-query">Query Page</a>
                 <a class="nav-link py-1 px-0 text-dark ps-3 border-start ms-2" href="#screen-network">Network & Discovery</a>
@@ -144,6 +145,53 @@
                     <li><strong>Limits</strong>: Add <code>top 50</code> to restrict result size.</li>
                 </ul>
                 <p class="small">For the complete grammar, visit the <a href="https://github.com/mynl/querexfuzz_project" target="_blank">Querexfuzz Project</a>.</p>
+            </div>
+        </section>
+
+        <section id="bibtex" class="mb-5">
+            <h3 class="fw-bold mb-3">BibTeX Format</h3>
+            <p>Archivum stores bibliographic metadata in a deliberately narrow BibTeX-compatible shape. Keeping entry types and fields normalized makes imports safer, keeps Feather tables predictable, and reduces BibTeX synchronization noise.</p>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Entry Types</h5>
+                <p class="small text-muted">Use one of these types for new or edited records:</p>
+                <div class="bg-light border rounded p-3 font-monospace small">
+                    article, book, techreport, misc, incollection, unpublished,
+                    inproceedings, phdthesis
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Supported Fields</h5>
+                <p class="small text-muted">Restrict BibTeX fields to the following set unless a specific import requires a temporary exception:</p>
+                <div class="bg-light border rounded p-3 font-monospace small">
+                    tag, type, title, year, author, journal, volume, number,
+                    month, pages, booktitle, editor, edition, doi, isbn,
+                    publisher, institution, address, url, archivePrefix,
+                    arxivId, eprint
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <h5 class="fw-bold text-primary">Conventions</h5>
+                <ul class="small">
+                    <li><strong>Tag</strong>: The BibTeX key is the Archivum tag. Keep it stable after import because links, citations, reports, and document mappings use it as the reference identity.</li>
+                    <li><strong>Type</strong>: Store the entry type without the leading <code>@</code> in editable metadata, for example <code>article</code> rather than <code>@article</code>.</li>
+                    <li><strong>Authors and editors</strong>: Use BibTeX <code>and</code> between names. Prefer canonical names that match the library's author normalization.</li>
+                    <li><strong>Dates</strong>: Keep <code>year</code> as a four-digit year when known. Use <code>month</code> only when it is bibliographically meaningful.</li>
+                    <li><strong>Identifiers</strong>: Prefer DOI, ISBN, URL, and arXiv fields over embedding identifiers in titles or notes.</li>
+                    <li><strong>Document paths</strong>: Do not add Mendeley-style file fields manually; Archivum maintains document links through the ref-doc table and importer workflow.</li>
+                </ul>
+            </div>
+
+            <div class="bg-dark text-light p-3 rounded font-monospace small">
+@article{Wang2024,<br>
+&nbsp;&nbsp;author = {Wang, Ruodu and Smith, Jane},<br>
+&nbsp;&nbsp;title = {Spectral Risk Measures},<br>
+&nbsp;&nbsp;year = {2024},<br>
+&nbsp;&nbsp;journal = {Insurance Mathematics and Economics},<br>
+&nbsp;&nbsp;doi = {10.0000/example}<br>
+}
             </div>
         </section>
 

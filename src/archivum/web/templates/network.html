@@ -114,11 +114,11 @@
         </div>
     </div>
 
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div id="network-status-area" class="small text-muted font-monospace overflow-auto bg-light border rounded p-2" style="height: 5rem; width: 60%;">
+    <div class="mb-3">
+        <div id="network-status-area" class="small text-muted font-monospace overflow-auto bg-light border rounded p-2 w-100" style="height: 5rem;">
             Enter "q querex rg regex" to begin analysis...
         </div>
-        <div id="network-stats" class="text-end text-secondary small fw-medium">
+        <div id="network-stats" class="text-end text-secondary small fw-medium mt-2">
             <!-- Stats will be injected here -->
         </div>
     </div>
@@ -688,6 +688,23 @@
         }
     }
 
+    function scrollRowWithinContainer(row) {
+        const container = row.closest('.overflow-auto');
+        if (!container) return;
+
+        const rowTop = row.offsetTop;
+        const rowBottom = rowTop + row.offsetHeight;
+        const visibleTop = container.scrollTop;
+        const visibleBottom = visibleTop + container.clientHeight;
+
+        if (rowTop < visibleTop || rowBottom > visibleBottom) {
+            container.scrollTo({
+                top: Math.max(0, rowTop - (container.clientHeight / 2) + (row.offsetHeight / 2)),
+                behavior: 'smooth',
+            });
+        }
+    }
+
     function updateFilters() {
         if (!cy) return;
         
@@ -812,7 +829,7 @@
         if (row) {
             document.querySelectorAll('#galaxy-table tr').forEach(r => r.classList.remove('table-primary'));
             row.classList.add('table-primary');
-            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            scrollRowWithinContainer(row);
         }
     }
 

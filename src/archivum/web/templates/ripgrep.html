@@ -96,7 +96,7 @@
                 <input type="text" 
                        id="rg-input" 
                        name="q" 
-                       placeholder="Full-text search (ripgrep)..." 
+                       placeholder="Ripgrep full-text search..."
                        hx-get="{{ url_for('main.rg_search') }}" 
                        hx-trigger="keyup[key=='Enter']" 
                        hx-target="#rg-stream-sink" 
@@ -228,9 +228,7 @@
     <!-- Stats will be injected here via OOB swap -->
 </div>
 
-<div id="rg-results">
-    <p class="text-muted">Press Enter or click Execute to search document text...</p>
-</div>
+<div id="rg-results"></div>
 
 <div id="rg-more-container" class="text-center my-4" style="display: none;">
     <!-- More button will be injected here via OOB swap -->
