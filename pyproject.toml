@@ -75,6 +75,7 @@ archivum = "archivum.cli:entry"
 
 [project.urls]
 "Source Code" = "https://github.com/mynl/archivum_project"
+"Documentation" = "https://archivum-project.readthedocs.io/en/latest/"
 
 [project.optional-dependencies]
 dev = [

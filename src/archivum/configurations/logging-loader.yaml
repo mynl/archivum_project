@@ -23,7 +23,7 @@ handlers:
   file_main:  
     class: logging.handlers.RotatingFileHandler
     formatter: json
-    filename: "C:/temp/temp-arc/logging/archivum.log.json"
+    filename: "C:/tmp/logging/archivum.log.json"
     maxBytes: 10485760        # 10 MB
     backupCount: 5
     encoding: utf8

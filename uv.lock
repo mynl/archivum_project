@@ -51,7 +51,7 @@ wheels = [
 
 [[package]]
 name = "archivum"
-version = "2.2.2"
+version = "2.2.3"
 source = { editable = "." }
 dependencies = [
     { name = "arxiv" },
@@ -135,7 +135,7 @@ requires-dist = [
     { name = "roman", marker = "extra == 'dev'" },
     { name = "sentence-transformers" },
     { name = "setuptools", marker = "extra == 'dev'", specifier = ">=62.3.2" },
-    { name = "skimmatch" },
+    { name = "skimmatch", specifier = ">=0.2.1" },
     { name = "sphinx", marker = "extra == 'dev'", specifier = ">=8.1,<9" },
     { name = "sphinx-click", marker = "extra == 'dev'" },
     { name = "sphinx-copybutton", marker = "extra == 'dev'" },
@@ -2264,13 +2264,9 @@ wheels = [
 
 [[package]]
 name = "skimmatch"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6b/f0/ca14d5adf150f80359670e9d05cdcfc536f42bcfa5884ced82f2fa7fa765/skimmatch-0.2.0.tar.gz", hash = "sha256:33301d0b5a062b0479f5dffe02ca1b456692f87c0f65192ac3d92ca09292c618", size = 1725460, upload-time = "2026-05-17T08:50:37.719Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/cc/103ffb7f87db07424021f437a212b5a0dc16014e8533d818d0a023affcb5/skimmatch-0.2.0-cp313-cp313-win_amd64.whl", hash = "sha256:a2c8ad972388c6deac42f4aa3ea1568224515e45dae25531dbc56acbfed9a93e", size = 269416, upload-time = "2026-05-17T08:50:35.184Z" },
-    { url = "https://files.pythonhosted.org/packages/3a/a6/d703538c0505fcfd556a39582d4229491f610db25547ea3eaae66f2ba4a3/skimmatch-0.2.0-cp314-cp314-win_amd64.whl", hash = "sha256:195a4d257c4636d88020e9428d32b3664dd1984c5d70d32ca8f4e34764a0c61e", size = 269215, upload-time = "2026-05-17T08:50:36.474Z" },
-]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/76/b514847ff2efe1b780e20b0d062af444daa4b8b52158a14a74d981ba4448/skimmatch-0.2.1.tar.gz", hash = "sha256:2cd20e982d88b6f93acba539e1d353712d79676fa7eaa5101a752c8582c457dd", size = 2669615, upload-time = "2026-05-18T19:46:38.866Z" }
 
 [[package]]
 name = "snowballstemmer"
