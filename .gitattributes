@@ -1,0 +1,15 @@
+# Enforce LF line endings in the repository regardless of the checkout OS or
+# any tool/editor that writes CRLF. `text=auto` lets git decide which files are
+# text; `eol=lf` forces those to be stored and checked out with LF.
+* text=auto eol=lf
+
+# Explicitly treat known-binary types as binary so they are never touched.
+*.feather binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.ico binary
+*.woff binary
+*.woff2 binary
