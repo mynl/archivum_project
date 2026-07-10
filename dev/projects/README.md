@@ -1,4 +1,4 @@
-# dev/projects — SQLite migration project briefs
+    # dev/projects — SQLite migration project briefs
 
 This directory holds **cold-start instruction docs** for the multi-session SQLite migration. Each numbered `NN-name.md` is self-contained: a fresh Claude (or human) session opens one file, has everything needed to do that chunk of work, and does not need to read sibling briefs.
 
