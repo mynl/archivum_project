@@ -416,7 +416,26 @@ class Library(LibraryBase):
 
         # Trigger internal reset for database merge next time
         self._database = pd.DataFrame()
-        self.save()
+        self.save_read()
+
+    def save_read(self):
+        """Persist only ``read.feather`` (read history).
+
+        ``record_read`` mutates nothing but read history, so it must not trigger
+        the full :meth:`save` pipeline — rewriting ref/doc/ref-doc feathers,
+        resaving config, clearing every cache via :meth:`reset`, and rebuilding
+        ``bibtex.bib``. This writes just the one small frame.
+        """
+        if self.read_df.empty:
+            # record_read always adds a row before calling us; guard anyway.
+            return
+        read_path = self.config_path / "read.feather"
+        # Parity with save(): quiet the fs-watcher window and keep mtime
+        # bookkeeping honest (read.feather isn't in the watched core_files, but
+        # this is harmless and future-proofs against that changing).
+        self._ignore_until = time.time() + 2.0
+        self.read_df.to_feather(read_path)
+        self._last_mtimes["read.feather"] = read_path.stat().st_mtime
 
     @property
     def database(self):
