@@ -18,6 +18,21 @@ Rewrite all 10 `save()`-call-sites as backend transactions, with a `change_log` 
 - Bibtex regen **kept** for: `update_reference`, `remove_reference`, `update(importer)`, `enhance_refs`.
 - Bibtex regen **dropped** for: `record_read`, `link_document`, `validate`, `update_hashes`, `enhance_doc_df`.
 
+### Added 2026-08-06 — two more mutation sites
+
+`Library.unlink_document` and `Library.replace_document` were added for the web
+ingest duplicate-replacement flow, taking the count from 10 to 12. Both mutate
+`ref_doc` (and `replace_document` also `doc`), and both are **bibtex regen
+dropped** — they change which file a reference points at, never its metadata.
+`replace_document` optionally delegates to `update_reference`, which keeps its
+own regen. Both must land in a single transaction: `replace_document` demotes
+every existing `ref_doc` row for the tag, inserts the new one at
+`priority = 0`, and appends a `doc` row, and a partial write would leave the
+reference with no primary document.
+
+`delete_ref_doc` in the ABC below covers `unlink_document`. `upsert_ref_doc`
+must accept and preserve the `priority` column (see project 03).
+
 ## ABC additions for this project
 
 ```python

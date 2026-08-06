@@ -139,6 +139,7 @@ A single sharded document store (`doc_store_lib`) can back **multiple libraries*
 
 ## Things To Know Before You Edit
 
+- **Check `TODO.md` and remind the user.** Read it at the start of any change session. If an open item touches the area being worked on, say so up front and ask whether to fold it in — the user wants to be prompted, not to have to remember. Move finished items to the Done section with the version they shipped in.
 - **Help template is a hard rule:** when you change web-visible behavior, update `src/archivum/web/templates/help.html`.
 - **Non-destructive default:** never delete source documents without explicit confirmation. Sharding uses hardlinks. Many CLI commands require `-x` / `--execute` to actually write.
 - **Multiple libraries, one store:** different libraries may have divergent metadata for the same hash. Operations that rewrite canonical filenames can cause libraries to "fight" over a file.
@@ -149,6 +150,8 @@ A single sharded document store (`doc_store_lib`) can back **multiple libraries*
 
 ## Companion Files In The Repo Root
 
+- `TODO.md` — small deferred items, each scoped to the area that will trigger it. **Read this every session and surface relevant items to the user** (see Things To Know above). Larger multi-session work goes in `dev/projects/` instead.
+- `CHANGELOG.md` — notable shipped changes, keyed to `project.version`. Add an entry whenever you bump the version. Starts at 2.3.0; earlier history is in the `Version-*` git tags.
 - `human-notes.md` — the user's running roadmap, ideas, and prioritized improvement items (the "Improvement Roadmap" section enumerates known performance/security/maintainability targets). Treat as current intent when prioritizing.
 - `codex.md` — chronological session handoffs (test setup history, dependency changes, semantic/report work). Useful for "why is X the way it is" archaeology.
 - `GEMINI.md` — the older architectural overview and Web Interface Overhaul history.

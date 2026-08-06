@@ -39,8 +39,6 @@ from .library_base import LibraryBase
 from .hasher import hash_many3 as hash_many
 
 from .enhancements import save_from_row, path_from_row
-# set to True to override where audit files are stored to tmp
-# False is default
 
 logger = logging.getLogger(__name__)
 
@@ -211,9 +209,13 @@ class Bib2df_Incremental(LibraryBase):
                              "{L{\\'{o}}pez\xa0de\xa0Vergara}, Jorge E.": 'López\xa0de\xa0Vergara, Jorge E.'}
 
 
-        Audit mode is just ALWAYS ON - you can delete the files if you like!
-        Files saved to /tmp for nightly delete. On update they are committed
-        to the library import folder.
+        ``write_audit`` controls the audit trail and nothing else; it does not
+        gate the library save. When True, working CSVs are written under
+        ``debug_dir/imports/<timestamp>/`` and ``update_library`` hard links
+        them into ``<library>/import-audit/<timestamp>/``, which is what
+        ``Library.history`` reads. When False nothing is written and neither
+        directory is created. Bulk CLI imports audit; staged single-document
+        imports from the web do not.
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
@@ -229,7 +231,6 @@ class Bib2df_Incremental(LibraryBase):
         if self.doc_dir and not self.doc_dir.exists():
             logger.info("PDF directory is None or does not exist")
 
-        # if you write audits, also save  - this is a flag
         self._errors_mapper_saved = False
         # for properties
         self._raw_df = pd.DataFrame()
@@ -249,6 +250,7 @@ class Bib2df_Incremental(LibraryBase):
         self._last_missing_vfiles = None
         self._last_decode = None
         self.__audit_dir_path = None
+        self.__audit_dir_created = False
         self._all_unicode_errors = None
         # for duplicate detection: normalized titles and doi
         self._existing_title_norm = None
@@ -641,6 +643,11 @@ class Bib2df_Incremental(LibraryBase):
                 }
             ).dropna(subset=['hash'])
             self._ref_doc_df['version'] = self._ref_doc_df['version'].astype(int)
+            # 0 = primary. Library.update re-ranks against whatever the tag
+            # already has, so this is only a within-import ordering.
+            self._ref_doc_df['priority'] = (
+                self._ref_doc_df.groupby('tag').cumcount().astype(int)
+            )
             # for ref.
             self._last_missing_vfiles = missing_vfiles
         return self._ref_doc_df
@@ -1127,11 +1134,23 @@ class Bib2df_Incremental(LibraryBase):
         self.save_audit_file(import_info, ".audit-info")
         return import_info
 
+    def _tag_for_hash(self, file_hash: str) -> str:
+        """First library tag already linked to this content hash, or ""."""
+        lib_ref_doc = self.reference_library.ref_doc_df
+        if lib_ref_doc.empty:
+            return ""
+        tags = lib_ref_doc[lib_ref_doc.hash == file_hash].tag.tolist()
+        return str(tags[0]) if tags else ""
+
     def import_analysis(self, lib_test=True):
         """
         Prepare a detailed analysis of the import.
         Returns a DataFrame with columns:
-        tag | author | title | hash match | doi match | title match | action
+        tag | author | title | hash match | doi match | title match | match tag | action
+
+        ``match tag`` is the existing library tag the entry collided with, or
+        "" when it is clean. The web ingest needs it to offer "replace the
+        document on <tag>" instead of just refusing the import.
         """
         # Return cached analysis if available (ensures we see filtered records)
         if hasattr(self, '_analysis_cache') and self._analysis_cache is not None:
@@ -1162,18 +1181,22 @@ class Bib2df_Incremental(LibraryBase):
             # Determine Action
             action = "Import"
             has_meta_match = (dup_info['doi'] or dup_info['title'])
-            
+            match_tag = ""
+
             if dup_info['hash'] and has_meta_match:
                 action = "SKIP (Dupe)"
+                match_tag = (dup_info['doi'] or dup_info['title'])['tag']
             elif dup_info['hash']:
                 action = "Link Existing"
+                match_tag = self._tag_for_hash(dup_info['hash'])
             elif has_meta_match:
                 m = dup_info['doi'] or dup_info['title']
+                match_tag = m['tag']
                 if not m['has_doc']:
                     action = "Import (Fill)"
                 else:
                     action = "Merge/Warn"
-            
+
             rows.append({
                 "tag": tag,
                 "author": author,
@@ -1181,6 +1204,7 @@ class Bib2df_Incremental(LibraryBase):
                 "hash match": hash_m,
                 "doi match": doi_m,
                 "title match": title_m,
+                "match tag": match_tag,
                 "action": action
             })
             
@@ -1385,7 +1409,11 @@ class Bib2df_Incremental(LibraryBase):
 
         self.reference_library.update(self)
 
-        # create audit trail
+        # create audit trail; only when auditing, otherwise this would create
+        # both the debug audit dir and an empty import-audit dir as a side effect
+        if not self.write_audit:
+            return
+
         import_path = (
             self.reference_library.config_path / "import-audit" / self.timestamp
         )
@@ -1403,19 +1431,23 @@ class Bib2df_Incremental(LibraryBase):
         """Save df audit file with a standard filename."""
         if not self.write_audit:
             return
+        audit_dir = self._ensure_audit_dir()
         fn = self.bibtex_file_path.stem + suffix + ".csv"
-        p = self._audit_dir_path / fn
+        p = audit_dir / fn
         df.to_csv(p, encoding="utf-8")
         logger.debug(f"Audit: dataFrame, {len(df) = }, saved to {p.name}.")
         # check about errors mapper
         if self.errors_mapper and not self._errors_mapper_saved:
-            fn = self._audit_dir_path / "errors_mapper.json"
+            fn = audit_dir / "errors_mapper.json"
             with open(fn, "w", encoding="utf-8") as f:
                 json.dump(self.errors_mapper, f, indent=4)
             self._errors_mapper_saved = True
 
     def show_audit_files(self, top=5, trim=100, bib=False):
         """qd all the audit files."""
+        if not self._audit_dir_path.exists():
+            logger.info("No audit files: this import ran with write_audit=False.")
+            return
         if bib:
             for f in self._audit_dir_path.glob("*.bib"):
                 print(f.name)
@@ -1463,22 +1495,35 @@ class Bib2df_Incremental(LibraryBase):
     @property
     def _audit_dir_path(self):
         """
-        Time-stamped location to save audit data.
+        Time-stamped location for audit data.
 
-        If created, copies the input bibtex file (hard link).
+        Pure: reading this never creates anything. Call ``_ensure_audit_dir``
+        before writing.
         """
         if self.__audit_dir_path is None:
             self.__audit_dir_path = self.reference_library.debug_dir_path / "imports" / self.timestamp
-            # ensure it exists
-            self.__audit_dir_path.mkdir(parents=True, exist_ok=True)
-            logger.info("Created audit path at %s", str(self.__audit_dir_path))
-            # audit the bibtex input file
-            p_ = self.__audit_dir_path / self.bibtex_file_path.name
-            if p_.exists():
-                logger.warning("REALLY WEIRD - audit of input bibtex already exists.")
-                p_.unlink()
-            p_.hardlink_to(self.bibtex_file_path)
         return self.__audit_dir_path
+
+    def _ensure_audit_dir(self):
+        """
+        Create the audit directory and hard link the input bibtex into it.
+
+        Only ever called from behind a ``write_audit`` check, so an import
+        that is not auditing leaves no trace on disk.
+        """
+        p = self._audit_dir_path
+        if self.__audit_dir_created:
+            return p
+        p.mkdir(parents=True, exist_ok=True)
+        logger.info("Created audit path at %s", str(p))
+        # audit the bibtex input file
+        p_ = p / self.bibtex_file_path.name
+        if p_.exists():
+            logger.warning("REALLY WEIRD - audit of input bibtex already exists.")
+            p_.unlink()
+        p_.hardlink_to(self.bibtex_file_path)
+        self.__audit_dir_created = True
+        return p
 
     # GEMINI CODE for interactive update library
     @staticmethod

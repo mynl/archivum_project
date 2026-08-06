@@ -21,6 +21,53 @@ from greater_tables import GT
 logger = logging.getLogger(__name__)
 
 
+def assign_ref_doc_priority(ref_doc: pd.DataFrame) -> pd.DataFrame:
+    """
+    Give every ref-doc row a contiguous per-tag ``priority``, 0 = primary.
+
+    ``priority`` orders the documents attached to one tag: 0 is the one that
+    opens, 1, 2, ... are alternates in preference order. Promote a document by
+    zeroing its priority and demoting the incumbent (see
+    ``Library.replace_document``).
+
+    This is deliberately NOT ``version``. ``version`` identifies *which sharded
+    copy* of a content hash a row points at -- one physical file linked from
+    several references is sharded under several canonical names -- and
+    ``ref-doc`` joins ``doc`` on ``(hash, version)``. Reusing it for ordering
+    would repoint rows at the wrong file.
+
+    Existing values are respected: rows are only re-ranked to close gaps and to
+    put rows that carry no value yet at the end of their tag. Libraries written
+    before the column existed get ranked by current row order, which is what
+    the old ``.iloc[0]`` callers already resolved to.
+    """
+    if ref_doc.empty:
+        if "priority" in ref_doc.columns:
+            return ref_doc
+        out = ref_doc.copy()
+        out["priority"] = pd.Series(dtype="int64")
+        return out
+
+    out = ref_doc.copy()
+    existing = (
+        pd.to_numeric(out["priority"], errors="coerce")
+        if "priority" in out.columns
+        else pd.Series(np.nan, index=out.index, dtype="float64")
+    )
+    # within a tag: ranked rows first (by rank), then unranked, each group
+    # keeping its current relative order
+    out["_unranked"] = existing.isna().to_numpy()
+    out["_rank"] = existing.fillna(0).to_numpy()
+    out["_row"] = np.arange(len(out))
+    out = out.sort_values(["tag", "_unranked", "_rank", "_row"], kind="stable")
+    out["priority"] = out.groupby("tag").cumcount().astype("int64")
+    # restore the original row order so the feather stays diff-stable
+    out = out.sort_values("_row", kind="stable").drop(
+        columns=["_unranked", "_rank", "_row"]
+    )
+    return out.reset_index(drop=True)
+
+
 def djvu_convert_file(in_path: Path, out_path: Path, verbose: bool = False, config=None) -> bool:
     """
     Convert a DjVu file to a searchable PDF.

@@ -73,8 +73,12 @@ def get_hash_meta_cache(lib):
         logger.info("Rebuilding metadata cache for %s", lib.name)
         hash_prefix_to_meta = {}
         if not lib.ref_doc_df.empty:
+            # One tag per hash: prefer the tag this document is primary for,
+            # then the latest version.
+            sort_cols = ["hash", "priority", "version"] if "priority" in lib.ref_doc_df.columns else ["hash", "version"]
+            ascending = [True, True, False] if len(sort_cols) == 3 else [True, False]
             latest_links = (
-                lib.ref_doc_df.sort_values(["hash", "version"], ascending=[True, False])
+                lib.ref_doc_df.sort_values(sort_cols, ascending=ascending)
                 .drop_duplicates("hash")
             )
             meta_df = latest_links.merge(lib.doc_df, on=["hash", "version"], how="left")

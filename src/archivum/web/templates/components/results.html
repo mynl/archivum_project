@@ -91,6 +91,7 @@
             <span class="title {{ 'fw-bold' if row.is_book else '' }}">"{{ row.title_display }}"</span>
             <span class="author text-muted small ms-1">{{ row.author_display }}</span>
             <span class="journal small ms-1"><i>{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</i></span>
+            {% if row.hash_display %}<span class="doc-hash text-muted ms-1">{{ row.hash_display|upper }}</span>{% endif %}
         </span>
     </div>
     {% endfor %}

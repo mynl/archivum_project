@@ -18,6 +18,7 @@ from pathlib import Path
 import logging
 import json
 import html
+import mimetypes
 import subprocess
 import os
 import time

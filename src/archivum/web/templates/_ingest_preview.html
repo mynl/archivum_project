@@ -6,9 +6,62 @@
         {% endif %}
     </div>
     <div class="card-body p-0">
-        {% if preview_blocked %}
+        {% if conflict and conflict.resolvable %}
+            {# Merge/Warn: a different file that matches a reference which already
+               has a document. Offer the swap instead of refusing the import. #}
+            <div class="alert alert-warning m-3 mb-0" role="alert">
+                <div>
+                    This looks like a duplicate of
+                    <a href="{{ url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>,
+                    which already has a document{% if conflict.title %} &mdash; <em>{{ conflict.title }}</em>{% endif %}.
+                    The file itself is new. Replace the existing document?
+                </div>
+                <div class="d-flex gap-2 mt-3 align-items-start">
+                    <form hx-post="{{ url_for('main.ingest_replace') }}"
+                          hx-target="#ingest-workbench"
+                          hx-include="#workbench-bibtex"
+                          hx-indicator="#replace-indicator-{{ idx }}">
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <input type="hidden" name="idx" value="{{ idx }}">
+                        <input type="hidden" name="hash" value="{{ known_hash }}">
+                        <input type="hidden" name="match_tag" value="{{ conflict.match_tag }}">
+                        <button type="submit" class="btn btn-sm btn-warning fw-bold">
+                            <span id="replace-indicator-{{ idx }}" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+                            Replace document on {{ conflict.match_tag }}
+                        </button>
+                        <div class="form-check mt-2 small">
+                            <input class="form-check-input" type="checkbox" name="update_metadata" id="update-metadata-{{ idx }}">
+                            <label class="form-check-label" for="update-metadata-{{ idx }}">
+                                Also update the reference metadata from this BibTeX
+                            </label>
+                        </div>
+                    </form>
+                    <form hx-post="{{ url_for('main.ingest_next') }}" hx-target="#ingest-workbench">
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <input type="hidden" name="idx" value="{{ idx }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Skip this document</button>
+                    </form>
+                    <form hx-post="{{ url_for('main.ingest_cancel') }}" hx-target="#ingest-workbench">
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Cancel</button>
+                    </form>
+                </div>
+            </div>
+        {% elif preview_blocked %}
             <div class="alert alert-danger m-3 mb-0" role="alert">
                 {{ preview_message }}
+                {% if conflict and conflict.match_tag %}
+                    <div class="mt-2 small">
+                        Already in the library as
+                        <a href="{{ url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>
+                        &mdash; same file and same metadata, so there is nothing to replace.
+                    </div>
+                    <form class="mt-2" hx-post="{{ url_for('main.ingest_next') }}" hx-target="#ingest-workbench">
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <input type="hidden" name="idx" value="{{ idx }}">
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Skip this document</button>
+                    </form>
+                {% endif %}
             </div>
         {% else %}
             <div class="alert alert-success m-3 mb-0" role="alert">
@@ -30,6 +83,7 @@
                             <th>Hash</th>
                             <th>DOI</th>
                             <th>Title</th>
+                            <th>Matches</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -40,6 +94,7 @@
                                 <td>{{ row.get('hash match', '') }}</td>
                                 <td>{{ row.get('doi match', '') }}</td>
                                 <td>{{ row.get('title match', '') }}</td>
+                                <td>{{ row.get('match tag', '') }}</td>
                             </tr>
                         {% endfor %}
                     </tbody>

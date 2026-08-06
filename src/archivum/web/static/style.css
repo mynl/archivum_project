@@ -138,6 +138,12 @@ header img {
     font-family: SFMono-Regular, Consolas, monospace;
 }
 
+.dense-list .doc-hash {
+    font-family: SFMono-Regular, Consolas, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+}
+
 /* Verbose List Item */
 .verbose-list .list-item {
     transition: transform 0.2s, box-shadow 0.2s;

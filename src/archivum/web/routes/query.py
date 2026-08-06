@@ -19,8 +19,11 @@ def parse_rg_json(proc, lib):
     # Pre-map first 10 chars of hash to metadata
     hash_prefix_to_meta = {}
     if not lib.ref_doc_df.empty:
-        # Get latest tag for each hash
-        latest_links = lib.ref_doc_df.sort_values(['hash', 'version'], ascending=[True, False]).drop_duplicates('hash')
+        # One tag per hash: prefer the tag this document is primary for,
+        # then the latest version.
+        sort_cols = ['hash', 'priority', 'version'] if 'priority' in lib.ref_doc_df.columns else ['hash', 'version']
+        ascending = [True, True, False] if len(sort_cols) == 3 else [True, False]
+        latest_links = lib.ref_doc_df.sort_values(sort_cols, ascending=ascending).drop_duplicates('hash')
         # Merge with ref_df to get title/author
         meta_df = latest_links.merge(lib.ref_df, on='tag', how='left')
         for _, row in meta_df.iterrows():

@@ -36,6 +36,7 @@ Define the `archivum.db` schema (the SQL sketched in `dev/projects/README.md`) a
 
 - `pd.read_feather` returns object-dtype columns with mixed empty strings and NaN. Migrator must normalize NaN → NULL consistently.
 - `version` int column on `doc` and `ref_doc` has its own allocation logic in `import_bibtex.assign_version`. Round-trip preserves the int; allocation is unchanged.
+- `ref_doc` carries a **`priority`** int column (added 2026-08-06). 0 = the tag's primary document, 1+ = ordered alternates. It is NOT `version`: `version` selects which sharded copy of a content hash a row points at, `priority` orders the documents attached to one tag. Both are needed; the schema must carry both. The feather loader backfills a missing column via `utilities.assign_ref_doc_priority`; the migrator should persist whatever it finds and not re-derive. `(tag, hash, version)` remains the row identity, so `priority` is a plain column, not part of the key.
 - `read.last_read` is `pd.Timestamp`; serialize as ISO with tz.
 - The `querex` accessor column attached by querexfuzz is NOT data; never persist it. Verify the migrator strips it (current feather save does — mirror that).
 

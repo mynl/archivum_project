@@ -27,7 +27,7 @@ from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, resolve_path
 from .trie import Trie
-from .utilities import TagAllocator
+from .utilities import TagAllocator, assign_ref_doc_priority
 from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex, rows_to_bibtex
@@ -82,8 +82,9 @@ class Library(LibraryBase):
         self.text_dir_path.mkdir(parents=True, exist_ok=True)
         self.text_dir_full_name = str(self.text_dir_path)
 
+        # NB: not created here. Debug output is rare and the directory is
+        # never cleaned, so writers create it on demand instead.
         self.debug_dir_path = resolve_path(str(self.config.debug_dir))
-        self.debug_dir_path.mkdir(parents=True, exist_ok=True)
 
         self.exports_dir_path = self.config_path / "exports"
         self.exports_dir_path.mkdir(parents=True, exist_ok=True)
@@ -212,8 +213,20 @@ class Library(LibraryBase):
         except Exception as e:
             logger.error("Error while opening %s: %s", p, e)
 
-    def link_document(self, tag: str, file_hash: str, version: int = 0):
-        """Manually link a tag to a specific (hash, version)."""
+    def _ranked_ref_doc(self) -> pd.DataFrame:
+        """Loaded ref_doc_df, guaranteed to carry a well-formed priority column."""
+        _ = self.ref_doc_df
+        if "priority" not in self._ref_doc_df.columns:
+            self._ref_doc_df = assign_ref_doc_priority(self._ref_doc_df)
+        return self._ref_doc_df
+
+    def link_document(self, tag: str, file_hash: str, version: int = 0, primary: bool = False):
+        """
+        Manually link a tag to a specific (hash, version).
+
+        ``primary=True`` makes the new document the one ``/view/<tag>`` opens,
+        demoting whatever held priority 0.
+        """
         # 1. Validation
         if tag not in self.ref_df.tag.values:
             raise ValueError(f"Tag '{tag}' not found in references.")
@@ -230,12 +243,97 @@ class Library(LibraryBase):
             logger.info("Link already exists.")
             return False
 
-        # 3. Create link
-        new_link = pd.DataFrame([{"tag": tag, "hash": file_hash, "version": version}])
-        self._ref_doc_df = pd.concat([self.ref_doc_df, new_link], ignore_index=True)
+        # 3. Create link. Priority -1 sorts ahead of every incumbent, then
+        # assign_ref_doc_priority renumbers the tag to 0..n-1.
+        self._ranked_ref_doc()
+        if primary:
+            self._ref_doc_df.loc[self._ref_doc_df.tag == tag, "priority"] += 1
+        new_link = pd.DataFrame([{
+            "tag": tag,
+            "hash": file_hash,
+            "version": version,
+            "priority": -1 if primary else len(self._ref_doc_df[self._ref_doc_df.tag == tag]),
+        }])
+        self._ref_doc_df = assign_ref_doc_priority(
+            pd.concat([self._ref_doc_df, new_link], ignore_index=True)
+        )
 
         self.save()
         return True
+
+    def unlink_document(self, tag: str, file_hash: str, version: int | None = None, save: bool = True):
+        """
+        Remove the link between a tag and a document. The document itself and
+        its sharded hard link are left alone.
+
+        ``version=None`` removes every version of that hash for the tag.
+        Returns the number of links removed.
+        """
+        self._ranked_ref_doc()
+        mask = (self._ref_doc_df.tag == tag) & (self._ref_doc_df.hash == file_hash)
+        if version is not None:
+            mask &= self._ref_doc_df.version == version
+        removed = int(mask.sum())
+        if not removed:
+            logger.info("No link from %s to %s to remove.", tag, file_hash[:12])
+            return 0
+
+        self._ref_doc_df = assign_ref_doc_priority(
+            self._ref_doc_df[~mask].reset_index(drop=True)
+        )
+        if save:
+            self.save()
+        return removed
+
+    def promote_document(self, tag: str, file_hash: str, version: int | None = None, save: bool = True):
+        """
+        Make an already-linked document the primary one for ``tag``.
+
+        Zero its priority and push the incumbents down. This is the undo for
+        ``replace_document``: the previous document is demoted, never deleted,
+        so promoting it back restores the original state.
+        """
+        self._ranked_ref_doc()
+        mask = (self._ref_doc_df.tag == tag) & (self._ref_doc_df.hash == file_hash)
+        if version is not None:
+            mask &= self._ref_doc_df.version == version
+        if not mask.any():
+            raise ValueError(f"No link from '{tag}' to {file_hash[:12]}.")
+
+        self._ref_doc_df.loc[self._ref_doc_df.tag == tag, "priority"] += 1
+        # -1 sorts ahead of every incumbent; the renumber puts it at 0
+        self._ref_doc_df.loc[mask, "priority"] = -1
+        self._ref_doc_df = assign_ref_doc_priority(self._ref_doc_df)
+        if save:
+            self.save()
+        return True
+
+    def primary_doc(self, tag: str):
+        """
+        The document row that ``tag`` opens: lowest ``priority``, joined to doc_df.
+
+        Single resolver for every caller that needs "the" document for a tag.
+        Callers used to disagree -- the view routes took the first ref-doc row
+        and the query/cache paths took the highest version -- which gave
+        different answers for any tag with more than one document.
+
+        Returns a doc_df row (Series) or None.
+        """
+        links = self.ref_doc_df[self.ref_doc_df.tag == tag]
+        if links.empty:
+            return None
+        if "priority" in links.columns:
+            links = links.sort_values("priority", kind="stable")
+        link = links.iloc[0]
+
+        docs = self.doc_df
+        match = docs[(docs.hash == link.hash) & (docs.version == link.version)]
+        if match.empty:
+            # tolerate a stale version pointer rather than 404
+            match = docs[docs.hash == link.hash]
+        if match.empty:
+            return None
+        return match.iloc[0]
 
     def reset(self):
         """Reset all cache variables."""
@@ -367,6 +465,9 @@ class Library(LibraryBase):
             except FileNotFoundError:
                 return self._ref_doc_df
 
+            # backfills priority on libraries written before the column existed
+            self._ref_doc_df = assign_ref_doc_priority(self._ref_doc_df)
+
             config_file = (
                 files("archivum.configurations") / "querexfuzz-ref-doc-config.yaml"
             )
@@ -444,9 +545,16 @@ class Library(LibraryBase):
             if self.ref_df.empty:
                 return self._database
 
+            # Only the primary document per tag, so a reference appears once and
+            # the hash shown in search results is the one /view/<tag> opens.
+            # Alternates stay reachable through ref_doc_df and primary_doc().
+            links = self.ref_doc_df
+            if "priority" in links.columns:
+                links = links[links.priority == 0].drop(columns=["priority"])
+
             # Use hash and version for joining
             merged = (
-                self.ref_doc_df.merge(self.ref_df, on="tag", how="right")
+                links.merge(self.ref_df, on="tag", how="right")
             ).merge(self.doc_df, on=["hash", "version"], how="left")
             
             # Join with read history
@@ -516,6 +624,9 @@ class Library(LibraryBase):
         ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True).drop_duplicates(subset=['tag'], keep='last')
         doc_out = pd.concat([self._doc_df, doc_add], ignore_index=True).drop_duplicates(subset=['hash', 'version'], keep='last')
         ref_doc_out = pd.concat([self._ref_doc_df, ref_doc_add], ignore_index=True).drop_duplicates(subset=['tag', 'hash', 'version'], keep='last')
+        # incoming rows carry only a within-import rank; re-rank against the
+        # tag's existing links so established primaries keep priority 0
+        ref_doc_out = assign_ref_doc_priority(ref_doc_out)
 
         post_ref = len(ref_out)
         post_doc = len(doc_out)
@@ -1179,7 +1290,8 @@ class Library(LibraryBase):
         failures = [(to_extract[i], err) for i, (ok, err) in enumerate(results) if not ok]
         if failures:
             error_file = self.debug_dir_path / "full-text-errors.md"
-            
+            error_file.parent.mkdir(parents=True, exist_ok=True)
+
             with error_file.open("a", encoding="utf-8") as f:
                 f.write(f"\n## Full Text Extraction Errors - {dt.datetime.now().isoformat()}\n")
                 for p, err in failures:
@@ -1442,7 +1554,7 @@ class Library(LibraryBase):
             staged_document_path,
             known_hash=known_hash,
             source_label=source_label,
-            write_audit=True,
+            write_audit=False,
         )
 
         analysis = importer.import_analysis()
@@ -1474,6 +1586,171 @@ class Library(LibraryBase):
 
         return importer
 
+    def register_document(self, path: Union[str, Path], known_hash: str | None = None) -> dict:
+        """
+        Build a doc.feather row for a file on disk, hashing it if needed.
+
+        Returns the row as a dict, including the ``version`` allocated for this
+        content hash. Does not touch the library; callers append it themselves.
+        """
+        p = Path(path).resolve()
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(f"Document not found: {p}")
+
+        file_hash = known_hash or hash_many(
+            [p], workers=self.config.hash_workers
+        ).get(p, "")
+        if not file_hash:
+            raise ValueError(f"Could not hash {p}")
+
+        stat = p.stat()
+        row = {
+            "name": p.name,
+            "path": str(p.as_posix()),
+            "mod": stat.st_mtime_ns,
+            "create": stat.st_ctime_ns,
+            "access": stat.st_atime_ns,
+            "node": stat.st_ino,
+            "links": stat.st_nlink,
+            "size": stat.st_size,
+            "suffix": p.suffix,
+            "hash": file_hash,
+        }
+        tz = self.config.timezone
+        for col in ["create", "mod", "access"]:
+            row[col] = (
+                pd.to_datetime(row[col], unit="ns").tz_localize("UTC").tz_convert(tz)
+            )
+
+        # same allocation rule as import_bibtex.assign_version: reuse the row if
+        # this exact (hash, path) is already known, else take the next version
+        docs = self.doc_df
+        row["version"] = 0
+        if not docs.empty:
+            same = docs[(docs.hash == file_hash) & (docs.path == row["path"])]
+            if not same.empty:
+                row["version"] = int(same.version.iloc[0])
+            else:
+                versions = docs[docs.hash == file_hash].version
+                if not versions.empty:
+                    row["version"] = int(versions.max()) + 1
+        return row
+
+    def replace_document(
+        self,
+        tag: str,
+        staged_document_path: Union[str, Path],
+        *,
+        known_hash: str | None = None,
+        update_bibtex: str | None = None,
+        extract_text: bool = True,
+    ) -> dict:
+        """
+        Make a new file the primary document of an existing reference.
+
+        Used when an ingest turns out to be a better copy of something already
+        in the library (analysis action ``Merge/Warn``): same paper, different
+        file. The new document is registered, sharded under the *existing*
+        reference's metadata, and linked at priority 0; the previous document
+        is demoted to priority 1 but keeps its doc row and its sharded hard
+        link, so the change is reversible by zeroing its priority.
+
+        ``update_bibtex`` optionally rewrites the reference's fields from an
+        edited BibTeX entry; by default the reference is left alone.
+
+        Returns a summary dict.
+        """
+        refs = self.ref_df[self.ref_df.tag == tag]
+        if refs.empty:
+            raise ValueError(f"Tag '{tag}' not found in references.")
+
+        staged = Path(staged_document_path).resolve()
+        doc_row = self.register_document(staged, known_hash=known_hash)
+        new_hash, new_version = doc_row["hash"], doc_row["version"]
+
+        previous = self.ref_doc_df[self.ref_doc_df.tag == tag]
+        previous_hashes = previous.hash.tolist()
+        if new_hash in previous_hashes:
+            raise LibraryImportBlocked(
+                f"{tag} is already linked to this exact file ({new_hash[:8]})."
+            )
+
+        # shard under the existing reference's metadata, so the canonical name
+        # matches the rest of that reference's documents
+        ref_row = refs.iloc[0]
+
+        def field(key, default):
+            v = ref_row.get(key, "")
+            if v is None or (isinstance(v, float) and pd.isna(v)):
+                return default
+            v = str(v).strip()
+            return v or default
+
+        shard_row = pd.Series({
+            "author": field("author", "Unknown"),
+            "title": field("title", "Unknown"),
+            "year": field("year", "9999")[:4],
+            "hash": new_hash,
+            "path": str(staged),
+        })
+        status = save_from_row(shard_row, base_path=self.doc_store_path)
+        if status != "ok":
+            raise ValueError(f"Could not shard {staged.name} into the document store.")
+        sharded = path_from_row(shard_row, self.doc_store_path)
+        doc_row["path"] = str(Path(sharded).as_posix())
+        doc_row["name"] = Path(sharded).name
+
+        # 1. new doc row
+        _ = self.doc_df
+        self._doc_df = pd.concat(
+            [self._doc_df, pd.DataFrame([doc_row])], ignore_index=True
+        ).drop_duplicates(subset=["hash", "version"], keep="last")
+
+        # 2. demote incumbents, link the new file at priority 0
+        self._ranked_ref_doc()
+        self._ref_doc_df.loc[self._ref_doc_df.tag == tag, "priority"] += 1
+        new_link = pd.DataFrame([{
+            "tag": tag,
+            "hash": new_hash,
+            "version": new_version,
+            "priority": 0,
+        }])
+        self._ref_doc_df = assign_ref_doc_priority(
+            pd.concat([self._ref_doc_df, new_link], ignore_index=True)
+        )
+
+        # 3. optional metadata refresh, then a single save
+        if update_bibtex:
+            from .bibtex import bibtex_to_dict
+
+            entries = bibtex_to_dict(update_bibtex)
+            if len(entries) != 1:
+                raise ValueError("Expected exactly one BibTeX entry.")
+            _, data = next(iter(entries.items()))
+            data = dict(data)
+            data["tag"] = tag
+            # update_reference saves for us
+            self.update_reference(tag, data)
+        else:
+            self.save()
+
+        if extract_text and doc_row["path"].lower().endswith(".pdf"):
+            extract_text_for_paths(
+                [self.abspath(doc_row["path"])],
+                self.text_dir_path,
+                extractor=self.config.extractor,
+                workers=self.config.hash_workers,
+                hashes={self.abspath(doc_row["path"]): new_hash},
+            )
+
+        return {
+            "tag": tag,
+            "hash": new_hash,
+            "version": new_version,
+            "path": doc_row["path"],
+            "demoted": previous_hashes,
+        }
+
     def preview_staged_document_import(
         self,
         bibtex_text: str,
@@ -1491,7 +1768,7 @@ class Library(LibraryBase):
             write_audit=False,
         )
         analysis = importer.import_analysis()
-        blocked_message = self._blocked_import_message(
+        conflict = self.import_conflict(
             analysis,
             fallback_tag=self._first_bibtex_tag(bibtex_text),
         )
@@ -1508,8 +1785,9 @@ class Library(LibraryBase):
             "bibtex": preview_bibtex,
             "tag": final_tag,
             "analysis": analysis,
-            "blocked": blocked_message is not None,
-            "blocked_message": blocked_message or "",
+            "blocked": conflict is not None,
+            "blocked_message": conflict["message"] if conflict else "",
+            "conflict": conflict,
         }
 
     @staticmethod
@@ -1548,10 +1826,10 @@ class Library(LibraryBase):
         suffix = staged_abs.suffix.lstrip(".") or "pdf"
         data["file"] = f":{staged_abs.as_posix()}:{suffix}"
 
-        staging_dir = self.config_path / "staging"
-        staging_dir.mkdir(parents=True, exist_ok=True)
-        safe_tag = "".join(c if c.isalnum() or c in "-_" else "_" for c in tag) or "entry"
-        review_bib = staging_dir / f"{source_label}-{safe_tag}.bib"
+        # The review bib lives beside the staged document. Callers stage one
+        # document per directory, so the name cannot collide between concurrent
+        # imports and the file is removed with the rest of the staging dir.
+        review_bib = staged_abs.parent / f"{source_label}.bib"
         review_text = dict_to_bibtex(data)
         review_text = re.sub(
             r"(?m)^\s*file\s*=\s*\{.*\},\s*$",
@@ -1591,20 +1869,49 @@ class Library(LibraryBase):
         if blocked_message:
             raise LibraryImportBlocked(blocked_message)
 
-    @staticmethod
-    def _blocked_import_message(analysis: pd.DataFrame, *, fallback_tag: str) -> str | None:
-        blocked_actions = {"SKIP (Dupe)", "Merge/Warn"}
-        if not analysis.empty:
-            blocked = analysis[analysis["action"].isin(blocked_actions)]
-            if not blocked.empty:
-                row = blocked.iloc[0]
-                parts = [
-                    f"Import blocked: {row.get('action', 'duplicate warning')}",
-                    f"tag {row.get('tag', fallback_tag)}",
-                ]
-                if row.get("title"):
-                    parts.append(f"title {row.get('title')}")
-                return "; ".join(parts)
+    # actions that stop a staged import; "Merge/Warn" is resolvable by replacing
+    # the document on the matched reference, "SKIP (Dupe)" is not
+    BLOCKING_ACTIONS = ("SKIP (Dupe)", "Merge/Warn")
+
+    @classmethod
+    def import_conflict(cls, analysis: pd.DataFrame, *, fallback_tag: str = "") -> dict | None:
+        """
+        Describe the first blocking row of an import analysis, or None if clean.
+
+        Returns ``{action, tag, match_tag, title, resolvable, message}``.
+        ``resolvable`` marks a Merge/Warn -- the new file is a different
+        document that matches an existing reference by DOI or title, so the
+        user can choose to replace that reference's document.
+        """
+        if analysis.empty or "action" not in analysis.columns:
+            return None
+        blocked = analysis[analysis["action"].isin(cls.BLOCKING_ACTIONS)]
+        if blocked.empty:
+            return None
+
+        row = blocked.iloc[0]
+        action = str(row.get("action", "duplicate warning"))
+        tag = str(row.get("tag", "") or fallback_tag)
+        match_tag = str(row.get("match tag", "") or "")
+        title = str(row.get("title", "") or "")
+
+        parts = [f"Import blocked: {action}", f"tag {tag}"]
+        if title:
+            parts.append(f"title {title}")
+
+        return {
+            "action": action,
+            "tag": tag,
+            "match_tag": match_tag,
+            "title": title,
+            "resolvable": action == "Merge/Warn" and bool(match_tag),
+            "message": "; ".join(parts),
+        }
+
+    @classmethod
+    def _blocked_import_message(cls, analysis: pd.DataFrame, *, fallback_tag: str) -> str | None:
+        conflict = cls.import_conflict(analysis, fallback_tag=fallback_tag)
+        return conflict["message"] if conflict else None
         return None
 
     def history(self):
@@ -1781,16 +2088,19 @@ class Library(LibraryBase):
             if v != "":
                 info.append({"Field": k, "Value": str(v)})
 
-        # 2. Files
+        # 2. Files, primary first
         links = self.ref_doc_df[self.ref_doc_df.tag == tag]
+        if "priority" in links.columns:
+            links = links.sort_values("priority", kind="stable")
         if not links.empty:
             # Join on hash and version
             docs = links.merge(self.doc_df, on=["hash", "version"], how="left")
             for i, (_, doc) in enumerate(docs.iterrows(), 1):
                 h = f" (hash: {doc.hash[:12]})" if pd.notna(doc.get("hash")) else ""
+                label = "Document (primary)" if i == 1 else f"Document {i}"
                 info.append(
                     {
-                        "Field": f"Document {i}",
+                        "Field": label,
                         "Value": f"{doc.path}{h}",
                     }
                 )

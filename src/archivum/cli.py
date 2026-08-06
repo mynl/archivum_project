@@ -1,5 +1,6 @@
 """Implement command line interface for archivum."""
 from collections import deque
+import datetime as dt
 import html
 from importlib.resources import files
 import json
@@ -8,6 +9,7 @@ import logging.config
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 from typing import Union
@@ -561,6 +563,95 @@ def library_validate(task, execute):
             click.secho(f"\nFound {len(report)} items to address. Use -x --execute to fix.", fg="yellow")
         else:
             click.secho(f"\nProcessed {len(report)} items.", fg="green")
+
+
+# ========================================================================================
+@entry.command()
+@click.option(
+    "-d",
+    "--days",
+    type=int,
+    default=30,
+    show_default=True,
+    help="Only remove material older than this many days.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    show_default=True,
+    help="Actually delete; otherwise, do a dry run and report.",
+)
+def clean_audit(days, execute):
+    """
+    Prune accumulated import audit and staging scratch files.
+
+    \b
+    Covers three locations, none of which is ever cleaned automatically:
+    - <debug_dir>/imports/       working CSVs from bulk imports
+    - <library>/import-audit/    the committed audit trail (read by history())
+    - <library>/staging/         legacy per-entry review bibtex files
+
+    Nothing is deleted without -x --execute.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    cutoff = dt.datetime.now().timestamp() - days * 86400
+
+    targets = [
+        ("debug imports", lib.debug_dir_path / "imports", True),
+        ("import-audit", lib.config_path / "import-audit", True),
+        ("staging bibs", lib.config_path / "staging", False),
+    ]
+
+    rows = []
+    for label, root, is_dir_per_entry in targets:
+        if not root.exists():
+            continue
+        entries = [p for p in root.iterdir() if p.is_dir() == is_dir_per_entry]
+        for p in entries:
+            if p.stat().st_mtime >= cutoff:
+                continue
+            files = [f for f in p.rglob("*") if f.is_file()] if is_dir_per_entry else [p]
+            rows.append({
+                "area": label,
+                "name": p.name,
+                "files": len(files),
+                "KB": round(sum(f.stat().st_size for f in files) / 1024, 1),
+                "path": p,
+            })
+
+    if not rows:
+        click.secho(f"Nothing older than {days} days to clean.", fg="green")
+        return
+
+    report = pd.DataFrame(rows)
+    qd(report.drop(columns="path"))
+    total_kb = report.KB.sum()
+    total_files = int(report.files.sum())
+
+    if not execute:
+        click.secho(
+            f"\nDRY RUN: {len(report)} entries, {total_files} files, "
+            f"{total_kb / 1024:.1f} MB. Use -x --execute to delete.",
+            fg="yellow",
+        )
+        return
+
+    removed = 0
+    for p in report.path:
+        try:
+            if p.is_dir():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+            removed += 1
+        except OSError as e:
+            click.secho(f"Could not remove {p}: {e}", fg="red")
+    click.secho(f"\nRemoved {removed} entries, {total_kb / 1024:.1f} MB.", fg="green")
 
 
 # ========================================================================================
@@ -2387,8 +2478,19 @@ def djvu_convert_file_cmd(in_path, out_path, verbose):
 @click.argument("tag", type=str)
 @click.argument("file_hash", type=str)
 @click.option("-v", "--version", type=int, default=0, help="Version number of the hash (default 0).")
-def link_tag_hash(tag, file_hash, version):
-    """Manually link an existing tag reference to an existing document by hash and version."""
+@click.option(
+    "-p",
+    "--primary",
+    is_flag=True,
+    help="Make this the document the tag opens (priority 0), demoting the current one.",
+)
+def link_tag_hash(tag, file_hash, version, primary):
+    """
+    Manually link an existing tag reference to an existing document by hash and version.
+
+    With --primary, an existing link is promoted instead of skipped. That is
+    the undo for a web Ingest 'replace document': promote the old hash back.
+    """
     lib = LibraryContext.get()
     if lib.is_empty:
         click.echo("No library open.")
@@ -2406,10 +2508,62 @@ def link_tag_hash(tag, file_hash, version):
                 return
             file_hash = matches.hash.iloc[0]
 
-        if lib.link_document(tag, file_hash, version):
-            click.secho(f"Successfully linked {tag} to {file_hash[:12]} (v{version})", fg="green")
+        if lib.link_document(tag, file_hash, version, primary=primary):
+            suffix = " as primary" if primary else ""
+            click.secho(f"Successfully linked {tag} to {file_hash[:12]} (v{version}){suffix}", fg="green")
+        elif primary:
+            lib.promote_document(tag, file_hash, version)
+            click.secho(f"Promoted {file_hash[:12]} (v{version}) to primary for {tag}", fg="green")
         else:
-            click.echo("Link operation skipped (already exists).")
+            click.echo("Link operation skipped (already exists). Use --primary to promote it.")
+    except Exception as e:
+        click.echo(f"Error: {e}")
+
+
+@entry.command(name="unlink-tag-hash")
+@click.argument("tag", type=str)
+@click.argument("file_hash", type=str)
+@click.option("-v", "--version", type=int, default=None, help="Version to unlink (default: all versions).")
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    help="Actually remove the link; otherwise, report what would happen.",
+)
+def unlink_tag_hash(tag, file_hash, version, execute):
+    """
+    Remove the link between a tag and a document.
+
+    The document and its sharded hard link are left alone; only the ref-doc
+    row goes. Remaining documents for the tag are renumbered.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open.")
+        return
+
+    try:
+        if len(file_hash) < 64:
+            matches = lib.doc_df[lib.doc_df.hash.str.startswith(file_hash.upper())]
+            if len(matches.hash.unique()) != 1:
+                click.echo(f"No unique document found starting with hash {file_hash}")
+                return
+            file_hash = matches.hash.iloc[0]
+
+        links = lib.ref_doc_df[(lib.ref_doc_df.tag == tag) & (lib.ref_doc_df.hash == file_hash)]
+        if version is not None:
+            links = links[links.version == version]
+        if links.empty:
+            click.echo(f"No link from '{tag}' to {file_hash[:12]}.")
+            return
+
+        if not execute:
+            qd(links)
+            click.secho(f"\nDRY RUN: would remove {len(links)} link(s). Use -x --execute.", fg="yellow")
+            return
+
+        removed = lib.unlink_document(tag, file_hash, version)
+        click.secho(f"Removed {removed} link(s) from {tag}.", fg="green")
     except Exception as e:
         click.echo(f"Error: {e}")
 

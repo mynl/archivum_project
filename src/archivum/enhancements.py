@@ -21,6 +21,7 @@ from rapidfuzz import process, fuzz
 from tqdm import tqdm
 
 from .config import Configurator
+from .utilities import assign_ref_doc_priority
 
 logger = logging.getLogger(__name__)
 
@@ -955,15 +956,17 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
     # Merge candidates to get the best title etc.
     # candidates: [tag, hash, version, is_valid_pdf, has_bookmarks, size, create]
     
-    # Sort order for "Best File" (used if we needed to elect, but here we keep all links)
+    # "Best File" order. All links are kept; the ranking becomes the priority,
+    # so priority 0 is the elected best document for each tag.
     candidates = candidates.sort_values(
         by=['tag', 'is_valid_pdf', 'has_bookmarks', 'size', 'create'],
         ascending=[True, False, False, True, False]
     )
 
     # --- Phase 6: Finalize ---
-    # Reconstruct clean ref_doc_df with just [tag, hash, version]
+    # Reconstruct clean ref_doc_df with just [tag, hash, version, priority]
     final_ref_doc = candidates[['tag', 'hash', 'version']].copy()
+    final_ref_doc['priority'] = final_ref_doc.groupby('tag').cumcount().astype(int)
 
     logger.info(f"Identity Mapping: Mapped {len(final_ref_doc)} file links.")
 
@@ -1060,9 +1063,19 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
     if update:
         print("Doc Organizer: Updating library database with sharded paths...")
         
-        # Build new ref_doc_df (Rich links only)
-        new_ref_doc = to_process[to_process.tag != 'ORPHAN'][['tag', 'hash', 'version']]
-        
+        # Build new ref_doc_df (Rich links only), carrying existing priorities
+        # across so elected primaries survive a re-shard
+        new_ref_doc = to_process[to_process.tag != 'ORPHAN'][['tag', 'hash', 'version']].copy()
+        prior = library_obj.ref_doc_df
+        if 'priority' in prior.columns:
+            new_ref_doc = new_ref_doc.merge(
+                prior[['tag', 'hash', 'version', 'priority']],
+                on=['tag', 'hash', 'version'],
+                how='left',
+            )
+        new_ref_doc = assign_ref_doc_priority(new_ref_doc)
+
+
         # Build new doc_df
         # We merge the original doc stats with the new paths
         new_doc_df = to_process.merge(doc_df, on=['hash', 'version'], how='inner', suffixes=('', '_old'))

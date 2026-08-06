@@ -1,0 +1,137 @@
+{% if summary %}
+<div class="alert alert-light border shadow-sm d-flex align-items-center gap-3 mb-4">
+    <i class="bi bi-check2-circle fs-4 text-success"></i>
+    <div>
+        <div class="fw-bold">Batch finished &mdash; {{ summary.total }} document{{ '' if summary.total == 1 else 's' }}</div>
+        <div class="text-muted small">
+            {{ summary.done }} imported,
+            {{ summary.replaced }} replaced,
+            {{ summary.skipped }} skipped,
+            {{ summary.failed }} failed.
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- Zone A: The Files -->
+    <div class="col-md-6">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                <h5 class="card-title fw-bold text-dark mb-0">Zone A: The Documents</h5>
+            </div>
+            <div class="card-body p-4">
+                <div id="ingest-error" class="mb-4 d-none">
+                    <div class="alert alert-danger alert-dismissible fade show shadow-sm border-0" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <span id="error-message"></span>
+                        <button type="button" class="btn-close" onclick="document.getElementById('ingest-error').classList.add('d-none')"></button>
+                    </div>
+                </div>
+
+                <form id="file-form" hx-post="{{ url_for('main.ingest_start') }}" hx-encoding="multipart/form-data" hx-target="#ingest-workbench" hx-indicator="#process-indicator">
+                    <div class="mb-4">
+                        <label class="form-label text-muted small fw-bold text-uppercase">Drag &amp; Drop or Upload &mdash; one or many</label>
+                        <div id="drop-zone" class="drop-zone rounded-3 border-2 border-dashed d-flex flex-column align-items-center justify-content-center p-5 bg-light" style="min-height: 200px; cursor: pointer;">
+                            <i class="bi bi-cloud-arrow-up display-4 text-muted mb-3"></i>
+                            <span class="text-muted text-center px-3">Drop documents here or click to browse</span>
+                            <input type="file" name="file" id="file-input" class="d-none" multiple
+                                   accept=".pdf,.djvu,.epub,.mobi,.chm,.xps,.fb2">
+                        </div>
+                        <div id="file-name" class="mt-2 text-primary fw-medium small"></div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label text-muted small fw-bold text-uppercase">Or Paste URL / File / Folder</label>
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-white border-end-0"><i class="bi bi-link-45deg"></i></span>
+                            <input type="text" name="url_path" class="form-control border-start-0" placeholder="https://arxiv.org/pdf/... or C:\path\to\folder">
+                        </div>
+                        <div class="form-text small">A folder imports every document in it &mdash; that folder only, not subfolders.</div>
+                    </div>
+
+                    <div class="d-grid mt-4 text-center">
+                        <button type="submit" class="btn btn-primary btn-lg shadow-sm fw-bold w-100" id="submit-btn">
+                            <span id="process-indicator" class="htmx-indicator spinner-border spinner-border-sm me-2"></span>
+                            <span class="btn-text">Start Processing</span>
+                        </button>
+                        <div class="htmx-indicator mt-3 text-muted small animate-pulse" id="processing-msg">
+                            <i class="bi bi-gear-fill spin me-2"></i>
+                            Staging and analyzing. Please wait, this may take a minute...
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Zone B: The BibTeX -->
+    <div class="col-md-6">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-header bg-white border-bottom-0 pt-4 px-4">
+                <h5 class="card-title fw-bold text-dark mb-0">Zone B: BibTeX Metadata</h5>
+            </div>
+            <div class="card-body p-4 d-flex flex-column">
+                <div class="mb-3 d-flex flex-column">
+                    <label class="form-label text-muted small fw-bold text-uppercase">Paste BibTeX (e.g. from Google Scholar)</label>
+                    <textarea name="bibtex" id="bibtex-input" class="form-control font-monospace small" rows="12" placeholder="@article{...}"></textarea>
+                </div>
+                <div class="text-muted small mt-auto">
+                    <i class="bi bi-info-circle me-1"></i> If you leave this empty, Archivum will try to extract it from the file in Zone A.
+                    Pasted BibTeX applies only when you stage a single document; in a batch you edit each one in turn.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // IIFE: this fragment is swapped back in after every batch, so top-level
+    // declarations would collide on the second pass.
+    (function () {
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const fileNameDisplay = document.getElementById('file-name');
+        if (!dropZone) return;
+
+        function describe(files) {
+            if (!files || !files.length) return '';
+            if (files.length === 1) return 'Selected: ' + files[0].name;
+            return 'Selected: ' + files.length + ' documents';
+        }
+
+        dropZone.addEventListener('click', () => fileInput.click());
+
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('border-primary', 'bg-white');
+        });
+
+        ['dragleave', 'dragend'].forEach(type => {
+            dropZone.addEventListener(type, () => {
+                dropZone.classList.remove('border-primary', 'bg-white');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('border-primary', 'bg-white');
+            if (e.dataTransfer.files.length) {
+                fileInput.files = e.dataTransfer.files;
+                fileNameDisplay.textContent = describe(fileInput.files);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            fileNameDisplay.textContent = describe(fileInput.files);
+        });
+
+        // Zone B lives outside the form, so re-inject it on submit
+        document.getElementById('file-form').addEventListener('htmx:configRequest', (event) => {
+            const bibtex = document.getElementById('bibtex-input').value;
+            if (bibtex) {
+                event.detail.parameters['bibtex'] = bibtex;
+            }
+        });
+    })();
+</script>

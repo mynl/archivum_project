@@ -211,6 +211,7 @@
                         </ul>
                     </li>
                     <li><strong>View Modes</strong>: Toggle between <strong>List</strong>, <strong>Verbose</strong> (all metadata), and <strong>Table</strong>.</li>
+                    <li><strong>Document Hash</strong>: Each List entry ends with the first 8 characters of the document hash, in small upper-case monospace. This is the hash of the reference's <em>primary</em> document &mdash; the one <code>View</code> opens &mdash; so it lines up with Ripgrep results and with filenames in the document store. It is omitted if a query's explicit <code>select</code> clause drops the <code>hash</code> column.</li>
                     <li><strong>Exports</strong>: Download the current result set as CSV, BibTeX, or BibTeX+ from the Export menu. BibTeX+ adds Archivum document hashes and Mendeley-style <code>file</code> fields when a matched document path is available.</li>
                 </ul>
             </div>
@@ -269,14 +270,19 @@
             {% if is_admin %}
             <div id="screen-ingest" class="mb-4">
                 <h5 class="fw-bold text-danger"><i class="bi bi-plus-circle me-2"></i>Ingest (Admin Mode)</h5>
-                <p>Import new documents or BibTeX entries into the library.</p>
+                <p>Import new documents or BibTeX entries into the library, one at a time or as a queue.</p>
                 <ul>
-                    <li><strong>Source</strong>: Paste BibTeX, provide a local path, or enter a URL (including Arxiv/DOI support).</li>
+                    <li><strong>Source</strong>: Select or drop <em>one or many</em> files, paste a local file path, point at a <em>folder</em> (every document in that folder, not subfolders), or enter a URL (including Arxiv/DOI support). Pasted BibTeX in Zone B applies only when you stage a single document.</li>
+                    <li><strong>Formats</strong>: PDF, DjVu, EPUB, MOBI, CHM, XPS, FB2. Only PDFs preview inline and have their text extracted; for the others you paste the full BibTeX yourself, since metadata discovery usually finds nothing.</li>
+                    <li><strong>Queue</strong>: Documents are handled one at a time in the same workbench. The header shows <strong>Importing M of N</strong> with a progress bar. Remaining documents are analysed on a background thread while you work, so later ones usually open instantly.</li>
                     <li><strong>Workbench</strong>: Edit the source BibTeX while viewing the staged document and metadata candidates.</li>
                     <li><strong>Import Preview</strong>: The preview runs the real BibTeX importer without saving. It shows the BibTeX that will be produced after author Trie normalization and tag allocation.</li>
                     <li><strong>Tag Allocation</strong>: Previewed tags are advisory. The final tag is recomputed when you click <strong>GO: Archive Document</strong> and is locked down only when the library update is saved.</li>
-                    <li><strong>Duplicate Detection</strong>: Archivum warns on matching hashes and blocks unsafe duplicate or merge-warning imports before committing.</li>
-                    <li><strong>Commit</strong>: Archive Document reruns the same import path, shards the document into the library store, writes import audit files, updates the Feather data, and extracts text for new PDFs.</li>
+                    <li><strong>Duplicate Detection</strong>: A matching hash is flagged in the header. If the file is <em>new</em> but its DOI or title matches a reference that already has a document, the preview names that reference and offers <strong>Replace document on &lt;tag&gt;</strong>, optionally updating the reference metadata from your BibTeX too. If both the file and the metadata already exist there is nothing to replace, and the import is refused.</li>
+                    <li><strong>Replacement</strong>: Replacing links the new file to the existing reference at priority 0, so <code>View</code> and search results now show it. The previous document is kept as an ordered alternate &mdash; nothing is deleted, and the change can be undone from the CLI with <code>link-tag-hash</code>.</li>
+                    <li><strong>Skip / Cancel</strong>: <strong>Skip</strong> abandons the current document and moves to the next. <strong>Cancel batch</strong> abandons the whole queue. Both only discard staged copies; your original files are never touched.</li>
+                    <li><strong>Results</strong>: You stay on the Ingest page throughout. Each outcome &mdash; imported, replaced, skipped, or failed &mdash; is appended as a colored banner below the workbench, and a summary appears when the queue drains.</li>
+                    <li><strong>Commit</strong>: Archive Document reruns the same import path, shards the document into the library store, updates the Feather data, and extracts text for new PDFs. Web ingests deliberately write no audit files; bulk CLI <code>import-bibtex</code> runs still do. Use <code>archivum clean-audit -x</code> to prune old audit and staging scratch.</li>
                 </ul>
             </div>
 
