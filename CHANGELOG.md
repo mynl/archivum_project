@@ -5,6 +5,17 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.4.0 (2026-08-07)
+
+### Added
+
+- **`/text/<tag>`** serves the extracted text of the tag's primary document,
+  resolved through `Library.textpath` (the `full_text_lib` tree mirrors the
+  document store's shard layout, with the extractor suffix). Served as
+  `text/plain; charset=utf-8` so it renders inline rather than downloading, with
+  an `inline; filename=<tag>.txt` disposition. 404 when the tag is unknown, has
+  no document, or has no extracted text. Like `/view/<tag>`, it records a read.
+
 ## 2.3.0 (2026-08-06)
 
 Query-line document hashes, batch ingest, duplicate replacement, and an end to

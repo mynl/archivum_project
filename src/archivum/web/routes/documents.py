@@ -46,3 +46,24 @@ def view(tag):
     path = lib.abspath(doc.path) if hasattr(lib, 'abspath') else doc.path
     if not path or not Path(path).exists(): abort(404)
     return send_file(path, mimetype=doc_mimetype(path), as_attachment=False)
+
+
+@bp.route('/text/<tag>')
+def text(tag):
+    """Extracted text of the tag's primary document; full_text_lib mirrors the shard layout."""
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+
+    doc = lib.primary_doc(tag)
+    if doc is None: abort(404)
+
+    rel_path = doc.path
+    if not rel_path or pd.isna(rel_path): abort(404)
+    path = lib.textpath(rel_path)
+    if not path.exists(): abort(404)
+
+    lib.record_read(doc.hash, caller=request.referrer or "")
+
+    # named .md but it is raw extractor output; text/plain renders inline
+    return send_file(path, mimetype='text/plain', as_attachment=False,
+                     download_name=f"{tag}.txt")

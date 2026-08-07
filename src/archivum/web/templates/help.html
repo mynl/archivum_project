@@ -90,6 +90,7 @@
             </div>
             <h5 class="fw-bold">Full-Text Extraction</h5>
             <p>When documents are imported, Archivum automatically extracts their text content. This text is sharded into a separate directory, enabling blazing-fast full-text searches across thousands of documents using the integrated <a href="https://github.com/BurntSushi/ripgrep" target="_blank"><strong>Ripgrep</strong></a> engine.</p>
+            <p><code>/view/&lt;tag&gt;</code> serves the tag's primary document itself; <code>/text/&lt;tag&gt;</code> serves the extracted text for that same document as plain UTF-8, and returns 404 if no text has been extracted (non-PDF formats, or a document imported before extraction). Both count as a read in the Read history.</p>
         </section>
 
         <section id="query" class="mb-5">
