@@ -27,7 +27,7 @@ from querexfuzz.core import Querexfuzz  # type: ignore[import-untyped]
 
 from . import BASE_DIR, LIBRARIES_DIR, DEFAULT_LIBRARY, resolve_path
 from .trie import Trie
-from .utilities import TagAllocator, assign_ref_doc_priority
+from .utilities import TagAllocator, assign_ref_doc_priority, inode_or_zero
 from .config import load_configuration
 from .library_base import LibraryBase
 from .bibtex import dict_to_bibtex, rows_to_bibtex
@@ -1619,7 +1619,7 @@ class Library(LibraryBase):
             "mod": stat.st_mtime_ns,
             "create": stat.st_ctime_ns,
             "access": stat.st_atime_ns,
-            "node": stat.st_ino,
+            "node": inode_or_zero(stat),
             "links": stat.st_nlink,
             "size": stat.st_size,
             "suffix": p.suffix,

@@ -33,6 +33,7 @@ from .utilities import (
     remove_accents,
     accent_mapper_dict,
     safe_int,
+    inode_or_zero,
     TagAllocator,
 )
 from .trie import Trie
@@ -368,7 +369,7 @@ class Bib2df_Incremental(LibraryBase):
                             "mod": stat.st_mtime_ns,
                             "create": stat.st_ctime_ns,
                             "access": stat.st_atime_ns,
-                            "node": stat.st_ino,
+                            "node": inode_or_zero(stat),
                             "links": stat.st_nlink,
                             "size": stat.st_size,
                             "suffix": p.suffix,
@@ -546,7 +547,7 @@ class Bib2df_Incremental(LibraryBase):
                         "mod": stat.st_mtime_ns,
                         "create": stat.st_ctime_ns,
                         "access": stat.st_atime_ns,
-                        "node": stat.st_ino,
+                        "node": inode_or_zero(stat),
                         "links": stat.st_nlink,
                         "size": stat.st_size,
                         "suffix": p.suffix,

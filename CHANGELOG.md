@@ -5,6 +5,15 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.5.1 (2026-08-29)
+
+### Fixed
+
+- Importing a document staged on a ReFS volume (a Windows Dev Drive such as
+  `V:`) crashed the save with `int too big to convert`: ReFS file IDs exceed
+  the int64 `node` column. Unrepresentable inodes are now recorded as 0. The
+  save routine's pre-write backups made the failure recoverable.
+
 ## 2.5.0 (2026-08-29)
 
 ### Changed

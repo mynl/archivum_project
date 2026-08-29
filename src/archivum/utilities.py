@@ -481,3 +481,15 @@ def rename(
         shutil.copy2(original_doc_path, new_path)
     return True
 
+
+def inode_or_zero(stat) -> int:
+    """
+    Return ``stat.st_ino`` if it fits the int64 ``node`` column, else 0.
+
+    ReFS volumes (Windows Dev Drives) report 128-bit file IDs; NTFS fits in
+    64. The ``node`` column only ever identified hardlinked files, and sharding
+    now copies, so an unrepresentable inode carries nothing worth keeping and
+    must not blow up the Feather write.
+    """
+    ino = int(stat.st_ino)
+    return ino if ino < 2**63 else 0
