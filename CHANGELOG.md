@@ -5,6 +5,25 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.5.0 (2026-08-29)
+
+### Changed
+
+- **App home is `~/.archivum`**, overridable with `$ARCHIVUM_HOME`, replacing
+  `%LOCALAPPDATA%\archivum`. The home is a set of symlinks into the settings and
+  data trees, built once by `scripts/New-ArchivumHome.ps1` (dry run by default).
+- **No auto-creation.** A missing `global-config.yaml`, or a `doc_store_lib` /
+  `full_text_lib` that is missing or empty, raises with a pointer to the script
+  instead of silently starting an empty library beside the real one.
+- **Sharding, ingest staging, and import audit copy files** instead of
+  hardlinking them. The store and the sources now sit on different volumes,
+  where hardlinks cannot go.
+
+### Fixed
+
+- `config.bak` and `bibtex.bak` are real backups. They were hardlinks to the
+  file being rewritten, so they never held the previous version.
+
 ## 2.4.0 (2026-08-07)
 
 ### Added

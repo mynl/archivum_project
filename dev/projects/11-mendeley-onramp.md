@@ -25,7 +25,7 @@ Ship `archivum init-from-mendeley <bib> [--docs <dir>]` zero-config command. Ref
 ## Open design questions (resolve when writing the brief)
 
 - PyPI publication checklist: package metadata, `uv build`, `uv publish`, test install in a fresh venv. Worth its own subsection.
-- Default `config.yaml` choices for a fresh user: where to put doc store (`%LOCALAPPDATA%/archivum/sharded-docs`?), what extractor (`pdftotext` if installed else `pymupdf`?), empty `tag_name_mapper`.
+- Default `config.yaml` choices for a fresh user: where to put doc store (`~/.archivum/docs`?), what extractor (`pdftotext` if installed else `pymupdf`?), empty `tag_name_mapper`.
 - Onboarding docs: a new `docs/onboarding.rst` (this IS Sphinx, user-facing) plus README update. One of the few user-facing additions to `docs/`.
 - Zotero export format: probably similar `file = {…}` syntax — minor extension to the vfile parser. Confirm whether worth bundling.
 - Should the onramp ask if the user wants to fetch citation counts (Project 10)? Probably yes — a single prompt for a one-shot bulk fetch on first run.

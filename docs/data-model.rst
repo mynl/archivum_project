@@ -39,17 +39,18 @@ against PDF binary contents directly.
 Configuration
 -------------
 
-Global configuration lives under local app data:
+The app home is ``~/.archivum``, overridable with ``$ARCHIVUM_HOME``. Global
+configuration lives there:
 
 .. code-block:: text
 
-   %LOCALAPPDATA%\archivum\global-config.yaml
+   ~\.archivum\global-config.yaml
 
 Library-specific configuration lives in each library directory:
 
 .. code-block:: text
 
-   %LOCALAPPDATA%\archivum\libraries\<library-name>\config.yaml
+   ~\.archivum\libraries\<library-name>\config.yaml
 
 Important configuration concepts include ``default_library``, ``doc_store_lib``,
 ``bibtex_file``, query defaults, enhancement settings, timezone settings, table

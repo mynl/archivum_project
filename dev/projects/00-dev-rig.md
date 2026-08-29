@@ -18,7 +18,7 @@ This is **the** load-bearing project. Everything that follows assumes this rig w
 - `rclone` installed and on PATH (`rclone version` returns something). Fallback is `Robocopy` (built into Windows) which also works fine — note in the runbook.
 - Disk space on T: ≥ size of `doc_store_lib` + `full_text_lib` + library metadata + working room. Check first:
   ```powershell
-  $store = (Get-Content "$env:LOCALAPPDATA\archivum\global-config.yaml" | Select-String 'doc_store_lib').ToString()
+  $store = (Get-Content "$HOME\.archivum\global-config.yaml" | Select-String 'doc_store_lib').ToString()
   # eyeball the path, then:
   Get-ChildItem -Recurse -LiteralPath '<doc_store_path>' | Measure-Object -Sum Length |
     Select-Object @{n='GB'; e={[math]::Round($_.Sum/1GB, 2)}}
@@ -30,7 +30,7 @@ This is **the** load-bearing project. Everything that follows assumes this rig w
 
 A cold session should open these before touching anything:
 
-- `src/archivum/__init__.py` — `BASE_DIR` is set at import time from `os.environ["LOCALAPPDATA"]`. This is the single point the `ARCHIVUM_BASE_DIR` override edits.
+- `src/archivum/__init__.py` — `BASE_DIR` is set at import time from `os.environ["LOCALAPPDATA"]`. This is the single point the `ARCHIVUM_HOME` override edits.
 - `src/archivum/config.py` — `Configurator` Pydantic model; `bibtex_file` field; `load_configuration` precedence.
 - `src/archivum/library.py` — specifically:
   - `Library.__init__` and `reset()` (lines ~58–105, 240–270) for path resolution.
@@ -56,7 +56,9 @@ A cold session should open these before touching anything:
 
 These are deliberately tiny. Combined diff target: under 80 lines including tests. One commit, clear message: `Project 00: dev-rig safety belts`.
 
-### Edit A — `ARCHIVUM_BASE_DIR` env override
+### Edit A — `ARCHIVUM_HOME` env override
+
+**Shipped in 2.5.0** as `_app_home()` in `src/archivum/__init__.py`; the sketch below predates it and is kept for the record.
 
 **File:** `src/archivum/__init__.py`, `_get_local_folder()`.
 
@@ -66,7 +68,7 @@ These are deliberately tiny. Combined diff target: under 80 lines including test
 
 ```python
 def _get_local_folder() -> Path:
-    override = os.environ.get("ARCHIVUM_BASE_DIR")
+    override = os.environ.get("ARCHIVUM_HOME")
     if override:
         base = Path(override)
     elif sys.platform == "win32":
@@ -165,8 +167,8 @@ git commit -m "Project 00: dev-rig safety belts"
 # --- 4. rclone library metadata ---
 $dev = 'T:\archivum-dev\AppData\Local\archivum'
 New-Item -ItemType Directory -Force -Path $dev | Out-Null
-Copy-Item -LiteralPath "$env:LOCALAPPDATA\archivum\global-config.yaml" -Destination "$dev\global-config.yaml"
-rclone copy "$env:LOCALAPPDATA\archivum\libraries\uber-library" "$dev\libraries\uber-library-dev" --progress
+Copy-Item -LiteralPath "$HOME\.archivum\global-config.yaml" -Destination "$dev\global-config.yaml"
+rclone copy "$HOME\.archivum\libraries\uber-library" "$dev\libraries\uber-library-dev" --progress
 
 # --- 5. rclone doc store and full text ---
 # Read the absolute paths from prod's global-config.yaml or the library's config.yaml first.
@@ -187,7 +189,7 @@ rclone copy '<prod full_text_path>'   'T:\archivum-dev\full-text'    --progress
 #   debug_dir:     T:\archivum-dev\AppData\Local\archivum\debug
 
 # --- 7. Dev shell session env ---
-$env:ARCHIVUM_BASE_DIR           = $dev
+$env:ARCHIVUM_HOME           = $dev
 $env:ARCHIVUM_LIBRARY            = 'uber-library-dev'
 $env:ARCHIVUM_READ_ONLY_DOCSTORE = '1'      # belt-and-braces — docs are copied so this is defence-in-depth
 $env:ARCHIVUM_CONFINE_BIBTEX     = '1'
@@ -256,7 +258,7 @@ Adds four small safety-belt code changes that make a fully insulated dev environ
 on T: enforceable from inside the code, plus the runbook for setting up that
 environment.
 
-- ARCHIVUM_BASE_DIR env var overrides the default %LOCALAPPDATA%\archivum location.
+- ARCHIVUM_HOME env var overrides the default ~\.archivum location.
   Lets a dev shell point archivum at T: without clobbering LOCALAPPDATA for other apps.
 - ARCHIVUM_READ_ONLY_DOCSTORE guard in save_from_row() — single chokepoint for all
   hardlink creation in the doc store. When set, raises loudly; covers Library.validate,

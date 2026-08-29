@@ -201,7 +201,7 @@ The app uses split-horizon access control. Local or trusted traffic can receive
 admin capabilities, while external access can be restricted to read-only mode.
 
 Semantic discovery uses `all-MiniLM-L6-v2`, caches the transformer model under
-`%LOCALAPPDATA%\archivum\models\sentence-transformers`, and caches embeddings per
+`~\.archivum\models\sentence-transformers`, and caches embeddings per
 library/source so repeated runs avoid unnecessary encoding.
 
 ## Data Model
@@ -222,16 +222,18 @@ drive mappings.
 
 ## Configuration
 
-Global configuration lives under local app data:
+The app home is `~\.archivum`, overridable with `$ARCHIVUM_HOME`. It holds only
+symlinks and derived caches; the settings and data it points at live elsewhere
+(see `scripts/New-ArchivumHome.ps1`). Global configuration:
 
 ```text
-%LOCALAPPDATA%\archivum\global-config.yaml
+~\.archivum\global-config.yaml
 ```
 
 Library-specific configuration lives in each library directory:
 
 ```text
-%LOCALAPPDATA%\archivum\libraries\<library-name>\config.yaml
+~\.archivum\libraries\<library-name>\config.yaml
 ```
 
 Important configured concepts:
@@ -291,7 +293,7 @@ can use model and embedding caches and may take longer on a cold machine.
 ## Safety Notes
 
 - Do not delete source documents unless the exact operation is intentional.
-- Be careful around hardlinks, sharded document storage, Feather files, and
+- Be careful around sharded document storage, Feather files, and
   BibTeX synchronization.
 - Prefer dry runs first. Many commands require `-x` or `--execute` before they
   write changes.
