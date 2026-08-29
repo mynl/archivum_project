@@ -3,6 +3,7 @@ Configuration model for archivum.
 """
 import logging
 from pathlib import Path
+import shutil
 from typing import List, Literal, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict, ValidationError
 import yaml
@@ -110,11 +111,10 @@ class Configurator(BaseModel):
         data_to_save = _get_config_diff(current_data, site_defaults)
 
         # 3. Handle Backup
+        # A real copy: a hardlink would share the inode that open("w") then
+        # truncates in place, leaving no backup at all.
         if backup and file_path.exists():
-            bak_path = config_path / 'config.bak'
-            if bak_path.exists():
-                bak_path.unlink()
-            bak_path.hardlink_to(file_path)
+            shutil.copy2(file_path, config_path / 'config.bak')
 
         # 4. Write Minimal Config
         with file_path.open("w", encoding="utf-8") as f:

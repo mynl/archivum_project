@@ -130,20 +130,13 @@ def position(state: dict, idx: int) -> int:
 
 def _stage_file(source: Path, dest_dir: Path, filename: str) -> None:
     """
-    Put ``source`` into ``dest_dir``, preferring a hard link.
+    Copy ``source`` into ``dest_dir``. The original is never touched.
 
-    Hard links are how sharding already works here, so this never copies bytes
-    for a same-volume source and never touches the original. Cross-volume falls
-    back to a copy.
+    A copy rather than a hard link: the store and the staging tree are on
+    different volumes here, and hard links cannot cross them.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / filename
-    if dest.exists():
-        dest.unlink()
-    try:
-        dest.hardlink_to(source)
-    except OSError:
-        shutil.copy2(source, dest)
+    shutil.copy2(source, dest_dir / filename)
 
 
 def _safe_name(name: str) -> str:
@@ -257,7 +250,7 @@ def create_batch(uploads=None, url_path: str = "", downloader=None) -> dict:
 
 
 def discard_batch(batch_id: str) -> None:
-    """Remove a batch's staging tree. Originals are untouched (hard links)."""
+    """Remove a batch's staging tree. Originals are untouched (staging holds copies)."""
     try:
         root = batch_dir(batch_id)
     except BatchError:

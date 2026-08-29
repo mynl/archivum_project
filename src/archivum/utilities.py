@@ -5,6 +5,7 @@ from functools import partial
 import logging
 import os
 from pathlib import Path
+import shutil
 import re
 import stat
 import unicodedata
@@ -474,12 +475,9 @@ def rename(
         if execute:
             new_path.unlink()
 
-    # make new link
+    # copy into place (not a hardlink: the store may be on another volume)
     logger.info("new: %s --> old: %s", new_path, original_doc_path)
-    # print(f"{new_path} ==> {original_doc_path}")
-
-    # create link
     if execute:
-        new_path.hardlink_to(original_doc_path)
+        shutil.copy2(original_doc_path, new_path)
     return True
 

@@ -15,6 +15,7 @@ import json
 import logging
 from functools import partial
 from pathlib import Path
+import shutil
 import re
 from difflib import SequenceMatcher
 
@@ -1389,9 +1390,9 @@ class Bib2df_Incremental(LibraryBase):
             if not to_shard.empty:
                 base_path = self.reference_library.doc_store_path
                 
-                # Perform hardlinking
-                hardlink_maker = partial(save_from_row, base_path=base_path)
-                results = to_shard.apply(hardlink_maker, axis=1)
+                # Copy into the shard tree
+                copy_maker = partial(save_from_row, base_path=base_path)
+                results = to_shard.apply(copy_maker, axis=1)
                 logger.info("Sharding complete: %s rich links created.", len(results))
 
                 # Update paths in the importer so the library update uses the sharded paths
@@ -1420,10 +1421,7 @@ class Bib2df_Incremental(LibraryBase):
         import_path.mkdir(parents=True, exist_ok=True)
         count = 0
         for f in self._audit_dir_path.glob("*.*"):
-            newf = import_path / f.name
-            if newf.exists():
-                newf.unlink()
-            newf.hardlink_to(f)
+            shutil.copy2(f, import_path / f.name)
             count += 1
         logger.info("UPDATE AUDIT: %s files copied to %s", count, import_path)
 
@@ -1520,8 +1518,7 @@ class Bib2df_Incremental(LibraryBase):
         p_ = p / self.bibtex_file_path.name
         if p_.exists():
             logger.warning("REALLY WEIRD - audit of input bibtex already exists.")
-            p_.unlink()
-        p_.hardlink_to(self.bibtex_file_path)
+        shutil.copy2(self.bibtex_file_path, p_)
         self.__audit_dir_created = True
         return p
 

@@ -76,11 +76,22 @@ class Library(LibraryBase):
 
         self.config = load_configuration(self.config_path, **overrides)
         self.doc_store_path = resolve_path(self.config.doc_store_lib)
-        self.doc_store_path.mkdir(parents=True, exist_ok=True)
-
         self.text_dir_path = resolve_path(self.config.full_text_lib)
-        self.text_dir_path.mkdir(parents=True, exist_ok=True)
         self.text_dir_full_name = str(self.text_dir_path)
+
+        # doc_store_lib / full_text_lib are relative by design and reached by
+        # symlink from the app home. An absent or empty store means the links
+        # were never made; opening the library anyway would report every
+        # document missing and let the next shard run start a second,
+        # divergent store.
+        for label, path in (("doc_store_lib", self.doc_store_path),
+                            ("full_text_lib", self.text_dir_path)):
+            if not path.is_dir() or not any(path.iterdir()):
+                raise FileNotFoundError(
+                    f"{label} resolves to {path}, which is missing or empty. "
+                    "The store is reached by symlink from the app home; run "
+                    "scripts/New-ArchivumHome.ps1 before opening the library."
+                )
 
         # NB: not created here. Debug output is rare and the directory is
         # never cleaned, so writers create it on demand instead.
@@ -789,7 +800,7 @@ class Library(LibraryBase):
                             # Update path in doc_df
                             self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
                         elif status == "Misplaced":
-                            # Perform the "move" (hardlink + update)
+                            # Perform the "move" (copy + update)
                             success = save_from_row(row, base_path)
                             if success == 'ok':
                                 self._doc_df.loc[(self._doc_df.hash == row.hash) & (self._doc_df.version == row.version), "path"] = rel_expected
@@ -1186,11 +1197,9 @@ class Library(LibraryBase):
         entry_count = txt.count("\n@") + (1 if txt else 0)
 
         # backup existing
+        # A real copy, not a hardlink: write_text truncates the inode in place.
         if bibtex_path.exists():
-            backup = bibtex_path.with_suffix(".bak")
-            if backup.exists():
-                backup.unlink()
-            backup.hardlink_to(bibtex_path)
+            shutil.copy2(bibtex_path, bibtex_path.with_suffix(".bak"))
 
         # write out
         bibtex_path.write_text(txt, encoding="utf-8")

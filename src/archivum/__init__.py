@@ -3,7 +3,6 @@ archivum project.
 ===================
 
 """
-import sys
 import os
 from importlib.metadata import PackageNotFoundError, version
 import yaml
@@ -20,25 +19,22 @@ except PackageNotFoundError:
 
 
 
-def _get_local_folder() -> Path:
-    if sys.platform == "win32":
-        base = Path(os.environ["LOCALAPPDATA"])
-    else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+def _app_home() -> Path:
+    """Return the archivum app home.
 
-    app_data = base / __appname__
-    if not app_data.exists():
-        app_data.mkdir(parents=True, exist_ok=True)
-    return app_data
+    ``~/.archivum`` by default; override with ``$ARCHIVUM_HOME``. The directory
+    is not created here: the home is a set of symlinks into the data and
+    settings trees (see scripts/New-ArchivumHome.ps1) and must exist before
+    archivum runs. The override exists so a dev shell can point archivum at a
+    scratch tree without disturbing the production home.
+    """
+    return Path(os.environ.get("ARCHIVUM_HOME", Path.home() / ".archivum")).expanduser()
 
 
 # Core Paths
-BASE_DIR = _get_local_folder()
+BASE_DIR = _app_home()
 LIBRARIES_DIR = BASE_DIR / "libraries"
 GLOBAL_CONFIG_PATH = BASE_DIR / "global-config.yaml"
-
-# Ensure Core Dirs Exist
-LIBRARIES_DIR.mkdir(exist_ok=True)
 
 # Default Configuration
 DEFAULT_GLOBAL_CONFIG = {
@@ -54,29 +50,28 @@ DEFAULT_GLOBAL_CONFIG = {
 
 
 def _load_global_config() -> dict:
-    """Loads global config or creates it with defaults if missing."""
+    """Load the global config, merged over the defaults.
+
+    The home is never populated here. A missing file means the app home was not
+    wired up (see scripts/New-ArchivumHome.ps1), and silently writing defaults
+    would plant a real file at what should be a symlink site.
+    """
     if not GLOBAL_CONFIG_PATH.exists():
-        # Check if old config exists and rename it
+        # Legacy name from before the hyphenated form.
         old_config = BASE_DIR / "global_config.yaml"
         if old_config.exists():
             old_config.rename(GLOBAL_CONFIG_PATH)
         else:
-            try:
-                with open(GLOBAL_CONFIG_PATH, "w") as f:
-                    yaml.dump(DEFAULT_GLOBAL_CONFIG, f, default_flow_style=False)
-                return DEFAULT_GLOBAL_CONFIG.copy()
-            except OSError as e:
-                print(f"Warning: Could not create config file: {e}", file=sys.stderr)
-                return DEFAULT_GLOBAL_CONFIG.copy()
+            raise FileNotFoundError(
+                f"archivum global config not found at {GLOBAL_CONFIG_PATH}. "
+                "Set ARCHIVUM_HOME or build the app home with "
+                "scripts/New-ArchivumHome.ps1 before running archivum."
+            )
 
-    try:
-        with open(GLOBAL_CONFIG_PATH, "r") as f:
-            # Merge with defaults to ensure new keys exist after updates
-            config = yaml.safe_load(f) or {}
-            return {**DEFAULT_GLOBAL_CONFIG, **config}
-    except Exception as e:
-        print(f"Error loading global config: {e}", file=sys.stderr)
-        return DEFAULT_GLOBAL_CONFIG.copy()
+    with open(GLOBAL_CONFIG_PATH, "r") as f:
+        # Merge with defaults to ensure new keys exist after updates
+        config = yaml.safe_load(f) or {}
+        return {**DEFAULT_GLOBAL_CONFIG, **config}
 
 
 # Initialize Global Config

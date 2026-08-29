@@ -9,6 +9,7 @@ from difflib import SequenceMatcher
 from functools import reduce
 from typing import Dict, List, Any, Callable, Tuple, Optional
 from pathlib import Path
+import shutil
 import re
 import unicodedata
 from IPython.display import display
@@ -847,7 +848,7 @@ def path_from_row(row, base_dir):
 
 
 def save_from_row(row, base_path):
-    """Do the "renaming" work: create new hardlink to the original file. Does not alter original file."""
+    """Do the "renaming" work: copy the original file to its canonical shard path. Does not alter original file."""
     # original = Path(row.path)
     original = base_path / row.path
     fn = canonical_name_from_row(row)
@@ -859,8 +860,9 @@ def save_from_row(row, base_path):
         path.unlink()
     
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Copy, not hardlink: the store may sit on a different volume from the source.
     try:
-        path.hardlink_to(original)
+        shutil.copy2(original, path)
     except OSError as e:
         print(f'OS error for {fn}\n{e}')
         print('continuing')
@@ -976,11 +978,11 @@ def enhance_ref_df(library_obj, ans = None) -> Ans:
 
 def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
     """
-    Organize all documents into a sharded hardlink structure.
+    Organize all documents into a sharded copy structure.
     
     Ensures:
     1. Rich naming for tagged files (Hash + Author + Year + Title).
-    2. Multiple names per file (one hardlink per tag).
+    2. Multiple names per file (one copy per tag).
     3. Orphan protection (Skeleton naming for untagged files).
     4. Sharding on the first two chars of the filename.
     """
@@ -1030,13 +1032,13 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
     base = Path(base_dir)
     base.mkdir(parents=True, exist_ok=True)
     
-    # 4. Calculate new paths and perform hardlinking
+    # 4. Calculate new paths and copy into the shard tree
     to_process['new_path'] = to_process.apply(lambda r: path_from_row(r, base), axis=1)
     
-    hardlink_maker = partial(save_from_row, base_path=base)
+    copy_maker = partial(save_from_row, base_path=base)
     # save_from_row uses absolute paths for os.path.samefile etc.
     # to_process.path might be relative if it came from doc_df
-    # We should ensure it's absolute for the hardlink maker
+    # We should ensure it's absolute for the copy maker
     to_process['abs_path'] = to_process.path.apply(library_obj.abspath)
     
     # We need to tweak save_from_row slightly to accept the absolute path if we have it
@@ -1052,7 +1054,7 @@ def enhance_doc_df(library_obj, base_dir: str = "", update: bool = False):
             path.unlink()
         path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            path.hardlink_to(original)
+            shutil.copy2(original, path)
         except OSError:
             return 'error'
         return 'ok'
