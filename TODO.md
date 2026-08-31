@@ -18,6 +18,9 @@ Larger multi-session work belongs in `dev/projects/`; shipped changes go in
    Worth deciding whether that is acceptable or whether it should read
    `pyproject.toml` directly in a dev checkout.
 
+2. Up / down arrows in text box in Edit (bibtex) page change the edited
+   bibtex entry, rather than moving up and down *within* that entry. 
+
 ## Done
 
 <!-- Move items here with the version they shipped in, or delete them. -->

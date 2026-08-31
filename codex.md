@@ -6,7 +6,7 @@ Keep it updated with changes to code (add at end along with date).
 
 ## Startup Checks
 
-Always confirm the shell is actually in the repository before running repo-sensitive commands. A previous Codex tool call started in `C:\` even though the intended working directory was `C:\S\TELOS\Python\archivum_project`.
+Always confirm the shell is actually in the repository before running repo-sensitive commands. A previous Codex tool call started in `C:\` even though the intended working directory was `V:\dev\archivum`.
 
 Use PowerShell:
 
@@ -19,10 +19,10 @@ git status --short
 Expected repository root:
 
 ```text
-C:\S\TELOS\Python\archivum_project
+V:\dev\archivum
 ```
 
-If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir `C:\S\TELOS\Python\archivum_project` to tool calls.
+If `Get-Location` reports `C:\`, stop and correct the working directory before running Git, tests, or file edits. Prefer passing the explicit workdir `V:\dev\archivum` to tool calls.
 
 ## User Preferences
 
