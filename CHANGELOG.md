@@ -5,6 +5,25 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.13.0 (2026-10-15)
+
+### Added
+
+- PDFs open in an **in-app reader**: the Mozilla PDF.js viewer in a tab titled
+  with the tag, one page at a time at Page Fit, keyboard paging at once, the
+  usual find, outline, thumbnails, print, and download. Other formats are
+  served to the browser as before.
+- `/file/<tag>` and `/file-hash/<h>` serve raw bytes with HTTP Range support;
+  they do not count as reads. `/view` counts one read per opening.
+- About lists the PDF.js version.
+
+### Changed
+
+- PDF.js 6.4.299 is vendored under `web/static/vendor/pdfjs/` (no CDN, no
+  build step): 295 files, 7.9 MB, after dropping source maps, the sample PDF,
+  and every locale but en-US and en-GB. To back this out: `git revert` this
+  commit, then a patch bump.
+
 ## 2.12.0 (2026-10-15)
 
 ### Added

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from flask import Flask
 from ..cli import LibraryContext
 
@@ -8,6 +10,11 @@ FRONTEND_VERSIONS = {
     "bootstrap-icons": "1.11.3",
     "htmx": "1.9.10",
 }
+
+# The vendored PDF.js viewer records its own version beside the files.
+_PDFJS_VERSION = Path(__file__).parent / "static" / "vendor" / "pdfjs" / "VERSION"
+if _PDFJS_VERSION.exists():
+    FRONTEND_VERSIONS["pdf.js"] = _PDFJS_VERSION.read_text(encoding="utf-8").strip()
 
 
 def create_app():

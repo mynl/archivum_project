@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {# tabs read as tags, not shard filenames #}
+    <title>{{ tag }}{% if short_title %}: {{ short_title }}{% endif %}</title>
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon/favicon-32x32.png') }}">
+    <link rel="icon" href="{{ url_for('static', filename='icon/android-chrome-192x192.png') }}" sizes="192x192">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon/apple-touch-icon.png') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <style>
+        html, body { margin: 0; height: 100%; overflow: hidden; background: #525659; }
+        #reader { display: block; width: 100%; height: 100%; border: 0; }
+    </style>
+    <script>
+        // The generic PDF.js viewer dispatches "webviewerloaded" on the embedding
+        // document before it initializes: the supported hook for its options.
+        // Registered before the iframe exists, so it cannot miss the event.
+        document.addEventListener('webviewerloaded', (event) => {
+            const options = event.detail.source.PDFViewerApplicationOptions;
+            // stored viewer preferences would otherwise override what follows
+            options.set('disablePreferences', true);
+            options.set('scrollModeOnLoad', 3);       // ScrollMode.PAGE: one page at a time
+            options.set('spreadModeOnLoad', 0);       // SpreadMode.NONE
+            options.set('defaultZoomValue', 'page-fit');
+        });
+    </script>
+</head>
+<body>
+    <iframe id="reader" src="{{ viewer_url }}" title="{{ tag }}" allow="fullscreen"></iframe>
+    <script>
+        // focus the viewer so PgDn and the arrows page at once
+        const frame = document.getElementById('reader');
+        frame.addEventListener('load', () => frame.contentWindow.focus());
+    </script>
+</body>
+</html>

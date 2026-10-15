@@ -13,3 +13,9 @@
 *.ico binary
 *.woff binary
 *.woff2 binary
+# vendored PDF.js data files
+*.bcmap binary
+*.pfb binary
+*.ttf binary
+*.icc binary
+*.wasm binary

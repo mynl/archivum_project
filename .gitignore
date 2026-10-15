@@ -28,6 +28,8 @@ Thumbs.db      # Windows
 *.egg-info/
 dist/
 build/
+# the vendored PDF.js viewer ships a build/ directory of its own
+!src/archivum/web/static/vendor/pdfjs/build/
 .eggs/
 
 # === docs ===
