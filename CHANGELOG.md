@@ -5,6 +5,25 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.6.0 (2026-10-15)
+
+### Added
+
+- **About** page (`/about`, last item under More, open to all): versions of
+  Archivum (with the git commit and a dirty marker when run from a checkout),
+  Python, the main Python packages, the front-end libraries, and the external
+  tools (rg, pandoc, quarto, tectonic, pdftotext, ddjvu). Tools are probed
+  once per server process.
+- `archivum --version` on the CLI.
+
+### Changed
+
+- **Menu**: Query, Ingest, Ripgrep, Edit at top level. Reports, Authors,
+  Network, Qmd, and Help moved under **More**, above Cloud, Insights, Status,
+  Health, and About. More is highlighted while on one of its pages.
+- Bootstrap, Bootstrap Icons, and HTMX versions are defined once in the app;
+  the page's CDN links and About both read them.
+
 ## 2.5.4 (2026-10-15)
 
 ### Fixed

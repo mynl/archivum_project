@@ -130,6 +130,35 @@ def test_query_bibtex_exports_download(client):
 @pytest.mark.web
 @pytest.mark.route
 @pytest.mark.active_library
+def test_about_reports_version_and_menu_order(client):
+    from archivum import __version__
+
+    with logged_step("about-page"):
+        html = assert_ok_html(client.get("/about"), context="about page")
+        assert "About Archivum" in html
+        assert __version__ in html
+
+    with logged_step("menu-order"):
+        html = assert_ok_html(client.get("/"), context="query page")
+        nav = html[html.index('id="mainNavbar"'):html.index("</nav>")]
+        top_level = nav[:nav.index('id="moreDropdown"')]
+        for demoted in ("Reports", "Authors", "Network", "Qmd", "Help"):
+            assert f">{demoted}</a>" not in top_level
+        positions = [nav.index(label) for label in (">Query<", ">Ingest<", ">Ripgrep<", ">Edit<", "More")]
+        assert positions == sorted(positions)
+        assert nav.index("Help") < nav.index("Cloud") < nav.index("Status") < nav.index("About")
+        toggle = html[html.index('id="moreDropdown"') - 200:html.index('id="moreDropdown"')]
+        assert "active" not in toggle
+
+    with logged_step("more-active-on-demoted-page"):
+        html = assert_ok_html(client.get("/help"), context="help page")
+        toggle = html[html.index('id="moreDropdown"') - 200:html.index('id="moreDropdown"')]
+        assert "active" in toggle
+
+
+@pytest.mark.web
+@pytest.mark.route
+@pytest.mark.active_library
 def test_exports_are_built_in_memory(client, tmp_path, monkeypatch):
     # exports used to land in ./temp, inside the checkout; nothing may touch the cwd
     monkeypatch.chdir(tmp_path)

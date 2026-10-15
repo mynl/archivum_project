@@ -236,5 +236,10 @@ Repo-root companions:
 - **Overrides "scripts committed to a repo are `.ps1`":** the docs build is `doc-test.bat`,
   Windows CMD. It clones the repo into `C:\tmp\archivum_project_rtd_build_<ver>` and runs
   Sphinx — `doc-test.bat <python-version> new|refresh`.
+- **Overrides the Help rule.** The dev tree says *"Help is a `?` button top right opening a
+  right-side offcanvas panel."* Archivum is a single-user app whose help is a long reference
+  page with its own table of contents and search, so Help is a full page reached from the
+  **More** menu, beside About. Top level holds only the daily pages: Query, Ingest, Ripgrep,
+  Edit.
 - **Version** is single-sourced in `pyproject.toml` as `project.version`; `archivum.__version__`
   reads it at runtime via `importlib.metadata`. Read the current value there, not from here.

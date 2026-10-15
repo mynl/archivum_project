@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% macro version_table(title, rows) %}
+<h5 class="text-muted small fw-bold text-uppercase mb-3">{{ title }}</h5>
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body p-0">
+        <table class="table table-sm table-borderless mb-0">
+            <tbody>
+                {% for name, value in rows %}
+                <tr>
+                    <td class="ps-4 py-1 fw-bold text-muted small" style="width: 200px;">{{ name }}</td>
+                    <td class="py-1 font-monospace small {{ 'text-danger' if value in ('not found', 'not installed') else '' }}">{{ value }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <h2 class="fw-bold">About Archivum</h2>
+        <p class="text-muted mb-0">Versions of the app and of what it runs on. External tools are probed once per server process.</p>
+        <hr>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        {{ version_table('Archivum', [
+            ('archivum', versions.archivum),
+            ('git commit', versions.git or 'not a git checkout'),
+            ('python', versions.python),
+        ]) }}
+        {{ version_table('Front end', versions.frontend.items()) }}
+        {{ version_table('External tools', versions.tools.items()) }}
+    </div>
+    <div class="col-lg-6">
+        {{ version_table('Python packages', versions.packages.items()) }}
+    </div>
+</div>
+{% endblock %}

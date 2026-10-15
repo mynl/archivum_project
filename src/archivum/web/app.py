@@ -1,6 +1,15 @@
 from flask import Flask
 from ..cli import LibraryContext
 
+# The single source for front-end library versions: base.html builds its CDN
+# URLs from this, and About reports it, so the two cannot disagree.
+FRONTEND_VERSIONS = {
+    "bootstrap": "5.3.3",
+    "bootstrap-icons": "1.11.3",
+    "htmx": "1.9.10",
+}
+
+
 def create_app():
     app = Flask(__name__)
     try:
@@ -27,6 +36,10 @@ def create_app():
     @app.context_processor
     def inject_lib():
         from flask import g
-        return dict(lib=LibraryContext.get(), is_admin=getattr(g, 'is_admin', False))
+        return dict(
+            lib=LibraryContext.get(),
+            is_admin=getattr(g, 'is_admin', False),
+            frontend_versions=FRONTEND_VERSIONS,
+        )
         
     return app

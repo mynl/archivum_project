@@ -47,7 +47,7 @@ from querexfuzz.core import querexfuzz_help  # type: ignore[import-untyped]
 
 from .library import Library
 from .document import Document  # type: ignore[import-untyped]
-from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, GLOBAL_CONFIG
+from . import DEFAULT_LIBRARY, EMPTY_LIBRARY, LIBRARIES_DIR, BASE_DIR, GLOBAL_CONFIG, __version__
 from .utilities import make_qd, djvu_convert_file
 from .config import Configurator
 from .crossref import lookup_doi, search_by_title, search
@@ -373,6 +373,7 @@ class SkimMatchCompleter(Completer):
 # ========================================================================================
 # ========================================================================================
 @click.group()
+@click.version_option(__version__, prog_name="archivum")
 def entry():
     """CLI for managing bibliographic entries."""
     if hasattr(sys.stdout, "reconfigure"):

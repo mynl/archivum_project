@@ -36,3 +36,16 @@ def status():
     }
     return render_template('status.html', status=status_info)
 
+
+@bp.route('/about')
+def about_page():
+    """Versions of archivum, its packages, front end, and external tools. Read-only, open to all."""
+    from ...versions import collect_versions
+    from ..app import FRONTEND_VERSIONS
+
+    # the no-library placeholder may carry no config
+    config = getattr(LibraryContext.get(), "config", None)
+    ddjvu = getattr(config, "ddjvu_command", None) or "ddjvu"
+    versions = collect_versions(ddjvu_command=ddjvu, frontend=FRONTEND_VERSIONS)
+    return render_template('about.html', versions=versions)
+

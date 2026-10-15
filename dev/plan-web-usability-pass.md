@@ -565,3 +565,11 @@ Review-time divergences:
 - `authors.html`'s filter input does rely on the global listener for navigation (its keyup handler only filters), so it is exempted by id as the plan anticipated.
 - The guard is one `confirmDiscard()` called from `navigateList` (before the index moves) and from the sidebar button's inline `onclick`, which runs before htmx's listener and stops it with `stopImmediatePropagation` on refusal. The flag clears on any swap into `#editor-container` (htmx does not swap 4xx/5xx, so a failed save keeps it) and in a new `cancelEdit()`.
 - The Playwright test also exercises the guard: Playwright answers the confirm (dismiss, then accept). `sample_tag` is the first tag in the list, so the accepted step reloads that same tag; the test checks the edit was discarded rather than the tag changing.
+
+[menu-about] 2.6.0:
+
+- `ddjvu` has no version flag (`--version` is rejected; no argument prints "Cannot decode document"). It is probed with `--help`, and any tool whose first output line carries no digit reports "found (no version reported)".
+- The git revision ignores untracked files for the dirty marker (`status --porcelain --untracked-files=no`), and is cached per process like the tools, since it describes the code the process loaded.
+- The More menu is one Jinja list of groups `(endpoint, label, icon, admin_only)`; it renders the items, the dividers (skipping the admin group for guests), the active item, and the toggle's active style. Demoted pages gained icons in the dropdown.
+- Version lag (TODO 1): after the bump to 2.6.0, `uv run archivum --version` printed 2.6.0 at once, so nothing reads `pyproject.toml` at runtime.
+- Menu checked with Playwright screenshots at 1400 px (More open; More active on Help and About) and 390 px (hamburger collapsed and open). The route test also pins the order and the More highlight.
