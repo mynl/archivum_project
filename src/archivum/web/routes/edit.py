@@ -5,7 +5,8 @@ from ...bibtex import dict_to_bibtex
 from ...import_bibtex import Bib2df_Incremental
 
 
-def _render_edit_form(lib, tag):
+def _render_edit_form(lib, tag, status_message=""):
+    """The editor; ``status_message`` reports a save beside the buttons."""
     row = lib.ref_df[lib.ref_df.tag == tag]
     if row.empty:
         return f"Reference '{tag}' not found.", 404
@@ -15,7 +16,21 @@ def _render_edit_form(lib, tag):
     added = ref.get("added")
     added = added.strftime("%Y-%m-%d") if added is not None and not pd.isna(added) else ""
     return render_template('components/edit_form.html', tag=tag, bib_str=bib_str, added=added,
-                           documents_html=_render_documents(lib, tag))
+                           documents_html=_render_documents(lib, tag),
+                           status_message=status_message, status_level="success",
+                           viewable=lib.primary_doc(tag) is not None)
+
+
+def _edit_save_failed(message):
+    """
+    A refused save: the reason goes in the status slot and the edit stays in
+    the box. Sent as 200 because htmx does not swap error responses.
+    """
+    response = make_response(render_template(
+        'components/edit_status.html', tag="", status_message=message, status_level="danger"))
+    response.headers["HX-Retarget"] = "#edit-status"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
 
 
 def _size_display(size) -> str:
@@ -303,18 +318,27 @@ def edit_tag(tag):
     # POST - Save changes
     bib_str = request.form.get('bibtex', '').strip()
     if not bib_str:
-        return "BibTeX entry cannot be empty.", 400
-        
+        return _edit_save_failed("BibTeX entry cannot be empty.")
+
     try:
         new_data = Bib2df_Incremental.parse_line(bib_str)
         if not new_data:
-            return "Error parsing BibTeX entry.", 400
-            
+            return _edit_save_failed("Error parsing BibTeX entry.")
         lib.update_reference(tag, new_data)
-        return render_template('components/edit_success.html', tag=new_data.get('tag', tag))
+    except ValueError as e:
+        return _edit_save_failed(str(e))
     except Exception as e:
         logger.error(f"Error updating reference {tag}: {e}")
-        return f"Error: {str(e)}", 500
+        return _edit_save_failed(f"Error: {e}")
+
+    # the editor reloads with the saved entry, as Ingest's workbench resets
+    new_tag = new_data.get('tag', tag)
+    if new_tag == tag:
+        return _render_edit_form(lib, tag, status_message="updated")
+    return (
+        _render_edit_form(lib, new_tag, status_message=f"updated, renamed from {tag}")
+        + render_template('components/sidebar_rename.html', old_tag=tag, new_tag=new_tag)
+    )
 
 @bp.route('/help')
 def help_page():

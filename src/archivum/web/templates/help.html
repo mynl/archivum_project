@@ -302,7 +302,7 @@
                     <li><strong>Citations</strong>: A deleted or merged-away tag leaves <code>bibtex.bib</code> and its linked copy, so manuscripts that cite it stop resolving. There is no alias mechanism: biblatex's <code>ids</code> field is not honored by pandoc citeproc.</li>
                     <li><strong>Date added</strong>: Shown under the title, read-only. It is set when the reference is first saved and kept through edits and tag renames; it never appears in the BibTeX.</li>
                     <li><strong>Unsaved changes</strong>: After typing in the BibTeX box, loading another tag asks before discarding the edit. Saving or Cancel clears the question.</li>
-                    <li><strong>Direct Edit</strong>: Edit the underlying BibTeX source directly and save with <code>Ctrl+S</code> or the Save button.</li>
+                    <li><strong>Direct Edit</strong>: Edit the underlying BibTeX source directly and save with <code>Ctrl+S</code> or <strong>Save Changes</strong>. The editor reloads with the saved entry, and a status line left of the buttons says so (with <strong>View</strong> when there is a document); it closes itself after 20 seconds. A refused save, such as a tag already taken or BibTeX that does not parse, puts the reason there instead, stays until closed, and keeps your edit in the box. A renamed tag is renamed in the sidebar too, in its old place.</li>
                 </ul>
             </div>
             {% endif %}

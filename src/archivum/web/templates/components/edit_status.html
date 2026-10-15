@@ -1,0 +1,9 @@
+{# A save outcome in the Edit status slot, styled like Ingest's result lines.
+   Success closes itself after 20 s (edit.html); an error stays until closed. #}
+<div class="alert alert-{{ status_level }} alert-dismissible fade show shadow-sm border-0 py-2 ps-3 mb-0 small"
+     role="status"{% if status_level == 'success' %} data-autoclose="20000"{% endif %}>
+    {% if tag %}<strong>{{ tag }}</strong> {{ status_message }}
+    {% if viewable %}<a href="{{ url_for('main.view', tag=tag) }}" target="_blank">View</a>{% endif %}
+    {% else %}{{ status_message }}{% endif %}
+    <button type="button" class="btn-close btn-close-sm py-2" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>

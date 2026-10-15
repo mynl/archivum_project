@@ -4,7 +4,7 @@
         {% if added %}<div class="small text-muted mt-1" title="When the reference entered the library. Set automatically; not editable.">Added {{ added }}</div>{% endif %}
     </div>
     <div class="card-body">
-        <form hx-post="{{ url_for('main.edit_tag', tag=tag) }}" hx-target="#editor-container">
+        <form id="edit-form" hx-post="{{ url_for('main.edit_tag', tag=tag) }}" hx-target="#editor-container">
             <div class="mb-4">
                 <label for="bibtex" class="form-label fw-bold small text-muted text-uppercase">BibTeX Entry</label>
                 <textarea class="form-control font-monospace p-3 border-2" 
@@ -18,9 +18,10 @@
                 </div>
             </div>
             
-            <div class="d-flex justify-content-between align-items-center mt-4 pt-3 border-top">
-                <div id="edit-error" class="text-danger small fw-bold"></div>
-                <div class="d-flex gap-2">
+            <div class="d-flex justify-content-end align-items-center gap-3 mt-4 pt-3 border-top">
+                {# save outcomes land here, beside the buttons #}
+                <div id="edit-status" aria-live="polite">{% if status_message %}{% include "components/edit_status.html" %}{% endif %}</div>
+                <div class="d-flex gap-2 flex-shrink-0">
                     <button type="button" 
                             class="btn btn-light px-4 fw-medium border"
                             onclick="cancelEdit()">Cancel</button>

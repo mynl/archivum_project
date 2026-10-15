@@ -118,13 +118,35 @@
 
     // Unsaved-change guard. Typing in #bibtex marks the editor dirty; loading
     // another tag asks first. Any swap into the editor (a loaded tag, a
-    // successful save) clears it; failed saves do not swap, so it stays set.
+    // successful save) clears it; a failed save swaps only #edit-status, so
+    // it stays set.
     let editorDirty = false;
     document.addEventListener('input', (e) => {
         if (e.target.id === 'bibtex') editorDirty = true;
     });
     document.body.addEventListener('htmx:afterSwap', (e) => {
         if (e.detail.target && e.detail.target.id === 'editor-container') editorDirty = false;
+        // a successful save reports beside the buttons, then closes itself
+        const saved = document.querySelector('#edit-status [data-autoclose]');
+        if (saved) {
+            const delay = Number(saved.dataset.autoclose);
+            delete saved.dataset.autoclose;
+            setTimeout(() => {
+                if (saved.isConnected) bootstrap.Alert.getOrCreateInstance(saved).close();
+            }, delay);
+        }
+    });
+
+    // Ctrl+S saves the open reference rather than the browser page
+    window.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+        const form = document.getElementById('edit-form');
+        if (!form) return;
+        e.preventDefault();
+        // htmx binds a freshly swapped form only after its settle delay; bind
+        // it now so a quick Ctrl+S cannot fall through to a native GET
+        htmx.process(form);
+        form.requestSubmit();
     });
 
     function confirmDiscard() {

@@ -1,0 +1,10 @@
+<script>
+    // the tag was renamed: point its Edit sidebar entry at the new one
+    document.querySelectorAll('.tag-item').forEach(el => {
+        if (el.dataset.tag !== {{ old_tag|lower|tojson }}) return;
+        el.dataset.tag = {{ new_tag|lower|tojson }};
+        el.textContent = {{ new_tag|tojson }};
+        el.setAttribute('hx-get', {{ url_for('main.edit_tag', tag=new_tag)|tojson }});
+        htmx.process(el);
+    });
+</script>

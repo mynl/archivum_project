@@ -5,6 +5,20 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.13.1 (2026-10-15)
+
+### Fixed
+
+- Saving in Edit no longer opens a "Reference Updated" panel whose Close did
+  nothing. The editor reloads with the saved entry and a status line left of
+  Cancel and Save Changes reports it, with View, closing itself after 20
+  seconds.
+- A refused save (tag already taken, BibTeX that does not parse) now says why
+  in that status line and keeps the edit; before, nothing appeared at all.
+- `Ctrl+S` saves in Edit, as Help already claimed; before, it opened the
+  browser's Save Page dialog.
+- A tag renamed in Edit is renamed in the sidebar too.
+
 ## 2.13.0 (2026-10-15)
 
 ### Added
