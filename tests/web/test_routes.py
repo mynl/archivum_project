@@ -25,6 +25,12 @@ def test_query_screen_recent_read_and_hash_prefix(client, sample_hash_prefix):
             None,
         ),
         (
+            "reference-only",
+            "q select added, * where docs == 0 order by -added",
+            "select added, * where docs == 0 order by -added",
+            None,
+        ),
+        (
             "hash-prefix",
             f"q top 25 select year, * hash ~ ^{sample_hash_prefix} order by -year",
             f"top 25 select year, * hash ~ ^{sample_hash_prefix} order by -year",

@@ -55,6 +55,11 @@ class Library(LibraryBase):
     # base columns used by the app for quick output displays
     base_cols = ["tag", "type", "author", "title", "year", "journal"]
 
+    # ref.feather columns kept whatever config.ref_columns says. ``added`` is
+    # when the reference entered the library: set by save(), never exported or
+    # hand-edited.
+    structural_ref_columns = ["tag", "type", "added"]
+
     def __init__(self, library_dir_name: str = "", **overrides):
         """
         Load YAML config from library name. Combines site, library
@@ -587,6 +592,8 @@ class Library(LibraryBase):
             # the hash shown in search results is the one /view/<tag> opens.
             # Alternates stay reachable through ref_doc_df and primary_doc().
             links = self.ref_doc_df
+            # every priority: 0 means reference only, > 1 means alternates
+            doc_counts = links.groupby("tag").size() if not links.empty else pd.Series(dtype=int)
             if "priority" in links.columns:
                 links = links[links.priority == 0].drop(columns=["priority"])
 
@@ -604,7 +611,14 @@ class Library(LibraryBase):
             for c in ["node", "links", "size"]:
                 if c in merged.columns:
                     merged[c] = merged[c].fillna(0)
-            
+
+            merged["docs"] = merged["tag"].map(doc_counts).fillna(0).astype(int)
+            # A library not yet backfilled has no date added; Recent sorts by
+            # it, so stand in the document date the shared querex config
+            # used to sort by.
+            if "added" not in merged.columns and "create" in merged.columns:
+                merged["added"] = merged["create"]
+
             # Note: We don't truncate hash here because querex might need it for filtering,
             # and truncating before merging or using it in query logic is risky.
             # But the display code usually handles the truncation.
@@ -637,7 +651,7 @@ class Library(LibraryBase):
 
         # avoid proliferation of spurious columns
         ref_cols = ref_add.columns
-        keep_cols = self.config.ref_columns
+        keep_cols = dict.fromkeys([*self.config.ref_columns, *self.structural_ref_columns])
         keep_cols = [i for i in keep_cols if i in ref_cols]
         ref_add = ref_add[keep_cols]
 
@@ -658,8 +672,15 @@ class Library(LibraryBase):
         _ = self.ref_df
         _ = self.ref_doc_df
 
-        # Append and Deduplicate
-        ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True).drop_duplicates(subset=['tag'], keep='last')
+        # Append and Deduplicate. A re-imported tag replaces its row but keeps
+        # the earlier date added (the incoming row has none).
+        ref_out = pd.concat([self._ref_df, ref_add], ignore_index=True)
+        if "added" in ref_out.columns:
+            earliest_added = ref_out.groupby("tag")["added"].min()
+            ref_out = ref_out.drop_duplicates(subset=['tag'], keep='last')
+            ref_out["added"] = ref_out["tag"].map(earliest_added)
+        else:
+            ref_out = ref_out.drop_duplicates(subset=['tag'], keep='last')
         doc_out = pd.concat([self._doc_df, doc_add], ignore_index=True).drop_duplicates(subset=['hash', 'version'], keep='last')
         ref_doc_out = pd.concat([self._ref_doc_df, ref_doc_add], ignore_index=True).drop_duplicates(subset=['tag', 'hash', 'version'], keep='last')
         # incoming rows carry only a within-import rank; re-rank against the
@@ -703,6 +724,8 @@ class Library(LibraryBase):
         new_tag = new_data.get("tag")
         if not new_tag:
             raise ValueError("New data must contain a 'tag'")
+        # the date added is structural, never hand-edited
+        new_data = {k: v for k, v in new_data.items() if k != "added"}
 
         # 0. ensure data loaded
         ref_df = self.ref_df
@@ -729,10 +752,9 @@ class Library(LibraryBase):
             # Adding new
             row = pd.Series(new_data)
 
-        # 3. Restrict to configured columns, but ENSURE tag and type are kept
-        keep_cols = set(self.config.ref_columns)
-        keep_cols.add("tag")
-        keep_cols.add("type")
+        # 3. Restrict to configured columns, but ENSURE the structural ones
+        # (tag, type, added) are kept. A new tag has no added; save() stamps it.
+        keep_cols = set(self.config.ref_columns) | set(self.structural_ref_columns)
         row = row[row.index.isin(keep_cols)]
 
         # 4. Append and save
@@ -740,6 +762,78 @@ class Library(LibraryBase):
             [self.ref_df, row.to_frame().T], ignore_index=True
         )
         self.save()
+
+    def _stamp_added(self, added: pd.Series) -> pd.Series:
+        """
+        Normalize ``added`` to tz-aware datetimes and fill gaps with now.
+
+        Appending a row through a Series (``update_reference``) degrades the
+        column to object dtype; feather would then store mixed values.
+        """
+        tz = self.config.timezone
+        added = pd.to_datetime(added, utc=True).dt.tz_convert(tz)
+        return added.fillna(pd.Timestamp.now(tz=tz))
+
+    def backfill_added(self, undated: str, execute: bool = False) -> pd.DataFrame:
+        """
+        Fill missing ``added`` dates once per library; never overwrite.
+
+        Parameters
+        ----------
+        undated : str
+            ISO date (``YYYY-MM-DD``) for references with no dated document,
+            taken as midnight in the configured timezone.
+        execute : bool
+            Write through :meth:`save` (which backs up the feathers first).
+            Default False: report only.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per rule (``existing``, ``documents``, ``undated``) with
+            the count and the earliest and latest resulting date.
+
+        Notes
+        -----
+        A reference with documents gets the earliest ``create`` across all
+        its links, every priority: the first time any copy of the work was
+        acquired. That keeps Recent's order close to what it was when it
+        sorted by the primary document's ``create``.
+        """
+        tz = self.config.timezone
+        refs = self.ref_df
+        if "added" in refs.columns:
+            current = pd.to_datetime(refs["added"], utc=True).dt.tz_convert(tz)
+        else:
+            current = pd.Series(pd.NaT, index=refs.index, dtype=f"datetime64[ns, {tz}]")
+
+        links = self.ref_doc_df[["tag", "hash", "version"]].merge(
+            self.doc_df[["hash", "version", "create"]], on=["hash", "version"], how="left"
+        )
+        earliest = links.groupby("tag")["create"].min()
+        from_documents = pd.to_datetime(refs["tag"].map(earliest), utc=True).dt.tz_convert(tz)
+        fallback = pd.Timestamp(undated, tz=tz)
+
+        missing = current.isna()
+        rule = pd.Series("existing", index=refs.index)
+        rule[missing & from_documents.notna()] = "documents"
+        rule[missing & from_documents.isna()] = "undated"
+        filled = current.where(~missing, from_documents.where(from_documents.notna(), fallback))
+
+        report = (
+            pd.DataFrame({"rule": rule, "added": filled})
+            .groupby("rule")["added"]
+            .agg(count="size", earliest="min", latest="max")
+            .reindex(["existing", "documents", "undated"])
+            .dropna(subset=["count"])
+        )
+        report["count"] = report["count"].astype(int)
+
+        if execute and missing.any():
+            self._ref_df = refs.copy()
+            self._ref_df["added"] = filled
+            self.save()
+        return report
 
     def validate(self, task: str = "sharding", execute: bool = False):
         """
@@ -924,6 +1018,13 @@ class Library(LibraryBase):
         ref_to_save = self.ref_df
         ref_doc_df = self.ref_doc_df
         doc_df = self.doc_df
+
+        # 1a. DATE ADDED: every write passes through here, so this is the one
+        # place a new reference is stamped. Only once the column exists: a
+        # library not yet backfilled must not have every row stamped "now".
+        if "added" in ref_to_save.columns:
+            ref_to_save = ref_to_save.copy()
+            ref_to_save["added"] = self._stamp_added(ref_to_save["added"])
 
         # 1b. RELATIVIZE PATHS for portability
         doc_dir = self.doc_store_path

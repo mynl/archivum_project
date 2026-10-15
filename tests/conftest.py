@@ -234,3 +234,66 @@ def log_payload_counts(name: str, payload: dict[str, Any]) -> None:
         len(payload.get("clusters") or []),
         payload.get("omitted_count"),
     )
+
+
+def make_tmp_library(tmp_path: Path, refs, docs=None, links=None, reads=None, **config):
+    """
+    A real ``Library`` whose feathers live under ``tmp_path``.
+
+    For tests that must call ``save()``: the production library is never
+    written. Built with ``Library.__new__`` because ``__init__`` resolves the
+    configured library home. ``bibtex_file`` is empty, so no symlink is made.
+
+    Parameters
+    ----------
+    refs, docs, links, reads : list of dict or DataFrame
+        Rows for ref, doc, ref-doc, and read feathers; omitted ones are empty.
+    **config
+        Overrides for the ``Configurator`` fields.
+    """
+    import pandas as pd
+
+    from archivum.config import Configurator
+    from archivum.library import Library
+
+    lib = Library.__new__(Library)
+    lib.config_path = tmp_path / "library"
+    lib.config_path.mkdir(parents=True)
+    lib.doc_store_path = tmp_path / "docs"
+    lib.doc_store_path.mkdir()
+    lib.text_dir_path = tmp_path / "text"
+    lib.text_dir_path.mkdir()
+    lib.exports_dir_path = lib.config_path / "exports"
+    lib.debug_dir_path = tmp_path / "debug"
+    settings = dict(
+        name="tmp", bibtex_file="", debug_mode=False, default_library="tmp",
+        debug_dir=tmp_path / "debug", doc_store_lib="docs", full_text_lib="text",
+        theme="system", ref_columns=["tag", "type", "author", "title", "year", "journal", "doi"],
+        timezone="Europe/London",
+    )
+    settings.update(config)
+    lib.config = Configurator(**settings)
+    lib.needs_reload = False
+    lib._ignore_until = 0.0
+    lib._last_mtimes = {}
+    lib._observer = None
+
+    frames = {
+        "ref.feather": (refs, ["tag", "type"]),
+        "doc.feather": (docs, ["hash", "version", "path", "create"]),
+        "ref-doc.feather": (links, ["tag", "hash", "version", "priority"]),
+        "read.feather": (reads, ["hash", "last_read", "read_count", "last_caller"]),
+    }
+    # a missing priority is ranked by row order on load (assign_ref_doc_priority)
+    for name, (rows, columns) in frames.items():
+        df = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows or [], columns=None if rows else columns)
+        if not df.empty or name != "read.feather":
+            df.to_feather(lib.config_path / name)
+    lib.reset()
+    return lib
+
+
+@pytest.fixture()
+def tmp_library(tmp_path):
+    """Factory for :func:`make_tmp_library` bound to this test's ``tmp_path``."""
+    return lambda *args, **kwargs: make_tmp_library(tmp_path, *args, **kwargs)

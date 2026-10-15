@@ -110,9 +110,10 @@ def dict_to_bibtex(data: Any, allowed_fields: List[str] = None, raw_fields: Iter
         keys = [k for k in allowed_fields if k not in {'type', 'tag'}]
     else:
         # Fallback: process all fields except blacklisted ones
-        keys = [k for k in data.keys() if k not in {'type', 'tag'} 
+        # added: the library's date added, structural and never hand-edited
+        keys = [k for k in data.keys() if k not in {'type', 'tag'}
                 and not k.startswith(('arc-', 'mendeley-'))
-                and k != 'merge_count']
+                and k not in ('merge_count', 'added')]
 
     # Filter out empty/NaN and sanitize
     processed_data = {}

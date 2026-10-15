@@ -4,11 +4,13 @@ base_cols:
   - title
   - journal
   - create
+  - added
   - hash
   - year
   - type
 
 date_fields:
+  - added
   - create
   - mod
   - access 
@@ -16,7 +18,9 @@ date_fields:
 default_date_field: mod
 
 bang_field: author
-recent_field: create
+# Recent means recently added references (ref.feather), not recently
+# acquired documents: replacing a document does not move its reference.
+recent_field: added
 
 fuzzy:
   fields:

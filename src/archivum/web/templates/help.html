@@ -99,7 +99,7 @@
             
             <div id="query-simple" class="mb-4">
                 <h5 class="fw-bold text-primary">1. Live Query Interpretation</h5>
-                <p>For quick lookups, plain text becomes a fuzzy <code>#</code> search. Explicit querexfuzz syntax is limited to the 50 most recent published matches by default.</p>
+                <p>For quick lookups, plain text becomes a fuzzy <code>#</code> search. Explicit querexfuzz syntax is limited to the 50 most recently added matches by default.</p>
                 <table class="table table-sm table-bordered bg-white small mb-3">
                     <thead class="bg-light">
                         <tr>
@@ -144,6 +144,7 @@
                     <li><strong>Projection</strong>: Control which columns are returned using <code>select col1, col2</code>.</li>
                     <li><strong>Sorting</strong>: Use <code>order by field</code> or <code>order by -field</code> for descending.</li>
                     <li><strong>Limits</strong>: Add <code>top 50</code> to restrict result size.</li>
+                    <li><strong>Library fields</strong>: <code>added</code> is when the reference entered the library, and is what <code>recent</code> sorts by; <code>create</code> is when its primary document's file was created. <code>docs</code> counts the documents linked to the reference: <code>where docs == 0</code> finds references with no document, <code>where docs &gt; 1</code> those with alternates.</li>
                 </ul>
                 <p class="small">For the complete grammar, visit the <a href="https://github.com/mynl/querexfuzz_project" target="_blank">Querexfuzz Project</a>.</p>
             </div>
@@ -207,7 +208,7 @@
                     <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type, and the live status line shows the interpreted querexfuzz expression.</li>
                     <li><strong>Quick Actions</strong>:
                         <ul>
-                            <li><strong>Recent</strong>: Dropdown to quickly view the last 50, 100, or 250 items added.</li>
+                            <li><strong>Recent</strong>: The last 50, 100, or 250 references added to the library, newest first. This is the reference's own date added, not its document's: replacing a document does not move a reference up. <strong>Reference only</strong>, below the divider, lists references with no document.</li>
                             <li><strong>Read</strong>: Quick access to your reading history, ordered by most recent.</li>
                             <li><strong>Random</strong>: Discovers papers using a random 2-digit hex hash prefix.</li>
                         </ul>
@@ -293,6 +294,7 @@
                 <p>A high-density interface for bulk metadata management.</p>
                 <ul>
                     <li><strong>Tag Sidebar</strong>: Live-filterable list of every tag in your library. Up/Down walk the list from the filter box or from anywhere outside a text field; inside the BibTeX box they move the caret.</li>
+                    <li><strong>Date added</strong>: Shown under the title, read-only. It is set when the reference is first saved and kept through edits and tag renames; it never appears in the BibTeX.</li>
                     <li><strong>Unsaved changes</strong>: After typing in the BibTeX box, loading another tag asks before discarding the edit. Saving or Cancel clears the question.</li>
                     <li><strong>Direct Edit</strong>: Edit the underlying BibTeX source directly and save with <code>Ctrl+S</code> or the Save button.</li>
                 </ul>

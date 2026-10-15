@@ -7,8 +7,12 @@ def _render_edit_form(lib, tag):
     row = lib.ref_df[lib.ref_df.tag == tag]
     if row.empty:
         return f"Reference '{tag}' not found.", 404
-    bib_str = dict_to_bibtex(row.iloc[0])
-    return render_template('components/edit_form.html', tag=tag, bib_str=bib_str)
+    ref = row.iloc[0]
+    bib_str = dict_to_bibtex(ref)
+    # read-only: the date added is structural and stays out of the textarea
+    added = ref.get("added")
+    added = added.strftime("%Y-%m-%d") if added is not None and not pd.isna(added) else ""
+    return render_template('components/edit_form.html', tag=tag, bib_str=bib_str, added=added)
 
 
 @bp.route('/edit')

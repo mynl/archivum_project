@@ -573,3 +573,12 @@ Review-time divergences:
 - The More menu is one Jinja list of groups `(endpoint, label, icon, admin_only)`; it renders the items, the dividers (skipping the admin group for guests), the active item, and the toggle's active style. Demoted pages gained icons in the dropdown.
 - Version lag (TODO 1): after the bump to 2.6.0, `uv run archivum --version` printed 2.6.0 at once, so nothing reads `pyproject.toml` at runtime.
 - Menu checked with Playwright screenshots at 1400 px (More open; More active on Help and About) and 390 px (hamburger collapsed and open). The route test also pins the order and the More highlight.
+
+[added] 2.7.0:
+
+- One class constant, `Library.structural_ref_columns = ["tag", "type", "added"]`, drives the always-kept set in both `update` and `update_reference`, so the two cannot drift.
+- `update_reference` also drops an `added` key from the parsed BibTeX, so a hand-typed `added = {...}` in the textarea cannot overwrite the date.
+- Audit of other `ref.feather` writers: `definitive_loader.py` writes only through `Library` methods; `initial_import` goes through `update`; `Library.enhance_refs` (the one-time initial-import enhancement, `_ref_df = ans.ans_df`) replaces the frame wholesale and would drop `added` if ever rerun on a backfilled library. Left as is: it is a from-scratch build step; noted here.
+- Tests use a new `make_tmp_library` / `tmp_library` factory in `tests/conftest.py`: a real `Library` over feathers in `tmp_path` with a real `Configurator` and no BibTeX link, so `save()` runs for real without touching production. Later steps reuse it.
+- The `--undated` fallback for a library in `Europe/London` lands at `2026-01-01 00:00+00:00` (GMT in January), midnight local as specified.
+- Backfill dry run on `uber-library` (CLI, nothing written): 7,195 references from documents (earliest 2019-05-28, latest 2026-10-15), 168 undated at 2026-01-01; no existing values. `-x` awaits the user's word. `Library.database` today: 168 references with `docs == 0`, 5 with `docs == 2`.

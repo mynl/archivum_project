@@ -5,6 +5,25 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.7.0 (2026-10-15)
+
+### Added
+
+- References carry their own **date added** (`added` in `ref.feather`), set
+  automatically on first save and kept through edits, renames, and re-imports.
+  Shown read-only on Edit; never in BibTeX.
+- `archivum backfill-added --undated YYYY-MM-DD [-x]` fills it once per
+  library: the earliest file-created date across a reference's documents, else
+  `--undated`. Dry run by default; never overwrites.
+- `docs` query field: documents linked to a reference (0 = reference only).
+  Recent's dropdown gains **Reference only**.
+
+### Changed
+
+- **Recent now means recently added references**, not recently acquired
+  documents: replacing a reference's document no longer moves it up. Until a
+  library is backfilled, Recent falls back to the document date as before.
+
 ## 2.6.0 (2026-10-15)
 
 ### Added

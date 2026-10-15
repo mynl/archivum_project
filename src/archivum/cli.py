@@ -709,6 +709,35 @@ def edit_tag(tag, info):
 
 
 # ========================================================================================
+@entry.command(name="backfill-added")
+@click.option("--undated", required=True,
+    help="ISO date (YYYY-MM-DD) for references with no dated document, as midnight local time.")
+@click.option("-x", "--execute",
+    is_flag=True,
+    default=False,
+    show_default=True,
+    help="Write the dates (saves, with the usual feather backup). Default: dry run.")
+def backfill_added(undated, execute):
+    """
+    Fill each reference's missing date added; existing dates are never changed.
+
+    A reference with documents gets the earliest file-created date across all
+    its documents; one without gets --undated.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+    try:
+        dt.date.fromisoformat(undated)
+    except ValueError:
+        raise click.BadParameter(f"{undated!r} is not YYYY-MM-DD", param_hint="--undated")
+    report = lib.backfill_added(undated, execute=execute)
+    click.echo(report.to_string())
+    click.echo("Written." if execute else "Dry run: nothing written. Add -x to write.")
+
+
+# ========================================================================================
 @entry.command()
 @click.argument("tag", type=str)
 @click.option("-x", "--execute",

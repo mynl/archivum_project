@@ -40,6 +40,8 @@
                 <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(50)">50 Recent</a></li>
                 <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(100)">100 Recent</a></li>
                 <li><a class="dropdown-item small fw-medium" href="#" onclick="executeRecent(250)">250 Recent</a></li>
+                <li><hr class="dropdown-divider"></li>
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeReferenceOnly()" title="References with no document, newest first">Reference only</a></li>
             </ul>
         </div>
 
@@ -94,6 +96,14 @@
         const input = document.getElementById('search-input');
         if (input) {
             input.value = `q top ${limit} recent`;
+            htmx.trigger(input, 'keyup');
+        }
+    }
+
+    function executeReferenceOnly() {
+        const input = document.getElementById('search-input');
+        if (input) {
+            input.value = `q select added, * where docs == 0 order by -added`;
             htmx.trigger(input, 'keyup');
         }
     }
