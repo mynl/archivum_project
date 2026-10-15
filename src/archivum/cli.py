@@ -760,8 +760,8 @@ def delete_tag(tag, execute):
         return
 
     try:
-        lib.remove_reference(tag)
-        click.echo(f"Reference '{tag}' deleted.")
+        audit = lib.remove_reference(tag)
+        click.echo(f"Reference '{tag}' deleted. Audit copy: {audit}")
     except Exception as e:
         click.echo(f"Error deleting reference: {e}")
 

@@ -200,6 +200,65 @@ def rows_to_bibtex(
     return "\n\n".join(entries)
 
 
+def _is_blank(value: Any) -> bool:
+    """None, NaN, or text that is empty or the string ``nan``."""
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip() in ("", "nan")
+
+
+def _merge_key(value: Any) -> str:
+    """Text compared for a merge conflict: braces dropped, whitespace collapsed."""
+    return re.sub(r"\s+", " ", str(value).replace("{", "").replace("}", "")).strip()
+
+
+def propose_merge(keep_row: Any, absorb_row: Any) -> tuple[dict, list[dict]]:
+    """
+    Propose one entry from two references to the same work.
+
+    Parameters
+    ----------
+    keep_row, absorb_row : mapping or pandas.Series
+        The surviving reference and the one merged into it.
+
+    Returns
+    -------
+    merged : dict
+        ``keep_row``'s non-empty fields, with ``absorb_row`` filling the
+        fields ``keep_row`` leaves empty. The tag is ``keep_row``'s.
+    conflicts : list of dict
+        ``{field, keep, absorb}`` for fields where both are non-empty and
+        differ once braces and whitespace are normalized; ``keep`` won.
+
+    Notes
+    -----
+    Archivum's own columns (``added``, ``arc-*``, ``mendeley-*``,
+    ``merge_count``) are neither merged nor reported: the library sets them.
+    """
+    keep = keep_row.to_dict() if hasattr(keep_row, "to_dict") else dict(keep_row)
+    absorb = absorb_row.to_dict() if hasattr(absorb_row, "to_dict") else dict(absorb_row)
+
+    def merged_field(key: str) -> bool:
+        return key not in ("tag", "added", "merge_count", "querex") and not key.startswith(("arc-", "mendeley-"))
+
+    merged = {k: v for k, v in keep.items() if merged_field(k) and not _is_blank(v)}
+    conflicts = []
+    for key, value in absorb.items():
+        if not merged_field(key) or _is_blank(value):
+            continue
+        if key not in merged:
+            merged[key] = value
+        elif _merge_key(merged[key]) != _merge_key(value):
+            conflicts.append({"field": key, "keep": merged[key], "absorb": value})
+    merged["tag"] = keep.get("tag")
+    return merged, conflicts
+
+
 def _dedupe_bibtex_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Avoid duplicate BibTeX entries from exploded author/database rows."""
     for column in ("tag", "hash"):

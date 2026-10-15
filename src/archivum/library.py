@@ -820,13 +820,107 @@ class Library(LibraryBase):
 
         logger.info("saved library and invalidated cache")
 
-    def remove_reference(self, tag: str):
-        """Remove a reference and its links from the library."""
+    def _write_edit_audit(self, name: str, tags: list[str]) -> Path:
+        """
+        Record references about to be deleted or merged away.
+
+        Writes ``edit-audit/<timestamp>_<name>.bib``: each entry as BibTeX,
+        followed by ``% added <iso>`` and one ``% link <hash> <version>
+        <priority>`` line per document, so it can be re-imported and
+        re-linked. BibTeX ignores text outside entries.
+        """
+        audit_dir = self.config_path / "edit-audit"
+        audit_dir.mkdir(exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = audit_dir / f"{stamp}_{re.sub(r'[^A-Za-z0-9_.-]', '_', name)}.bib"
+        links = self._ranked_ref_doc()
+        chunks = []
+        for tag in tags:
+            row = self.ref_df[self.ref_df.tag == tag].iloc[0]
+            lines = [dict_to_bibtex(row)]
+            added = row.get("added")
+            if added is not None and not pd.isna(added):
+                lines.append(f"% added {pd.Timestamp(added).isoformat()}")
+            for _, link in links[links.tag == tag].sort_values("priority").iterrows():
+                lines.append(f"% link {link.hash} {int(link.version)} {int(link.priority)}")
+            chunks.append("\n".join(lines))
+        path.write_text("\n\n".join(chunks) + "\n", encoding="utf-8")
+        return path
+
+    def remove_reference(self, tag: str) -> Path:
+        """
+        Remove a reference and its links, after writing an audit copy.
+
+        Documents, doc rows, and read history stay. Returns the audit path.
+        """
         if tag not in self.ref_df.tag.values:
-            logger.warning("Tag %s not found in ref_df", tag)
+            raise ValueError(f"Tag '{tag}' not found in references.")
+        audit = self._write_edit_audit(f"delete_{tag}", [tag])
         self._ref_df = self.ref_df[self.ref_df.tag != tag]
         self._ref_doc_df = self.ref_doc_df[self.ref_doc_df.tag != tag]
         self.save()
+        return audit
+
+    def merge_references(self, keep: str, absorb: str, merged_fields: dict) -> Path:
+        """
+        Merge reference ``absorb`` into ``keep``, two records of one work.
+
+        Parameters
+        ----------
+        keep, absorb : str
+            The surviving tag and the tag that goes.
+        merged_fields : dict
+            The edited merged entry (see :func:`archivum.bibtex.propose_merge`).
+            Its tag must be ``keep``: rename separately with Save.
+
+        Returns
+        -------
+        pathlib.Path
+            The audit file holding both originals.
+
+        Notes
+        -----
+        One save. ``keep`` takes the merged fields and the earlier of the two
+        dates added. Its links keep their order; ``absorb``'s follow, minus any
+        ``(hash, version)`` ``keep`` already has. Read history is keyed by hash,
+        so it follows the documents.
+        """
+        if keep == absorb:
+            raise ValueError("A reference cannot be merged into itself.")
+        for tag in (keep, absorb):
+            if tag not in self.ref_df.tag.values:
+                raise ValueError(f"Tag '{tag}' not found in references.")
+        if merged_fields.get("tag", keep) != keep:
+            raise ValueError(f"The merged entry must keep the tag {keep}; rename it separately with Save.")
+
+        audit = self._write_edit_audit(f"merge_{absorb}_into_{keep}", [keep, absorb])
+
+        refs = self.ref_df.copy()
+        keep_idx = refs.index[refs.tag == keep][0]
+        allowed = set(self.config.ref_columns) | set(self.structural_ref_columns)
+        for k, v in merged_fields.items():
+            if k in allowed and k not in ("tag", "added"):
+                refs.loc[keep_idx, k] = v
+        if "added" in refs.columns:
+            dates = pd.to_datetime(refs.loc[refs.tag.isin([keep, absorb]), "added"], utc=True).dropna()
+            if not dates.empty:
+                refs.loc[keep_idx, "added"] = dates.min().tz_convert(self.config.timezone)
+        self._ref_df = refs[refs.tag != absorb]
+
+        links = self._ranked_ref_doc()
+        keep_links = links[links.tag == keep].sort_values("priority")
+        absorb_links = links[links.tag == absorb].sort_values("priority")
+        have = set(zip(keep_links.hash, keep_links.version))
+        moved = absorb_links[[(h, v) not in have for h, v in zip(absorb_links.hash, absorb_links.version)]].copy()
+        moved["tag"] = keep
+        moved["priority"] = range(len(keep_links), len(keep_links) + len(moved))
+        rest = links[~links.tag.isin([keep, absorb])]
+        self._ref_doc_df = assign_ref_doc_priority(
+            pd.concat([rest, keep_links, moved], ignore_index=True)
+        )
+
+        self.save()
+        return audit
 
     def update_reference(self, old_tag: str, new_data: dict):
         """Update or add a reference. Handles tag changes."""

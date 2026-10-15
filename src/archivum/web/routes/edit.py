@@ -1,3 +1,5 @@
+from flask import make_response
+
 from .shared import *
 from ...bibtex import dict_to_bibtex
 from ...import_bibtex import Bib2df_Incremental
@@ -113,6 +115,131 @@ def edit_documents_link(tag):
             raise ValueError(f"{file_hash[:8].upper()} is already linked to {tag}.")
         return f"Linked {file_hash[:8].upper()} as an alternate."
     return _document_action(tag, link)
+
+
+# ------------------------------------------------------------- delete and merge
+
+def _ref_or_404(lib, tag):
+    """The reference row for ``tag``, or None."""
+    rows = lib.ref_df[lib.ref_df.tag == tag]
+    return None if rows.empty else rows.iloc[0]
+
+
+def _sidebar_removal(tag):
+    """Script that drops ``tag`` from the Edit sidebar once it is gone."""
+    return render_template('components/sidebar_remove.html', tag=tag)
+
+
+@bp.route('/edit-tag/<tag>/delete', methods=['GET', 'POST'])
+@admin_required
+def edit_delete(tag):
+    """GET: the confirm panel. POST: delete, with an audit copy."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        abort(404)
+    ref = _ref_or_404(lib, tag)
+    if ref is None:
+        return f"Reference '{tag}' not found.", 404
+    if request.method == 'GET':
+        return render_template(
+            'components/edit_delete.html',
+            tag=tag,
+            title=clean_latex(str(ref.get("title", "") or "")),
+            n_docs=len(lib.linked_documents(tag)),
+            audit_dir=lib.config_path / "edit-audit",
+            bibtex_file=lib.config.bibtex_file,
+        )
+    audit = lib.remove_reference(tag)
+    return (
+        render_template('components/edit_deleted.html', tag=tag, audit=audit)
+        + _sidebar_removal(tag)
+    )
+
+
+def _render_merge_preview(lib, keep, absorb, message=""):
+    """Proposed merged entry, conflicts, document plan, and the two actions."""
+    from ...bibtex import propose_merge
+
+    absorb = (absorb or "").strip()
+    keep_ref, absorb_ref = _ref_or_404(lib, keep), _ref_or_404(lib, absorb)
+    error = ""
+    if not absorb:
+        error = "Choose the reference to merge in."
+    elif absorb == keep:
+        error = "A reference cannot be merged into itself."
+    elif keep_ref is None or absorb_ref is None:
+        error = f"Reference '{keep if keep_ref is None else absorb}' not found."
+    if error:
+        return render_template('components/alert.html', level='warning', message=error)
+
+    merged, conflicts = propose_merge(keep_ref, absorb_ref)
+    keep_docs, absorb_docs = lib.linked_documents(keep), lib.linked_documents(absorb)
+    have = set(zip(keep_docs.hash, keep_docs.version))
+    plan = [
+        {"tag": keep, "hash": h, "name": n, "outcome": "stays primary" if p == 0 else "stays"}
+        for h, n, p in zip(keep_docs.hash, keep_docs.name, keep_docs.priority)
+    ] + [
+        {"tag": absorb, "hash": h, "name": n,
+         "outcome": f"already on {keep}, dropped" if (h, v) in have else f"moves to {keep}"}
+        for h, v, n in zip(absorb_docs.hash, absorb_docs.version, absorb_docs.name)
+    ]
+    return render_template(
+        'components/edit_merge_preview.html',
+        keep=keep,
+        absorb=absorb,
+        merged_bibtex=dict_to_bibtex(merged),
+        conflicts=[{**c, "keep": clean_latex(str(c["keep"])), "absorb": clean_latex(str(c["absorb"]))}
+                   for c in conflicts],
+        plan=plan,
+        bibtex_file=lib.config.bibtex_file,
+        message=message,
+    )
+
+
+@bp.route('/edit-tag/<keep>/merge', methods=['GET', 'POST'])
+@admin_required
+def edit_merge(keep):
+    """GET: choose the reference to merge in. POST: merge it, with an audit copy."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        abort(404)
+    if _ref_or_404(lib, keep) is None:
+        return f"Reference '{keep}' not found.", 404
+    if request.method == 'GET':
+        return render_template('components/edit_merge.html', keep=keep)
+
+    absorb = request.form.get('absorb', '').strip()
+    merged_fields = Bib2df_Incremental.parse_line(request.form.get('merged_bibtex', '').strip())
+    if not merged_fields:
+        return _render_merge_preview(lib, keep, absorb, message="Could not parse the merged BibTeX.")
+    try:
+        audit = lib.merge_references(keep, absorb, merged_fields)
+    except ValueError as e:
+        return _render_merge_preview(lib, keep, absorb, message=str(e))
+
+    # success replaces the whole editor with the survivor's form
+    form = _render_edit_form(lib, keep)
+    html = (
+        render_template('components/alert.html', level='success',
+                        message=f"Merged {absorb} into {keep}. Audit copy: {audit}")
+        + (form if isinstance(form, str) else form[0])
+        + _sidebar_removal(absorb)
+    )
+    response = make_response(html)
+    response.headers["HX-Retarget"] = "#editor-container"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
+
+
+@bp.route('/edit-tag/<keep>/merge/preview')
+@admin_required
+def edit_merge_preview(keep):
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        abort(404)
+    # absorb from the Swap link, q from the tag input (shared with /tag-suggest)
+    absorb = request.args.get('absorb') or request.args.get('q', '')
+    return _render_merge_preview(lib, keep, absorb)
 
 
 @bp.route('/edit-tag/<tag>/documents/hash-suggest')

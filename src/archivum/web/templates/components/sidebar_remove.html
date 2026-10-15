@@ -1,0 +1,6 @@
+<script>
+    // the reference is gone: drop it from the Edit sidebar
+    document.querySelectorAll('.tag-item').forEach(el => {
+        if (el.dataset.tag === {{ tag|lower|tojson }}) el.remove();
+    });
+</script>

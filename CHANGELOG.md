@@ -5,6 +5,22 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.12.0 (2026-10-15)
+
+### Added
+
+- Edit: **Delete** a reference, behind a confirm panel. Documents, doc rows,
+  and read history stay; an audit copy goes to the library's `edit-audit/`.
+- Edit: **Merge** a duplicate reference into the one being edited: editable
+  merged entry, conflicts table, document plan, Swap roles. One save; the
+  earlier date added survives; both originals go to `edit-audit/`.
+- Both panels warn that the removed tag stops resolving in manuscripts.
+
+### Changed
+
+- `delete-tag` (CLI) also writes the audit copy, and an unknown tag is now an
+  error instead of a warning followed by a save.
+
 ## 2.11.0 (2026-10-15)
 
 ### Added

@@ -617,3 +617,14 @@ Review-time divergences:
 - Found by the screenshot, fixed here: `Library.all_tags` was built from `ref-doc.feather`, so the 168 references without a document were missing from the Edit sidebar, `/tag-suggest`, and the CLI's tag completers. It now comes from `ref_df` (7,363 tags, matching the reference count). The test fixture `sample_tag` (`all_tags[0]`) may now be a reference-only tag; the tests that use it pass either way.
 - Visual check on a temp library with synthetic documents (Playwright screenshot), not the production one.
 - The new route tests' `create_app()` started the once-per-process semantic warmup earlier than before, and its background model load raced `test_semantic_model_cache` (`len(calls) == 1` saw 2). The `tmp_library` app fixture now stubs both warmups; the full suite passed twice afterwards.
+
+[edit-delete-merge] 2.12.0:
+
+- `remove_reference` now raises `ValueError` for an unknown tag (it used to log a warning and save anyway) and returns the audit path; the CLI prints it.
+- The audit writer is one helper, `Library._write_edit_audit(name, tags)`, shared by delete and merge.
+- Merge field semantics match Edit's Save: the merged entry's fields overwrite KEEP's (restricted to `ref_columns` plus the structural columns); a field deleted from the textarea is not cleared on KEEP, just as Save does not clear one.
+- `propose_merge` also leaves out `added`, `arc-*`, `mendeley-*`, and `merge_count`, which the library owns. `type` is merged like any field, so differing types show as a conflict.
+- The merge tag picker reuses the orphaned `components/tag_suggestions.html` and `/tag-suggest` unchanged, by giving the input and button the ids it expects (`#tag-search`, `#tag-suggestions`, `#load-tag-btn`).
+- A successful merge answers with `HX-Retarget: #editor-container` (the survivor's form plus a success line); a refused one re-renders the preview with the reason. Delete and merge drop the removed tag from the sidebar with a small swapped-in script.
+- Citation warning text names `bibtex.bib` and the configured `bibtex_file`, not a hard-coded `D:\projects`.
+- Screenshots of both panels on a temp library look right.

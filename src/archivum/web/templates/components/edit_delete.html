@@ -1,0 +1,18 @@
+<div class="p-3 border-top">
+    <h6 class="fw-bold text-danger mb-2">Delete {{ tag }}?</h6>
+    {% if title %}<div class="small mb-2"><em>{{ title }}</em></div>{% endif %}
+    <ul class="small mb-3">
+        <li>The reference and its {{ n_docs }} document link{{ '' if n_docs == 1 else 's' }} are removed, and <code>bibtex.bib</code> is rebuilt.</li>
+        <li>The documents themselves, their document rows, and read history stay.</li>
+        <li>An audit copy (the BibTeX, its date added, and its links) is written to <code>{{ audit_dir }}</code>, so it can be re-imported and re-linked.</li>
+    </ul>
+    {% set cited_tag = tag %}{% include "components/citation_warning.html" %}
+    <div class="d-flex gap-2 mt-3">
+        <button type="button" class="btn btn-sm btn-danger fw-bold"
+                hx-post="{{ url_for('main.edit_delete', tag=tag) }}" hx-target="#editor-container">
+            Delete {{ tag }} permanently
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="document.getElementById('edit-actions-panel').innerHTML = ''">Keep it</button>
+    </div>
+</div>

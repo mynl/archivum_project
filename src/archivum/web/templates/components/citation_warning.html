@@ -1,0 +1,4 @@
+<div class="alert alert-warning small mb-0">
+    <strong>Citations.</strong> <code>@{{ cited_tag }}</code> leaves <code>bibtex.bib</code>{% if bibtex_file %} and its linked copy <code>{{ bibtex_file }}</code>{% endif %},
+    so any manuscript that cites it stops resolving. There is no alias to fall back on: biblatex's <code>ids</code> field is not honored by pandoc citeproc.
+</div>

@@ -1,0 +1,19 @@
+<div class="p-3 border-top">
+    <h6 class="fw-bold mb-2">Merge another reference into {{ keep }}</h6>
+    <p class="small text-muted mb-2">For two records of one work. {{ keep }} survives; the other is removed after its documents move across.</p>
+    <div class="d-flex gap-2 align-items-start">
+        <div class="flex-grow-1">
+            {# ids shared with components/tag_suggestions.html, which fills #tag-search and clicks #load-tag-btn #}
+            <input type="text" id="tag-search" name="q" class="form-control form-control-sm font-monospace"
+                   placeholder="Tag to merge in" autocomplete="off"
+                   hx-get="{{ url_for('main.tag_suggest') }}" hx-trigger="keyup changed delay:300ms"
+                   hx-target="#tag-suggestions">
+            <div id="tag-suggestions" class="list-group small mt-1"></div>
+        </div>
+        <button type="button" id="load-tag-btn" class="btn btn-sm btn-outline-primary text-nowrap"
+                hx-get="{{ url_for('main.edit_merge_preview', keep=keep) }}" hx-include="#tag-search"
+                hx-target="#edit-actions-panel">Preview merge</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary"
+                onclick="document.getElementById('edit-actions-panel').innerHTML = ''">Cancel</button>
+    </div>
+</div>
