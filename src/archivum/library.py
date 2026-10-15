@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 import shutil
 import subprocess
+import tempfile
 from typing import Union, List, Dict, Optional
 
 import numpy as np
@@ -1710,7 +1711,7 @@ class Library(LibraryBase):
     def import_staged_document(
         self,
         bibtex_text: str,
-        staged_document_path: Union[str, Path],
+        staged_document_path: Union[str, Path, None] = None,
         *,
         known_hash: str | None = None,
         source_label: str = "web-ingest",
@@ -1722,17 +1723,36 @@ class Library(LibraryBase):
         The edited BibTeX is the metadata source. This helper only injects the
         staged document as a Mendeley-style ``file`` field so Bib2df_Incremental
         can perform its normal author, tag, duplicate, sharding, and audit work.
+
+        ``staged_document_path=None`` adds a reference with no document: no
+        ``file`` field, and the importer runs with no document directory. Tag
+        allocation, name normalization, and duplicate checks are unchanged.
         """
+        if staged_document_path is None:
+            with tempfile.TemporaryDirectory(prefix="archivum-ref-") as review_dir:
+                return self._import_staged(bibtex_text, None, Path(review_dir), known_hash,
+                                           source_label, extract_text)
+        return self._import_staged(bibtex_text, staged_document_path, None, known_hash,
+                                   source_label, extract_text)
+
+    def _import_staged(self, bibtex_text, staged_document_path, review_dir, known_hash,
+                       source_label, extract_text):
+        """Body of :meth:`import_staged_document`, inside any temporary review dir."""
         importer = self._make_staged_document_importer(
             bibtex_text,
             staged_document_path,
             known_hash=known_hash,
             source_label=source_label,
             write_audit=False,
+            review_dir=review_dir,
         )
 
         analysis = importer.import_analysis()
-        self._raise_for_blocked_import(analysis, fallback_tag=self._first_bibtex_tag(bibtex_text))
+        self._raise_for_blocked_import(
+            analysis,
+            fallback_tag=self._first_bibtex_tag(bibtex_text),
+            reference_only=staged_document_path is None,
+        )
 
         if importer.ported_df.empty:
             raise LibraryImportBlocked("Import did not produce any new entries.")
@@ -1928,23 +1948,39 @@ class Library(LibraryBase):
     def preview_staged_document_import(
         self,
         bibtex_text: str,
-        staged_document_path: Union[str, Path],
+        staged_document_path: Union[str, Path, None] = None,
         *,
         known_hash: str | None = None,
         source_label: str = "web-ingest-preview",
     ) -> dict:
-        """Return the BibTeX and analysis that the real staged import would produce."""
+        """
+        Return the BibTeX and analysis that the real staged import would produce.
+
+        ``staged_document_path=None`` previews a reference with no document.
+        """
+        if staged_document_path is None:
+            with tempfile.TemporaryDirectory(prefix="archivum-ref-") as review_dir:
+                return self._preview_staged(bibtex_text, None, Path(review_dir),
+                                            known_hash, source_label)
+        return self._preview_staged(bibtex_text, staged_document_path, None,
+                                    known_hash, source_label)
+
+    def _preview_staged(self, bibtex_text, staged_document_path, review_dir, known_hash,
+                        source_label) -> dict:
+        """Body of :meth:`preview_staged_document_import`."""
         importer = self._make_staged_document_importer(
             bibtex_text,
             staged_document_path,
             known_hash=known_hash,
             source_label=source_label,
             write_audit=False,
+            review_dir=review_dir,
         )
         analysis = importer.import_analysis()
         conflict = self.import_conflict(
             analysis,
             fallback_tag=self._first_bibtex_tag(bibtex_text),
+            reference_only=staged_document_path is None,
         )
 
         if importer.ref_df.empty:
@@ -1976,18 +2012,24 @@ class Library(LibraryBase):
     def _make_staged_document_importer(
         self,
         bibtex_text: str,
-        staged_document_path: Union[str, Path],
+        staged_document_path: Union[str, Path, None],
         *,
         known_hash: str | None,
         source_label: str,
         write_audit: bool,
+        review_dir: Path | None = None,
     ):
+        """
+        Run ``Bib2df_Incremental`` on one edited entry, with or without a document.
+
+        With a staged document the review bib sits beside it and the document
+        is injected as the ``file`` field. Without one (``staged_document_path``
+        None) the review bib goes in ``review_dir``, any ``file`` field is
+        dropped, and the importer gets no document directory, which is its
+        no-documents path.
+        """
         from .bibtex import bibtex_to_dict
         from .import_bibtex import Bib2df_Incremental
-
-        staged_document_path = Path(staged_document_path)
-        if not staged_document_path.exists() or not staged_document_path.is_file():
-            raise FileNotFoundError(f"Staged document not found: {staged_document_path}")
 
         entries = bibtex_to_dict(bibtex_text)
         if len(entries) != 1:
@@ -1996,6 +2038,28 @@ class Library(LibraryBase):
         tag, data = next(iter(entries.items()))
         data = data.copy()
         data["tag"] = tag
+
+        if staged_document_path is None:
+            if review_dir is None:
+                raise ValueError("A reference-only import needs a review directory.")
+            data.pop("file", None)
+            review_bib = Path(review_dir) / f"{source_label}.bib"
+            review_bib.write_text(dict_to_bibtex(data), encoding="utf-8")
+            importer = Bib2df_Incremental(
+                bibtex_file_path=review_bib,
+                doc_dir=None,
+                reference_library=self,
+                add_hashes=True,
+                incremental=True,
+                fillna=True,
+                write_audit=write_audit,
+            )
+            importer.import_bibtex_file()
+            return importer
+
+        staged_document_path = Path(staged_document_path)
+        if not staged_document_path.exists() or not staged_document_path.is_file():
+            raise FileNotFoundError(f"Staged document not found: {staged_document_path}")
         staged_abs = staged_document_path.resolve()
         suffix = staged_abs.suffix.lstrip(".") or "pdf"
         data["file"] = f":{staged_abs.as_posix()}:{suffix}"
@@ -2038,17 +2102,23 @@ class Library(LibraryBase):
             importer._doc_df.loc[doc_match, "hash"] = known_hash
 
     @classmethod
-    def _raise_for_blocked_import(cls, analysis: pd.DataFrame, fallback_tag: str):
-        blocked_message = cls._blocked_import_message(analysis, fallback_tag=fallback_tag)
+    def _raise_for_blocked_import(cls, analysis: pd.DataFrame, fallback_tag: str,
+                                  reference_only: bool = False):
+        blocked_message = cls._blocked_import_message(analysis, fallback_tag=fallback_tag,
+                                                      reference_only=reference_only)
         if blocked_message:
             raise LibraryImportBlocked(blocked_message)
 
     # actions that stop a staged import; "Merge/Warn" is resolvable by replacing
     # the document on the matched reference, "SKIP (Dupe)" is not
     BLOCKING_ACTIONS = ("SKIP (Dupe)", "Merge/Warn")
+    # with no document there is nothing to fill: a DOI or title match with a
+    # document-less reference is simply a duplicate reference
+    REFERENCE_ONLY_BLOCKING_ACTIONS = BLOCKING_ACTIONS + ("Import (Fill)",)
 
     @classmethod
-    def import_conflict(cls, analysis: pd.DataFrame, *, fallback_tag: str = "") -> dict | None:
+    def import_conflict(cls, analysis: pd.DataFrame, *, fallback_tag: str = "",
+                        reference_only: bool = False) -> dict | None:
         """
         Describe the first blocking row of an import analysis, or None if clean.
 
@@ -2056,10 +2126,14 @@ class Library(LibraryBase):
         ``resolvable`` marks a Merge/Warn -- the new file is a different
         document that matches an existing reference by DOI or title, so the
         user can choose to replace that reference's document.
+
+        ``reference_only`` (an import with no document) blocks on any DOI or
+        title match, and nothing is resolvable: there is no file to swap in.
         """
         if analysis.empty or "action" not in analysis.columns:
             return None
-        blocked = analysis[analysis["action"].isin(cls.BLOCKING_ACTIONS)]
+        blocking = cls.REFERENCE_ONLY_BLOCKING_ACTIONS if reference_only else cls.BLOCKING_ACTIONS
+        blocked = analysis[analysis["action"].isin(blocking)]
         if blocked.empty:
             return None
 
@@ -2078,13 +2152,15 @@ class Library(LibraryBase):
             "tag": tag,
             "match_tag": match_tag,
             "title": title,
-            "resolvable": action == "Merge/Warn" and bool(match_tag),
+            "resolvable": action == "Merge/Warn" and bool(match_tag) and not reference_only,
             "message": "; ".join(parts),
         }
 
     @classmethod
-    def _blocked_import_message(cls, analysis: pd.DataFrame, *, fallback_tag: str) -> str | None:
-        conflict = cls.import_conflict(analysis, fallback_tag=fallback_tag)
+    def _blocked_import_message(cls, analysis: pd.DataFrame, *, fallback_tag: str,
+                                reference_only: bool = False) -> str | None:
+        conflict = cls.import_conflict(analysis, fallback_tag=fallback_tag,
+                                       reference_only=reference_only)
         return conflict["message"] if conflict else None
         return None
 

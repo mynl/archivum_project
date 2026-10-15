@@ -407,3 +407,59 @@ def test_ingest_replace_calls_library_and_advances(tmp_path, monkeypatch):
     assert tag == "Old2020"
     assert kwargs["known_hash"] == "newhash"
     assert kwargs["update_bibtex"] == "@article{x}"
+
+
+# ------------------------------------------------------------- reference only
+
+REF_BIB = "@article{Smith2024,\n  author = {Smith, John},\n  title = {No File},\n  year = {2024},\n}"
+
+
+def test_reference_only_workbench_previews_without_a_document(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+    lib = _FakePreviewLibrary()
+    client = _batch_app(monkeypatch, lib).test_client()
+
+    html = client.post("/ingest/reference", data={"bibtex": REF_BIB}).get_data(as_text=True)
+
+    assert "Reference only" in html
+    assert "GO: Add Reference" in html
+    assert lib.calls["preview_path"] is None
+    # nothing staged: no batch, no file pane
+    assert not (tmp_path / "staging").exists()
+    assert "view-temp" not in html
+
+
+def test_reference_only_commit_adds_reference_with_no_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+
+    class FakeLibrary(_FakePreviewLibrary):
+        def import_staged_document(self, bibtex, staged_document_path=None, **kwargs):
+            self.calls["commit_path"] = staged_document_path
+            self.calls["commit_kwargs"] = kwargs
+            return SimpleNamespace(ref_df=pd.DataFrame([{"tag": "Smith2024"}]))
+
+    lib = FakeLibrary()
+    client = _batch_app(monkeypatch, lib).test_client()
+
+    html = client.post("/ingest/reference/commit", data={"bibtex": REF_BIB}).get_data(as_text=True)
+
+    assert lib.calls["commit_path"] is None
+    assert "added as a reference with no document" in html
+    assert "/edit?tag=Smith2024" in html
+    assert "Zone A: The Documents" in html
+
+
+def test_reference_only_commit_blocked_keeps_the_workbench(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+
+    class FakeLibrary(_FakePreviewLibrary):
+        def import_staged_document(self, *args, **kwargs):
+            raise LibraryImportBlocked("Import blocked: Import (Fill); tag Smith2024")
+
+    client = _batch_app(monkeypatch, FakeLibrary()).test_client()
+
+    html = client.post("/ingest/reference/commit", data={"bibtex": REF_BIB}).get_data(as_text=True)
+
+    assert "alert-danger" in html and "Import (Fill)" in html
+    assert "GO: Add Reference" in html
+    assert "title = {No File}" in html

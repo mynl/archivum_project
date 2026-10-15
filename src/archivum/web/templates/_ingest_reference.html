@@ -1,0 +1,68 @@
+<div class="workbench-header d-flex justify-content-between align-items-center mb-3 bg-white p-3 rounded-3 shadow-sm">
+    <div class="flex-grow-1 me-4">
+        <h4 class="fw-bold mb-0">
+            Ingest Workbench
+            <span class="text-muted fw-normal fs-6 ms-2">Reference only</span>
+        </h4>
+        <div class="text-muted small mt-1">
+            <span class="badge bg-light text-dark border me-2">No document</span>
+        </div>
+    </div>
+    <div class="d-flex gap-2 flex-shrink-0">
+        <form hx-post="{{ url_for('main.ingest_cancel') }}" hx-target="#ingest-workbench">
+            <button type="submit" class="btn btn-outline-secondary fw-bold">Cancel</button>
+        </form>
+        <form hx-post="{{ url_for('main.ingest_reference_commit') }}"
+              hx-target="#ingest-workbench"
+              hx-include="#workbench-bibtex"
+              hx-indicator="#commit-indicator">
+            <button type="submit" class="btn btn-primary px-4 fw-bold">
+                <span id="commit-indicator" class="htmx-indicator spinner-border spinner-border-sm me-2"></span>
+                GO: Add Reference
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4" style="height: calc(100vh - 280px);">
+    <!-- Left Pane: no document -->
+    <div class="col-md-6 h-100">
+        <div class="card h-100 shadow-sm border-0">
+            <div class="card-body d-flex flex-column align-items-center justify-content-center text-muted p-4 text-center">
+                <i class="bi bi-journal-text display-4 mb-3"></i>
+                <div class="fw-bold">Reference only</div>
+                <div class="small mt-2" style="max-width: 360px;">
+                    The reference is added with no document. Attach one later from its Edit page,
+                    or ingest the file and let the import match it.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Pane: BibTeX Editor & Preview -->
+    <div class="col-md-6 h-100 d-flex flex-column">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
+                <span class="text-muted small fw-bold text-uppercase">BibTeX Editor</span>
+                <form hx-post="{{ url_for('main.ingest_reference_preview') }}"
+                      hx-target="#import-preview"
+                      hx-include="#workbench-bibtex"
+                      hx-indicator="#preview-indicator">
+                    <button class="btn btn-sm btn-outline-primary fw-bold" type="submit">
+                        <span id="preview-indicator" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+                        <i class="bi bi-eye me-1"></i> Refresh Import Preview
+                    </button>
+                </form>
+            </div>
+            <div class="card-body p-0">
+                <textarea id="workbench-bibtex" name="bibtex" class="form-control font-monospace p-3 border-0" rows="12"
+                          placeholder="@article{Tag2024,&#10;  author = {Last, First},&#10;  title = {...},&#10;  year = {2024},&#10;}"
+                          style="resize: none; font-size: 0.9rem;">{{ bibtex }}</textarea>
+            </div>
+        </div>
+
+        <div id="import-preview" class="mt-3">
+            {{ preview_html|safe }}
+        </div>
+    </div>
+</div>

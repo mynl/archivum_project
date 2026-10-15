@@ -5,6 +5,20 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.10.0 (2026-10-15)
+
+### Added
+
+- Ingest: **Add reference only (no document)** in Zone B opens a workbench
+  with no document. Preview and commit go through the real importer; any DOI
+  or title duplicate blocks, with a link to the existing reference.
+
+### Fixed
+
+- The BibTeX importer accepted no file whose entries all lack a `file` field
+  (also the CLI's `import-bibtex`); such entries now import as references with
+  no document.
+
 ## 2.9.0 (2026-10-15)
 
 ### Added

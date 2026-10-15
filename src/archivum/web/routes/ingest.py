@@ -152,6 +152,7 @@ def _render_ingest_preview(lib, bibtex, temp_path, known_hash, batch_id, idx):
         preview_blocked=preview["blocked"],
         preview_message=preview["blocked_message"],
         conflict=preview.get("conflict"),
+        reference_only=temp_path is None,
         batch_id=batch_id,
         idx=idx,
         known_hash=known_hash or "",
@@ -372,6 +373,65 @@ def ingest_replace():
     return _advance(lib, batch_id, int(idx)) + banner
 
 
+# ---------------------------------------------------------------- reference only
+
+def _render_reference_workbench(lib, bibtex):
+    """The workbench with no document: BibTeX, preview, and commit only."""
+    preview_html = _render_ingest_preview(lib, bibtex, None, None, "", 0) if bibtex.strip() else ""
+    return render_template(
+        '_ingest_reference.html',
+        bibtex=bibtex,
+        preview_html=preview_html,
+    )
+
+
+@bp.route('/ingest/reference', methods=['POST'])
+@admin_required
+def ingest_reference():
+    """Open the workbench to add a reference with no document."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        abort(400, "No library open")
+    bibtex = request.form.get('bibtex', '')
+    if bibtex.strip():
+        bibtex = _normalize_pasted_bibtex(bibtex)
+    return _render_reference_workbench(lib, bibtex)
+
+
+@bp.route('/ingest/reference/preview', methods=['POST'])
+@admin_required
+def ingest_reference_preview():
+    lib = LibraryContext.get()
+    return _render_ingest_preview(lib, request.form.get('bibtex', ''), None, None, "", 0)
+
+
+@bp.route('/ingest/reference/commit', methods=['POST'])
+@admin_required
+def ingest_reference_commit():
+    """Add the reference through the real importer, with no document."""
+    from ...library import LibraryImportBlocked
+
+    lib = LibraryContext.get()
+    bibtex = request.form.get('bibtex', '')
+    try:
+        importer = lib.import_staged_document(bibtex, None, source_label="web-ingest-reference")
+        tag = str(importer.ref_df.iloc[0].tag)
+    except LibraryImportBlocked as e:
+        return _render_reference_workbench(lib, bibtex) + _banner('danger', message=str(e))
+    except Exception as e:
+        logger.error(f"Reference commit error: {e}")
+        return _render_reference_workbench(lib, bibtex) + _banner('danger', message=f"Error: {e}")
+
+    banner = _banner(
+        'success',
+        html_message=(
+            f'<strong>{html.escape(tag)}</strong> added as a reference with no document '
+            f'<a href="{url_for("main.editor_page", tag=tag)}">Edit</a>'
+        ),
+    )
+    return render_template('_ingest_start.html', lib=lib, summary=None) + banner
+
+
 @bp.route('/ingest/next', methods=['POST'])
 @admin_required
 def ingest_next():
@@ -405,9 +465,10 @@ def ingest_cancel():
         c = None
 
     discard_batch(batch_id)
+    # no batch: the reference-only workbench, which stages nothing
     message = (
         f"Batch cancelled with {c['pending']} of {c['total']} documents unprocessed."
-        if c else "Batch cancelled."
+        if c else "Cancelled."
     )
     return render_template('_ingest_start.html', lib=lib, summary=None) + _banner(
         'info', message=message

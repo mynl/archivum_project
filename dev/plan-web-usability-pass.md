@@ -597,3 +597,13 @@ Review-time divergences:
 - `last_read` in `read.feather` is tz-naive local time (`record_read` uses `pd.Timestamp.now()`); `_read_rank` measures days from a naive epoch, and converts to naive first should a tz-aware value ever appear.
 - The Mine button sits in a `span` carrying the tooltip, because a disabled button shows no tooltip.
 - Manual check (GET, counts only): Mine returns 53 lines, years descending; 249 references have reads and all carry a `read_rank`.
+
+[ref-only] 2.10.0:
+
+- CLI-path check run through the real importer on a temp library (see the review note). It failed exactly as the plan foresaw, and the fixes were small, all in `import_bibtex.py`: `vfile_df` treats a missing `file` column as empty and skips empty file references like `::`; `raw_no_file` guards the same column; and the typed empty `doc_df` (no document directory) gained the `version` column that `ref_doc_df` joins on.
+- `doc_dir=None`, not "a temporary directory holding only the `.bib`": an existing but empty document directory crashes `doc_df` (it builds `create` on a column-less frame). `None` is the importer's own no-documents branch. The review bib lives in a `TemporaryDirectory` held open for the whole preview or import.
+- The existing pair takes `staged_document_path=None` (option one of the plan); no new public methods.
+- Blocking: under the existing rules a DOI or title match with a document-less reference is "Import (Fill)", which does not block, so a duplicate reference would have been created. Reference-only imports block on it too (`REFERENCE_ONLY_BLOCKING_ACTIONS`) and never mark a conflict resolvable, matching the plan's "a DOI or title duplicate blocks, with a link to the existing tag".
+- Web: three routes (`/ingest/reference`, `/preview`, `/commit`) and `_ingest_reference.html`; no batch is created. Cancel reuses `/ingest/cancel`, whose no-batch message now reads "Cancelled." rather than "Batch cancelled.". A blocked commit re-renders the workbench with the BibTeX kept.
+- Titles: the review bib goes through `dict_to_bibtex`, which braces titles, exactly as the document path already does (6,876 of 7,363 production titles are braced).
+- Screenshots of the start page and the reference workbench with a synthetic entry (preview only, nothing committed) look right. Adding a real one is left for the user's tire-kicking.

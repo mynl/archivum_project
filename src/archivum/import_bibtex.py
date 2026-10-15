@@ -346,6 +346,9 @@ class Bib2df_Incremental(LibraryBase):
                     "size": "int64",
                     "suffix": "object",
                     "hash": "object",
+                    # ref_doc_df joins on (hash, version) even when there are
+                    # no documents (a reference-only import)
+                    "version": "int64",
                 }
                 # Create an empty DataFrame using the defined dtypes
                 self._doc_df = pd.DataFrame(columns=column_dtypes.keys()).astype(
@@ -479,16 +482,19 @@ class Bib2df_Incremental(LibraryBase):
             ans = []
             self._file_errs = []
             df = self.ported_df.set_index("tag")
-            for tag, value in df.file.str.split(";").fillna("").items():
+            # a BibTeX file whose entries all lack a file field has no column:
+            # a reference added without a document
+            files = df["file"] if "file" in df.columns else pd.Series("", index=df.index, dtype=object)
+            for tag, value in files.str.split(";").fillna("").items():
                 # the items are: tag=0,1,... and value a list of strings
                 # of the form :drive\\:file:file_type
                 # on splitting at ":" these have four parts:
                 # before drive (empty), drive, path, file_type
                 try:
                     for ref in value:
-                        # some empty refs come through as [::]
-                        # these should be ignored - they are not afiles
-                        if ref == "::":
+                        # some empty refs come through as [::], and an absent
+                        # file field as ""; neither names an afile
+                        if ref in ("", "::"):
                             continue
                         x = ref.split(":")
                         if len(x) == 4:
@@ -745,6 +751,8 @@ class Bib2df_Incremental(LibraryBase):
 
     def raw_no_file(self):
         """Raw entries with no files listed."""
+        if "file" not in self.raw_df.columns:
+            return self.raw_df[self._base_cols]
         return self.raw_df.loc[self.raw_df.file == "", self._base_cols]
 
     @staticmethod

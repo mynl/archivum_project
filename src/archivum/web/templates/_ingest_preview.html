@@ -50,7 +50,12 @@
         {% elif preview_blocked %}
             <div class="alert alert-danger m-3 mb-0" role="alert">
                 {{ preview_message }}
-                {% if conflict and conflict.match_tag %}
+                {% if reference_only and conflict and conflict.match_tag %}
+                    <div class="mt-2 small">
+                        A reference with this DOI or title is already in the library:
+                        <a href="{{ url_for('main.editor_page', tag=conflict.match_tag) }}" class="fw-bold">{{ conflict.match_tag }}</a>.
+                    </div>
+                {% elif conflict and conflict.match_tag %}
                     <div class="mt-2 small">
                         Already in the library as
                         <a href="{{ url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>

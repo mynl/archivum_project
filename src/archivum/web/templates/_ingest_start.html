@@ -76,9 +76,17 @@
                     <label class="form-label text-muted small fw-bold text-uppercase">Paste BibTeX (e.g. from Google Scholar)</label>
                     <textarea name="bibtex" id="bibtex-input" class="form-control font-monospace small" rows="12" placeholder="@article{...}"></textarea>
                 </div>
-                <div class="text-muted small mt-auto">
+                <div class="text-muted small">
                     <i class="bi bi-info-circle me-1"></i> If you leave this empty, Archivum will try to extract it from the file in Zone A.
                     Pasted BibTeX applies only when you stage a single document; in a batch you edit each one in turn.
+                </div>
+                <div class="mt-auto pt-3">
+                    <button type="button" class="btn btn-outline-secondary fw-bold w-100"
+                            hx-post="{{ url_for('main.ingest_reference') }}"
+                            hx-include="#bibtex-input"
+                            hx-target="#ingest-workbench">
+                        <i class="bi bi-journal-plus me-1"></i> Add reference only (no document)
+                    </button>
                 </div>
             </div>
         </div>
