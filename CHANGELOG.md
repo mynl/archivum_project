@@ -5,6 +5,21 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.5.2 (2026-10-15)
+
+### Fixed
+
+- Nothing writes into the checkout any more. CSV and BibTeX exports are built in
+  memory and sent as attachments; ingest staging moved to `~/.archivum/staging`;
+  QMD citation extraction uses a system temp directory.
+- The pytest cache is the default `.pytest_cache/`, no longer under `temp/`.
+
+### Changed
+
+- `temp` in the checkout is the user's scratch link, gitignored. The files once
+  committed under `temp/` left the index in the previous commit; history is not
+  rewritten.
+
 ## 2.5.1 (2026-08-29)
 
 ### Fixed

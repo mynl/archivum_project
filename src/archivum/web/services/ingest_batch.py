@@ -5,7 +5,8 @@ Every ingest is a batch of N documents; a single document is just N=1, so the
 one-file and many-file flows share a code path.
 
 State lives on disk, not in a Flask session (the app sets no SECRET_KEY), as
-``temp/staging/<batch_id>/manifest.json``. Each document gets its **own**
+``<app home>/staging/<batch_id>/manifest.json``: derived, disposable state in
+the app home, never in the checkout. Each document gets its **own**
 numbered subdirectory. That is load-bearing, not tidiness:
 ``Library._make_staged_document_importer`` hands ``doc_dir=<staged>.parent`` to
 ``Bib2df_Incremental``, which scans and hashes every file it finds there -- on
@@ -24,9 +25,11 @@ import time
 import uuid
 from pathlib import Path
 
+from ... import BASE_DIR
+
 logger = logging.getLogger(__name__)
 
-STAGING_ROOT = Path("temp/staging")
+STAGING_ROOT = BASE_DIR / "staging"
 
 # pymupdf-openable formats plus djvu, which we stage but cannot preview
 DOC_SUFFIXES = {".pdf", ".djvu", ".epub", ".mobi", ".chm", ".xps", ".fb2"}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-version = "2.5.1"
+version = "2.5.2"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
@@ -108,4 +108,3 @@ markers = [
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s %(levelname)s %(name)s: %(message)s"
-cache_dir = "temp/pytest-cache"

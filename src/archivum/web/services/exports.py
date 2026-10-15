@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
+import io
 import re
 
 from flask import send_file
@@ -11,10 +11,10 @@ from ...bibtex import rows_to_bibtex
 
 
 def export_dataframe_to_csv(export_df: pd.DataFrame, filename: str):
-    """Write a dataframe export to temp and return it as a download."""
-    temp_path = _temp_export_path(filename)
-    export_df.to_csv(temp_path, index=False, encoding="utf-8-sig")
-    return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+    """Return a dataframe export as a CSV download, built in memory."""
+    # utf-8-sig so Excel detects the encoding
+    payload = export_df.to_csv(index=False).encode("utf-8-sig")
+    return _attachment(payload, filename, "text/csv")
 
 
 def export_dataframe_to_bibtex(export_df: pd.DataFrame, lib, *, plus: bool = False):
@@ -30,9 +30,7 @@ def export_dataframe_to_bibtex(export_df: pd.DataFrame, lib, *, plus: bool = Fal
         return "No BibTeX entries found to export.", 400
 
     filename = "arc-bibtex-plus-export.bib" if plus else "arc-bibtex-export.bib"
-    temp_path = _temp_export_path(filename)
-    temp_path.write_text(bibtex + "\n", encoding="utf-8")
-    return send_file(str(temp_path.absolute()), as_attachment=True, download_name=filename)
+    return _attachment((bibtex + "\n").encode("utf-8"), filename, "application/x-bibtex")
 
 
 def query_export_filename(raw_query: str) -> str:
@@ -81,10 +79,19 @@ def _prefer_database_rows(export_df: pd.DataFrame, lib) -> pd.DataFrame:
     return export_df
 
 
-def _temp_export_path(filename: str) -> Path:
-    temp_dir = Path("temp")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    return temp_dir / filename
+def _attachment(payload: bytes, filename: str, mimetype: str):
+    """
+    Send ``payload`` as a download without touching the filesystem.
+
+    Exports used to be written under ``temp/`` relative to the working
+    directory, which put real library data inside the checkout.
+    """
+    return send_file(
+        io.BytesIO(payload),
+        as_attachment=True,
+        download_name=filename,
+        mimetype=mimetype,
+    )
 
 
 def _date_str() -> str:

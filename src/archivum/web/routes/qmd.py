@@ -1,3 +1,5 @@
+import tempfile
+
 from .shared import *
 
 @bp.route('/qmd')
@@ -17,15 +19,15 @@ def qmd_extract():
     if not text:
         return "No text or file provided.", 400
 
-    # Write to a temporary file for QmdParser
-    temp_file = Path("temp/qmd_extract.qmd")
-    temp_file.parent.mkdir(parents=True, exist_ok=True)
-    temp_file.write_text(text, encoding='utf-8')
-
     from ...quarto import QmdParser
     from ...bibtex import dict_to_bibtex
-    
-    parser = QmdParser(temp_file)
+
+    # QmdParser reads from a path; a system temp dir keeps the pasted text out
+    # of the checkout and is removed on exit
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_file = Path(tmp) / "qmd_extract.qmd"
+        temp_file.write_text(text, encoding='utf-8')
+        parser = QmdParser(temp_file)
     # Use a more permissive regex for citations if the default one is too strict
     # The default is: r"(?<!@)@(?!REF)([A-Z][A-Za-z0-9]+)"
     # We'll allow lowercase starting tags too: r"(?<!@)@(?!REF)([A-Za-z0-9]+)"

@@ -25,7 +25,7 @@ sharded document store are the user's actual archive, and the tests run against 
 - **One store, many libraries.** A single `doc_store_lib` backs multiple libraries, so two
   libraries may hold divergent metadata for the same hash. Anything that rewrites canonical
   filenames or hardlinks can make libraries fight over a file. The definitive store is
-  `D:rchivum\ShardedDocLibrary`, reached as `~\.archivum\docs`.
+  `D:\archivum\ShardedDocLibrary`, reached as `~\.archivum\docs`.
 - **Tests hit the production library.** Most call `Library(DEFAULT_LIBRARY)` and skip if none is
   configured (`ARCHIVUM_LIBRARY` overrides). Slow semantic tests can *write* to the production
   `semantic-embeddings.feather` — know this before adding one.
@@ -70,8 +70,8 @@ uv run --extra test python -m playwright install chromium    # one-time, browser
 The runner defaults to `uv run --extra test pytest`; `-Python <path>` selects another
 interpreter, `-PytestArgs "..."` forwards arguments. Slow and browser tests are skipped unless
 explicitly enabled by the plugin in `tests/conftest.py`. Session-scoped `active_library` and
-per-test `app` / `client` / `live_server` fixtures live there too. The pytest cache is
-`temp/pytest-cache/`, not the default.
+per-test `app` / `client` / `live_server` fixtures live there too. The pytest cache is the
+default `.pytest_cache/`, gitignored.
 
 **Use `rg` for content search.** It is a required runtime dependency of this project, not a
 preference — `Select-String` and `findstr` are the wrong tool here.
@@ -190,12 +190,14 @@ committed tag can differ if the library moved in between. Do not reintroduce the
   logic apart from reporting.
 - `docs/` — **Sphinx only** (`api.rst`, `quickstart.rst`, …), built by `doc-test.bat` and
   published to ReadTheDocs (`.readthedocs.yaml`). No planning or design docs here.
-- `dev/` — plan documents, per the house convention: `dev/plan-<version>-<desc>.md`, moved to
+- `dev/` — plan documents, per the house convention: `dev/plan-<desc>.md`, moved to
   `dev/done/` when the user says the work is done. `dev/projects/` holds the numbered cold-start
   briefs for the SQLite migration (`00-dev-rig.md` … `11-mendeley-onramp.md`), written before
   that convention settled; leave them where they are.
 - `scripts/` — PowerShell, chiefly `Test-ArchivumWeb.ps1`.
-- `temp/` — disposable, including the pytest cache.
+- `temp` — the user's scratch link, to a backed-up folder outside the repo; gitignored as
+  `/temp` (no trailing slash). Code never writes there: exports are built in memory, ingest
+  staging lives in the app home (`~\.archivum\staging`), QMD extraction uses the system temp.
 
 Repo-root companions:
 
@@ -235,4 +237,4 @@ Repo-root companions:
   Windows CMD. It clones the repo into `C:\tmp\archivum_project_rtd_build_<ver>` and runs
   Sphinx — `doc-test.bat <python-version> new|refresh`.
 - **Version** is single-sourced in `pyproject.toml` as `project.version`; `archivum.__version__`
-  reads it at runtime via `importlib.metadata`. Currently 2.5.1.
+  reads it at runtime via `importlib.metadata`. Read the current value there, not from here.

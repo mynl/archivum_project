@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 
 from archivum.library import Library, LibraryImportBlocked
+from archivum.web.services import ingest_batch as ib
 
 
 def _fake_library(tmp_path):
@@ -240,7 +241,7 @@ class _FakePreviewLibrary:
 
 
 def test_ingest_start_stages_document_and_renders_workbench(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
     lib = _FakePreviewLibrary()
     app = _batch_app(monkeypatch, lib)
 
@@ -257,7 +258,7 @@ def test_ingest_start_stages_document_and_renders_workbench(tmp_path, monkeypatc
 
 
 def test_ingest_commit_delegates_to_library_helper(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
 
     class FakeLibrary(_FakePreviewLibrary):
         def import_staged_document(self, bibtex, staged_document_path, **kwargs):
@@ -295,7 +296,7 @@ def test_ingest_commit_delegates_to_library_helper(tmp_path, monkeypatch):
 
 
 def test_ingest_commit_renders_duplicate_block_alert(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
 
     class FakeLibrary(_FakePreviewLibrary):
         def import_staged_document(self, *args, **kwargs):
@@ -321,7 +322,7 @@ def test_ingest_commit_renders_duplicate_block_alert(tmp_path, monkeypatch):
 
 
 def test_ingest_preview_route_uses_library_preview(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
     lib = _FakePreviewLibrary()
     app = _batch_app(monkeypatch, lib)
     client = app.test_client()
@@ -348,7 +349,7 @@ def test_ingest_preview_route_uses_library_preview(tmp_path, monkeypatch):
 
 def test_ingest_offers_replace_for_resolvable_duplicate(tmp_path, monkeypatch):
     """Merge/Warn must offer the swap, not dead-end with a red banner."""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
 
     class FakeLibrary(_FakePreviewLibrary):
         def preview_staged_document_import(self, bibtex, path, **kwargs):
@@ -377,7 +378,7 @@ def test_ingest_offers_replace_for_resolvable_duplicate(tmp_path, monkeypatch):
 
 
 def test_ingest_replace_calls_library_and_advances(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
 
     class FakeLibrary(_FakePreviewLibrary):
         def replace_document(self, tag, path, **kwargs):

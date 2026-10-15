@@ -130,6 +130,26 @@ def test_query_bibtex_exports_download(client):
 @pytest.mark.web
 @pytest.mark.route
 @pytest.mark.active_library
+def test_exports_are_built_in_memory(client, tmp_path, monkeypatch):
+    # exports used to land in ./temp, inside the checkout; nothing may touch the cwd
+    monkeypatch.chdir(tmp_path)
+    for url, filename in (
+        ("/search-export-csv", "arc-"),
+        ("/search-export-bibtex", "arc-bibtex-export.bib"),
+    ):
+        with logged_step("export-in-memory", url=url):
+            response = client.get(url, query_string={"q": "q top 5 recent"})
+            assert response.status_code == 200
+            disposition = response.headers["Content-Disposition"]
+            assert disposition.startswith("attachment")
+            assert filename in disposition
+            assert response.get_data()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.web
+@pytest.mark.route
+@pytest.mark.active_library
 def test_authors_screen_selects_author(client, sample_author):
     with logged_step("authors-page"):
         page = assert_ok_html(client.get("/authors"), context="authors page")

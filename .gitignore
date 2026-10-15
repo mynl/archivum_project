@@ -37,7 +37,7 @@ docs/_build
 .coverage
 htmlcov/
 .tox/
-pytest_cache/
+.pytest_cache/
 .cache/
 
 # === VSCode and PyCharm settings ===
@@ -58,14 +58,13 @@ data/
 
 *.sublime-workspace
 *.sublime-project
-temp/dm2.csv
 
 # === Rust ===
 rust/pycomfy/target
 /pending-papers
-/temp/img
 *.ipynb
 /rustfuzz/target
-temp/new-import.ipynb
 /new-papers
+# The user's scratch link (to a backed-up folder outside the repo). No trailing
+# slash: git sees a symlink as a file, and /temp/ would not match it.
 /temp

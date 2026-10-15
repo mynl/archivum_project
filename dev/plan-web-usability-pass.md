@@ -533,3 +533,22 @@ Browser smoke test: the reader loads and `PDFViewerApplication.pdfViewer.scrollM
   $S \leftarrow S\,2^{-\Delta/h} + 1$.
 - Opening documents in Sumatra from the web app (D1).
 - Help as an offcanvas panel (D2).
+
+## Execution log
+
+Executed from 2026-10-15, starting at 2.5.1. One step, one bump, one commit.
+
+Review-time divergences:
+
+- [repo-hygiene] The `git rm -r --cached temp` bullet was already done by the user in 5a73cb6 ("delete old temp files -> d: hacking"); `git ls-files temp` was empty at review.
+- [query-buttons] `Configurator.save` writes every field that differs from, or is missing in, the raw `global-config.yaml` into the library `config.yaml`. A new defaulted field absent from the global file would therefore be frozen into `uber-library/config.yaml` at the first save and shadow later global edits. Both new keys (`read_half_life_days`, `owner_author_pattern`) go into `~/.archivum/global-config.yaml`, not only the latter.
+- [ref-only] The CLI check `archivum import-bibtex x.bib -x` would write a junk entry into the production library. It is run instead through the real importer against a `tmp_path` library in the test suite.
+- [added] The backfill dry run is shown to the user; `-x` waits for the user's word. Later steps rely on the `added = create` fallback in `Library.database` and do not depend on it.
+- Browser tests at baseline: all 15 errored with "playwright install" (the cached Chromium did not match the venv's Playwright); `python -m playwright install chromium` was run once, as `CLAUDE.md` documents.
+
+[repo-hygiene] 2.5.2:
+
+- `CLAUDE.md` Layout also said plans are `dev/plan-<version>-<desc>.md`, contradicting the house rule (no version in the name); corrected to `dev/plan-<desc>.md` while editing those lines.
+- `CLAUDE.md` Deltas carried a copy of the version ("Currently 2.5.1"), which would go stale at every bump of this plan; replaced by a pointer to `pyproject.toml`, the single source.
+- Added `test_exports_are_built_in_memory` (CSV and BibTeX under a `chdir` to an empty `tmp_path`; the directory stays empty). The QMD route was smoke-checked the same way (no test added; the plan asks for none).
+- The ingest tests' stray prefetch-thread warning (`FileNotFoundError` on `temp\staging\...\manifest.json`) disappeared with the `chdir` removal.

@@ -81,7 +81,8 @@ def test_priority_is_not_version():
 
 @pytest.fixture()
 def staging(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    """Isolate the staging root under ``tmp_path``; sources go beside it."""
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
     return tmp_path
 
 
