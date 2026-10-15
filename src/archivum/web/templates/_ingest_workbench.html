@@ -36,6 +36,20 @@
             <button type="submit" class="btn btn-outline-warning fw-bold">Skip</button>
         </form>
         {% endif %}
+        {% if attach_to %}
+        <form hx-post="{{ url_for('main.ingest_replace') }}"
+              hx-target="#ingest-workbench"
+              hx-include="#workbench-bibtex">
+            <input type="hidden" name="batch_id" value="{{ batch_id }}">
+            <input type="hidden" name="idx" value="{{ idx }}">
+            <input type="hidden" name="hash" value="{{ doc_hash }}">
+            <input type="hidden" name="match_tag" value="{{ attach_to }}">
+            <button type="submit" class="btn btn-warning fw-bold"
+                    title="Link this file to {{ attach_to }} as its primary document; any current document is kept as an alternate">
+                Make primary document of {{ attach_to }}
+            </button>
+        </form>
+        {% endif %}
         <form hx-post="{{ url_for('main.ingest_commit') }}"
               hx-target="#ingest-workbench"
               hx-include="#workbench-bibtex"

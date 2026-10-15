@@ -353,6 +353,77 @@ class Library(LibraryBase):
             self.save()
         return True
 
+    def linked_documents(self, tag: str) -> pd.DataFrame:
+        """
+        The documents linked to ``tag``, primary first: the Edit page's panel.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per link: ``priority``, ``hash``, ``version``, ``name``,
+            ``suffix``, ``size``, ``create`` (the file's creation time),
+            ``read_count``, and ``shared_with``, the number of *other*
+            references linked to the same ``(hash, version)``. Unlinking a row
+            whose ``shared_with`` is 0 leaves an orphan document.
+        """
+        columns = ["priority", "hash", "version", "name", "suffix", "size", "create",
+                   "read_count", "shared_with"]
+        links = self._ranked_ref_doc()
+        mine = links.loc[links.tag == tag, ["hash", "version", "priority"]]
+        if mine.empty:
+            return pd.DataFrame(columns=columns)
+
+        doc_cols = [c for c in ["hash", "version", "name", "suffix", "size", "create"]
+                    if c in self.doc_df.columns]
+        out = mine.merge(self.doc_df[doc_cols], on=["hash", "version"], how="left")
+        reads = self.read_df
+        if not reads.empty:
+            out = out.merge(reads[["hash", "read_count"]].drop_duplicates("hash"),
+                            on="hash", how="left")
+        else:
+            out["read_count"] = 0
+        out["read_count"] = pd.to_numeric(out["read_count"], errors="coerce").fillna(0).astype(int)
+
+        others = links[links.tag != tag].groupby(["hash", "version"]).size()
+        out["shared_with"] = [int(others.get((h, v), 0)) for h, v in zip(out.hash, out.version)]
+        out = out.reindex(columns=columns)
+        return out.sort_values("priority", kind="stable").reset_index(drop=True)
+
+    def resolve_hash_prefix(self, prefix: str, min_length: int = 6) -> tuple[str, int]:
+        """
+        The one document whose hash starts with ``prefix``.
+
+        Parameters
+        ----------
+        prefix : str
+            Leading characters of a hash, any case.
+        min_length : int
+            Shortest prefix accepted.
+
+        Returns
+        -------
+        tuple of (str, int)
+            The hash and its lowest version (a hash with several sharded
+            copies is one document; any copy serves a new link).
+
+        Raises
+        ------
+        ValueError
+            Too short, no match, or more than one hash matches.
+        """
+        prefix = (prefix or "").strip().lower()
+        if len(prefix) < min_length:
+            raise ValueError(f"Give at least {min_length} characters of the hash.")
+        docs = self.doc_df
+        hashes = docs["hash"].astype(str)
+        matches = sorted(set(hashes[hashes.str.lower().str.startswith(prefix)]))
+        if not matches:
+            raise ValueError(f"No document hash starts with {prefix}.")
+        if len(matches) > 1:
+            raise ValueError(f"{len(matches)} document hashes start with {prefix}; give more characters.")
+        file_hash = matches[0]
+        return file_hash, int(docs.loc[docs.hash == file_hash, "version"].min())
+
     def primary_doc(self, tag: str):
         """
         The document row that ``tag`` opens: lowest ``priority``, joined to doc_df.
@@ -1251,12 +1322,14 @@ class Library(LibraryBase):
 
     @property
     def all_tags(self):
+        # every reference, including those with no document: built from the
+        # links, it hid reference-only entries from Edit and tag completion
         if self._tag_cache is None:
-            if self.ref_doc_df.empty:
+            if self.ref_df.empty:
                 self._tag_cache = []
             else:
                 self._tag_cache = sorted(
-                    self.ref_doc_df["tag"].dropna().unique().astype(str).tolist()
+                    self.ref_df["tag"].dropna().unique().astype(str).tolist()
                 )
         return self._tag_cache
 

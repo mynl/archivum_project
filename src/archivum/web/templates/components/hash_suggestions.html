@@ -1,0 +1,7 @@
+{% for m in matches %}
+<button type="button" class="list-group-item list-group-item-action py-1 font-monospace"
+        onclick="const box = this.closest('form').querySelector('[name=hash_prefix]'); box.value = {{ m.hash|tojson }}; this.parentElement.innerHTML = '';">
+    {{ m.hash[:12]|upper }} <span class="text-muted ms-2">{{ m.tag }}</span>
+    <span class="text-muted ms-2 text-truncate d-inline-block align-bottom" style="max-width: 280px;">{{ m.name }}</span>
+</button>
+{% endfor %}

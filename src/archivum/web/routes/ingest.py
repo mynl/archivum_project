@@ -12,6 +12,7 @@ from ..services.ingest_batch import (
     load_batch,
     mark,
     next_pending,
+    save_batch,
     position,
     start_prefetch,
 )
@@ -200,6 +201,7 @@ def _render_workbench(lib, state, idx, bibtex_override=None):
         bibtex=bibtex,
         preview_html=preview_html,
         duplicate_tag=duplicate_tag,
+        attach_to=state.get("attach_to", ""),
         viewable=Path(it["filename"]).suffix.lower() in VIEWABLE_SUFFIXES,
     )
 
@@ -232,7 +234,13 @@ def _advance(lib, batch_id, after_idx):
 @admin_required
 def ingest_page():
     lib = LibraryContext.get()
-    return render_template('ingest.html', lib=lib)
+    return render_template('ingest.html', lib=lib, attach_to=_attach_target(lib, request.args.get('attach_to', '')))
+
+
+def _attach_target(lib, tag):
+    """``tag`` if it names a reference (the Edit page's Attach file), else ""."""
+    tag = (tag or "").strip()
+    return tag if tag and not lib.is_empty and tag in lib.ref_df.tag.values else ""
 
 
 @bp.route('/ingest/start', methods=['POST'])
@@ -253,6 +261,12 @@ def ingest_start():
     except Exception as e:
         logger.error(f"Staging error: {e}")
         return f"Error staging documents: {e}", 400
+
+    # from Edit's Attach file: the workbench offers this reference as the target
+    attach_to = _attach_target(lib, request.form.get('attach_to', ''))
+    if attach_to:
+        state["attach_to"] = attach_to
+        save_batch(state)
 
     # analyse the rest of the queue while the user works on the first one
     if len(state["items"]) > 1:

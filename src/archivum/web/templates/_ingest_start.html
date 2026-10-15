@@ -13,6 +13,14 @@
 </div>
 {% endif %}
 
+{% if attach_to %}
+<div class="alert alert-info border-0 shadow-sm d-flex align-items-center gap-2 mb-4">
+    <i class="bi bi-paperclip fs-5"></i>
+    <div>Attaching a document to <strong>{{ attach_to }}</strong>: stage the file, then choose
+        <strong>Make primary document of {{ attach_to }}</strong> in the workbench. Its current document, if any, is kept as an alternate.</div>
+</div>
+{% endif %}
+
 <div class="row g-4">
     <!-- Zone A: The Files -->
     <div class="col-md-6">
@@ -30,6 +38,7 @@
                 </div>
 
                 <form id="file-form" hx-post="{{ url_for('main.ingest_start') }}" hx-encoding="multipart/form-data" hx-target="#ingest-workbench" hx-indicator="#process-indicator">
+                    {% if attach_to %}<input type="hidden" name="attach_to" value="{{ attach_to }}">{% endif %}
                     <div class="mb-4">
                         <label class="form-label text-muted small fw-bold text-uppercase">Drag &amp; Drop or Upload &mdash; one or many</label>
                         <div id="drop-zone" class="drop-zone rounded-3 border-2 border-dashed d-flex flex-column align-items-center justify-content-center p-5 bg-light" style="min-height: 200px; cursor: pointer;">

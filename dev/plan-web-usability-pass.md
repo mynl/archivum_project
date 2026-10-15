@@ -607,3 +607,13 @@ Review-time divergences:
 - Web: three routes (`/ingest/reference`, `/preview`, `/commit`) and `_ingest_reference.html`; no batch is created. Cancel reuses `/ingest/cancel`, whose no-batch message now reads "Cancelled." rather than "Batch cancelled.". A blocked commit re-renders the workbench with the BibTeX kept.
 - Titles: the review bib goes through `dict_to_bibtex`, which braces titles, exactly as the document path already does (6,876 of 7,363 production titles are braced).
 - Screenshots of the start page and the reference workbench with a synthetic entry (preview only, nothing committed) look right. Adding a real one is left for the user's tire-kicking.
+
+[edit-documents] 2.11.0:
+
+- Data assembly is `Library.linked_documents(tag)` (with `shared_with`, the count of other references on the same `(hash, version)`, which drives the orphan warning). Prefix resolution is `Library.resolve_hash_prefix(prefix)`, which returns the hash's lowest version: a hash with several sharded copies is one document. Both names were checked for collisions.
+- The panel renders inline with the edit form (no second request, so no load-time jump). `GET /edit-tag/<tag>/documents` serves it for re-renders, and each POST (`promote`, `unlink`, `link`) returns it with an outcome line.
+- "Reuse the hash completion": the web had none (only the CLI's `get_library_hashes`), so `/edit-tag/<tag>/documents/hash-suggest` mirrors `/tag-suggest`. It lists up to 8 hashes with a linked tag and file name.
+- Attach: `attach_to` is validated against `ref_df`, carried on the start form, and stored in the batch manifest, so the workbench offers "Make primary document of <tag>" (posting to the existing `/ingest/replace`) beside the usual Archive button.
+- Found by the screenshot, fixed here: `Library.all_tags` was built from `ref-doc.feather`, so the 168 references without a document were missing from the Edit sidebar, `/tag-suggest`, and the CLI's tag completers. It now comes from `ref_df` (7,363 tags, matching the reference count). The test fixture `sample_tag` (`all_tags[0]`) may now be a reference-only tag; the tests that use it pass either way.
+- Visual check on a temp library with synthetic documents (Playwright screenshot), not the production one.
+- The new route tests' `create_app()` started the once-per-process semantic warmup earlier than before, and its background model load raced `test_semantic_model_cache` (`len(calls) == 1` saw 2). The `tmp_library` app fixture now stubs both warmups; the full suite passed twice afterwards.

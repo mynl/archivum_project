@@ -1,0 +1,75 @@
+<div id="edit-documents" class="card shadow-sm border-0 mt-3">
+    <div class="card-header bg-white border-bottom d-flex justify-content-between align-items-center py-2 px-3">
+        <span class="text-muted small fw-bold text-uppercase">Documents</span>
+        <a class="btn btn-sm btn-outline-primary" href="{{ url_for('main.ingest_page', attach_to=tag) }}"
+           title="Stage a file on Ingest and make it this reference's primary document">
+            <i class="bi bi-paperclip me-1"></i> Attach file&hellip;
+        </a>
+    </div>
+    <div class="card-body p-0">
+        {% if message %}
+        <div class="alert alert-{{ level }} py-1 px-3 small m-2 mb-0">{{ message }}</div>
+        {% endif %}
+        {% if rows %}
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3"></th>
+                        <th>Hash</th>
+                        <th class="text-end">Ver</th>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th class="text-end">Size</th>
+                        <th class="text-center" title="When the file was created, not when the reference was added">File created</th>
+                        <th class="text-end">Reads</th>
+                        <th class="pe-3"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td class="ps-3">{% if row.primary %}<span class="badge bg-primary">Primary</span>{% endif %}</td>
+                        <td class="font-monospace">{{ row.hash[:8]|upper }}</td>
+                        <td class="text-end">{{ row.version }}</td>
+                        <td class="text-truncate" style="max-width: 260px;" title="{{ row.name }}">{{ row.name }}</td>
+                        <td>{{ row.suffix }}</td>
+                        <td class="text-end text-nowrap">{{ row.size }}</td>
+                        <td class="text-center text-nowrap">{{ row.created }}</td>
+                        <td class="text-end">{{ row.reads if row.reads else '' }}</td>
+                        <td class="pe-3 text-end text-nowrap">
+                            <a class="btn btn-sm btn-link py-0" href="{{ url_for('main.view_hash', h=row.hash) }}" target="_blank">View</a>
+                            {% if not row.primary %}
+                            <button type="button" class="btn btn-sm btn-outline-primary py-0"
+                                    hx-post="{{ url_for('main.edit_documents_promote', tag=tag) }}"
+                                    hx-vals='{"hash": {{ row.hash|tojson }}, "version": {{ row.version }}}'
+                                    hx-target="#edit-documents" hx-swap="outerHTML">Make primary</button>
+                            {% endif %}
+                            <button type="button" class="btn btn-sm btn-outline-danger py-0"
+                                    hx-post="{{ url_for('main.edit_documents_unlink', tag=tag) }}"
+                                    hx-vals='{"hash": {{ row.hash|tojson }}, "version": {{ row.version }}}'
+                                    hx-confirm="{% if row.orphan_on_unlink %}Unlink {{ row.hash[:8]|upper }} from {{ tag }}? No other reference links it, so it becomes an orphan: the file and its document row stay, and 'archivum validate orphans' lists it.{% else %}Unlink {{ row.hash[:8]|upper }} from {{ tag }}? Other references still link it.{% endif %}"
+                                    hx-target="#edit-documents" hx-swap="outerHTML">Unlink</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted small px-3 py-2">No document: this is a reference only.</div>
+        {% endif %}
+        <form class="d-flex gap-2 align-items-start px-3 py-2 border-top"
+              hx-post="{{ url_for('main.edit_documents_link', tag=tag) }}"
+              hx-target="#edit-documents" hx-swap="outerHTML">
+            <div class="flex-grow-1 position-relative">
+                <input type="text" name="hash_prefix" class="form-control form-control-sm font-monospace"
+                       placeholder="Link existing document: hash prefix, 6+ characters" autocomplete="off"
+                       hx-get="{{ url_for('main.edit_documents_hash_suggest', tag=tag) }}"
+                       hx-trigger="keyup changed delay:300ms" hx-target="#hash-suggestions">
+                <div id="hash-suggestions" class="list-group small mt-1"></div>
+            </div>
+            <button type="submit" class="btn btn-sm btn-outline-secondary text-nowrap">Link existing</button>
+        </form>
+    </div>
+</div>

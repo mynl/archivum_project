@@ -5,6 +5,21 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.11.0 (2026-10-15)
+
+### Added
+
+- Edit: a **Documents** panel under the BibTeX. Per document: View, Make
+  primary, Unlink (warns when that orphans the file). Link existing by hash
+  prefix (6+ characters, exactly one match, with suggestions). Attach file
+  opens Ingest for the reference and offers Make primary document of the tag;
+  it works for references with no document too. Nothing is deleted.
+
+### Fixed
+
+- References with no document were missing from the Edit sidebar, tag
+  suggestions, and CLI tag completion (the tag list came from the links).
+
 ## 2.10.0 (2026-10-15)
 
 ### Added
