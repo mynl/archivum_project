@@ -213,7 +213,7 @@
                     </li>
                     <li><strong>View Modes</strong>: Toggle between <strong>List</strong>, <strong>Verbose</strong> (all metadata), and <strong>Table</strong>.</li>
                     <li><strong>Document Hash</strong>: Each List entry ends with the first 8 characters of the document hash, in small upper-case monospace. This is the hash of the reference's <em>primary</em> document &mdash; the one <code>View</code> opens &mdash; so it lines up with Ripgrep results and with filenames in the document store. It is omitted if a query's explicit <code>select</code> clause drops the <code>hash</code> column.</li>
-                    <li><strong>Exports</strong>: Download the current result set as CSV, BibTeX, or BibTeX+ from the Export menu. BibTeX+ adds Archivum document hashes and Mendeley-style <code>file</code> fields when a matched document path is available.</li>
+                    <li><strong>Exports</strong>: Download the current result set as CSV, BibTeX, or BibTeX+ from the Export menu. BibTeX+ adds Archivum document hashes and Mendeley-style <code>file</code> fields when a matched document path is available. The <code>file</code> paths point at the real document store (symlinks resolved), not the app-home link.</li>
                 </ul>
             </div>
 

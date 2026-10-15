@@ -24,7 +24,8 @@ def export_dataframe_to_bibtex(export_df: pd.DataFrame, lib, *, plus: bool = Fal
         allowed_fields=list(lib.config.ref_columns),
         include_hash=plus,
         include_file=plus,
-        path_resolver=lib.abspath,
+        # the real store, not the app-home symlink that lib.abspath joins onto
+        path_resolver=lib.store_path,
     )
     if not bibtex:
         return "No BibTeX entries found to export.", 400

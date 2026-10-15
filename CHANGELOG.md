@@ -5,6 +5,14 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.5.3 (2026-10-15)
+
+### Fixed
+
+- BibTeX+ exports (Query, Ripgrep, Network) write `file` paths into the real
+  document store, `D:/archivum/ShardedDocLibrary/...`, instead of the app-home
+  symlink under the user profile. The store root is resolved once per library.
+
 ## 2.5.2 (2026-10-15)
 
 ### Fixed

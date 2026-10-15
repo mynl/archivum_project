@@ -5,7 +5,7 @@ Equivalent to and based on manager module in file_database.
 
 Querying uses a file-database project-like combo regex-sql (querex) querier.
 """
-from functools import cache
+from functools import cache, cached_property
 import datetime as dt
 from importlib.resources import files
 import json
@@ -200,6 +200,33 @@ class Library(LibraryBase):
         if p.is_absolute() or p.anchor in ('\\', '/'):
             return p
         return self.doc_store_path / p
+
+    @cached_property
+    def doc_store_real_path(self) -> Path:
+        """
+        The document store with every symlink resolved.
+
+        ``doc_store_path`` is reached through the app-home link
+        (``~/.archivum/docs``), which exists only on this machine and embeds
+        the user profile. Paths handed to the outside world, such as the
+        BibTeX+ ``file`` field, point at where the files actually live.
+        Resolved once: it costs a filesystem walk, and exports call it per row.
+        """
+        return self.doc_store_path.resolve()
+
+    def store_path(self, p: Union[str, Path]) -> Path:
+        """
+        Absolute path of a document under the real store.
+
+        A relative ``doc_df`` path is joined onto :attr:`doc_store_real_path`;
+        an absolute one is passed through unchanged.
+        """
+        if not p or pd.isna(p):
+            return Path()
+        p = Path(p)
+        if p.is_absolute() or p.anchor in ('\\', '/'):
+            return p
+        return self.doc_store_real_path / p
 
     def textpath(self, p: str) -> Path:
         """Return full text path from doc_df path. Does not check existence."""

@@ -552,3 +552,10 @@ Review-time divergences:
 - `CLAUDE.md` Deltas carried a copy of the version ("Currently 2.5.1"), which would go stale at every bump of this plan; replaced by a pointer to `pyproject.toml`, the single source.
 - Added `test_exports_are_built_in_memory` (CSV and BibTeX under a `chdir` to an empty `tmp_path`; the directory stays empty). The QMD route was smoke-checked the same way (no test added; the plan asks for none).
 - The ingest tests' stray prefetch-thread warning (`FileNotFoundError` on `temp\staging\...\manifest.json`) disappeared with the `chdir` removal.
+
+[export-paths] 2.5.3:
+
+- The resolver is a public `Library.store_path(p)` beside `abspath` and `textpath` (same shape, different root), rather than a private helper in `exports.py`, so the CLI can reuse it. No name collision.
+- Manual check run on the production library: a 25-row BibTeX+ export, all 25 `file` paths exist, all under `D:\archivum\ShardedDocLibrary`.
+- Every bump also carries `uv.lock`, whose `archivum` version line `uv run` rewrites; 2.5.2 was amended (unpushed) to include it.
+- Finding, outside this plan: the 6 `test_network_browser_data_reaches_graph_smoke` cases fail at baseline (2.5.1 code). `network.html:230` declares `let currentData` at the top level of a classic script, which never becomes `window.currentData`, so the test's `wait_for_function` times out after 180 s each. Not fixed here. Browser gates in this plan run with `-k "not network_browser_data"`; the other 9 browser tests passed at baseline.

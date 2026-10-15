@@ -49,3 +49,34 @@ def test_format_mendeley_file_handles_windows_style_path_string():
         format_mendeley_file("C:/Users/steve/MendeleyLibrary/Dean/paper.pdf")
         == ":C\\:/Users/steve/MendeleyLibrary/Dean/paper.pdf:pdf"
     )
+
+
+def test_bibtex_plus_paths_point_at_the_real_store(tmp_path, monkeypatch):
+    from archivum.library import Library
+
+    real_root = tmp_path / "ShardedDocLibrary"
+    lib = Library.__new__(Library)
+    # the app-home link that lib.abspath joins onto; it must not appear
+    lib.doc_store_path = tmp_path / "app-home" / "docs"
+    monkeypatch.setattr(lib, "doc_store_real_path", real_root, raising=False)
+    absolute = tmp_path / "elsewhere" / "kept.pdf"
+    df = pd.DataFrame(
+        [
+            {"tag": "Rel2020", "type": "article", "title": "Relative", "hash": "AAA",
+             "path": "ab/rel.pdf"},
+            {"tag": "Abs2021", "type": "article", "title": "Absolute", "hash": "BBB",
+             "path": str(absolute)},
+        ]
+    )
+
+    bibtex = rows_to_bibtex(
+        df,
+        allowed_fields=["tag", "type", "title"],
+        include_hash=True,
+        include_file=True,
+        path_resolver=lib.store_path,
+    )
+
+    assert format_mendeley_file(real_root / "ab" / "rel.pdf") in bibtex
+    assert format_mendeley_file(absolute) in bibtex
+    assert "app-home" not in bibtex
