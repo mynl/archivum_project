@@ -18,6 +18,7 @@ import shutil
 import subprocess
 from typing import Union, List, Dict, Optional
 
+import numpy as np
 import pandas as pd
 from IPython.display import display
 from watchdog.observers import Observer
@@ -613,6 +614,7 @@ class Library(LibraryBase):
                     merged[c] = merged[c].fillna(0)
 
             merged["docs"] = merged["tag"].map(doc_counts).fillna(0).astype(int)
+            merged["read_rank"] = self._read_rank(merged)
             # A library not yet backfilled has no date added; Recent sorts by
             # it, so stand in the document date the shared querex config
             # used to sort by.
@@ -633,6 +635,41 @@ class Library(LibraryBase):
                 "querex",
             )
         return self._database
+
+    def _read_rank(self, merged: pd.DataFrame) -> pd.Series:
+        r"""
+        Sort key blending how often and how recently a document was read.
+
+        Returns
+        -------
+        pandas.Series
+            :math:`\log_2 n + t/h`, NaN for unread rows.
+
+        Notes
+        -----
+        With :math:`n` the read count, :math:`a` the days since the last read
+        and :math:`h` the half-life (``read_half_life_days``), the score
+        :math:`s = n\,2^{-a/h}` halves each read's weight every :math:`h` days.
+        Only the count and the last time are stored, so all :math:`n` reads
+        are treated as happening at the last read: an upper bound on the exact
+        decayed count :math:`\sum_i 2^{-a_i/h}`. With :math:`t` the last-read
+        time in days since a fixed epoch, :math:`\log_2 s = \log_2 n + t/h -
+        \mathrm{now}/h`. Dropping the common :math:`\mathrm{now}/h` leaves an
+        order-equivalent key that does not depend on now, so it can be cached
+        with the database without going stale. One doubling of reads is worth
+        :math:`h` days of recency.
+        """
+        if "read_count" not in merged.columns or "last_read" not in merged.columns:
+            return pd.Series(np.nan, index=merged.index)
+        last = pd.to_datetime(merged["last_read"], errors="coerce")
+        if last.dt.tz is not None:
+            last = last.dt.tz_convert(None)
+        days = (last - pd.Timestamp("1970-01-01")) / pd.Timedelta(days=1)
+        count = pd.to_numeric(merged["read_count"], errors="coerce")
+        read = (count > 0) & days.notna()
+        rank = pd.Series(np.nan, index=merged.index)
+        rank[read] = np.log2(count[read]) + days[read] / self.config.read_half_life_days
+        return rank
 
     def update(self, importer):
         """

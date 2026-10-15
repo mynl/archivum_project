@@ -589,3 +589,11 @@ Review-time divergences:
 - The verbose view's `skip_keys` gained the three new display columns, which would otherwise have appeared there as metadata.
 - Dates format per value in their own timezone: converting the column to UTC first would put a 23:30 BST addition on the next day (covered by the test).
 - Manual acceptance done programmatically on the production library (GET only, counts only): `top 50 recent` gives 50 lines with dates in descending order; Reference only gives 168 lines, all `no doc`; the Read query gives 50 lines, all with `×N`.
+
+[query-buttons] 2.9.0:
+
+- Both new keys were appended to `~/.archivum/global-config.yaml` (outside the repo), not only `owner_author_pattern` (see the review-time note). After that, `_get_config_diff` against the global file shows neither key, so a save will not copy them into `uber-library/config.yaml`.
+- Pattern check on the production library (counts only): `! /Mildenhall/` 56 hits, `! /Mildenhall, Stephen/` 53. All 53 use the single form `Mildenhall, Stephen J.`; no initials-only forms (`Mildenhall, S. ...`) exist; the other 3 hits come from 2 other name forms. No widening needed. The user can view the 3 with `! /Mildenhall/`.
+- `last_read` in `read.feather` is tz-naive local time (`record_read` uses `pd.Timestamp.now()`); `_read_rank` measures days from a naive epoch, and converts to naive first should a tz-aware value ever appear.
+- The Mine button sits in a `span` carrying the tooltip, because a disabled button shows no tooltip.
+- Manual check (GET, counts only): Mine returns 53 lines, years descending; 249 references have reads and all carry a `read_rank`.

@@ -81,6 +81,10 @@ class Configurator(BaseModel):
     ddjvu_command: str = Field("ddjvu", description="Path to the ddjvu executable.")
     tag_name_mapper: dict[str, str] = Field(default_factory=dict,
         description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
+    read_half_life_days: float = Field(30.0, gt=0,
+        description="Half-life in days of a read's weight in the Read blend: one doubling of reads is worth this many days of recency.")
+    owner_author_pattern: str = Field("",
+        description="Regex matched against author for the Query page's Mine button (the library owner's own works). Empty disables Mine.")
 
     def write_template(self, path: Path):
         """Generate a clean default config file at the given path."""

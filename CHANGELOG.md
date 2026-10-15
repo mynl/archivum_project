@@ -5,6 +5,19 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.9.0 (2026-10-15)
+
+### Added
+
+- Query: **Read** is a split button. The main button blends count and recency
+  (`read_rank` = log2 count + days / half-life; one doubling of reads is worth
+  `read_half_life_days`, default 30, of recency); the dropdown adds Read by
+  count and Read by recent.
+- Query: **Mine** lists the owner's works newest first, by the
+  `owner_author_pattern` regex on author (disabled while empty).
+- Config: `read_half_life_days` and `owner_author_pattern`, both set in
+  `global-config.yaml` (`"Mildenhall, Stephen"`).
+
 ## 2.8.0 (2026-10-15)
 
 ### Added

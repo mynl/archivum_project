@@ -8,7 +8,10 @@ from ..services.exports import (
 
 @bp.route('/')
 def index():
-    return render_template('query.html')
+    # the no-library placeholder may carry no config
+    config = getattr(LibraryContext.get(), "config", None)
+    owner_pattern = getattr(config, "owner_author_pattern", "") or ""
+    return render_template('query.html', owner_pattern=owner_pattern)
 
 def parse_rg_json(proc, lib):
     """Parse ripgrep JSON output and group by document with full metadata."""

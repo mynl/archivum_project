@@ -45,10 +45,28 @@
             </ul>
         </div>
 
-        <button class="btn btn-outline-primary px-3 shadow-sm" 
-                onclick="executeReadHistory()">
-            <i class="bi bi-book me-1"></i> Read
-        </button>
+        <div class="btn-group shadow-sm">
+            <button class="btn btn-outline-primary px-3" onclick="executeReadHistory('blend')"
+                    title="Read history, blending count and recency">
+                <i class="bi bi-book me-1"></i> Read
+            </button>
+            <button type="button" class="btn btn-outline-primary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false">
+                <span class="visually-hidden">Toggle Dropdown</span>
+            </button>
+            <ul class="dropdown-menu shadow-sm">
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeReadHistory('blend')">Read (blend)</a></li>
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeReadHistory('count')">Read by count</a></li>
+                <li><a class="dropdown-item small fw-medium" href="#" onclick="executeReadHistory('recent')">Read by recent</a></li>
+            </ul>
+        </div>
+
+        <span class="d-inline-block" tabindex="0"
+              {% if not owner_pattern %}title="Set owner_author_pattern in the config to enable Mine"{% endif %}>
+            <button class="btn btn-outline-primary px-3 shadow-sm" onclick="executeMine()"
+                    {% if not owner_pattern %}disabled style="pointer-events: none;"{% else %}title="Your own works, newest first"{% endif %}>
+                <i class="bi bi-person me-1"></i> Mine
+            </button>
+        </span>
 
         <button class="btn btn-outline-secondary px-3 shadow-sm" 
                 onclick="executeRandom()">
@@ -108,10 +126,26 @@
         }
     }
 
-    function executeReadHistory() {
+    // Read orders; read_rank = log2(count) + days/half-life, built with the database
+    const READ_ORDERS = {
+        blend: '-read_rank',
+        count: '-read_count, -last_read',
+        recent: '-last_read',
+    };
+
+    function executeReadHistory(order) {
         const input = document.getElementById('search-input');
         if (input) {
-            input.value = `q top 50 select last_read, read_count, * where read_count > 0 order by -last_read`;
+            input.value = `q top 50 select last_read, read_count, * where read_count > 0 order by ${READ_ORDERS[order || 'blend']}`;
+            htmx.trigger(input, 'keyup');
+        }
+    }
+
+    function executeMine() {
+        const pattern = {{ owner_pattern|tojson }};
+        const input = document.getElementById('search-input');
+        if (input && pattern) {
+            input.value = `q select year, * ! /${pattern}/ order by -year, -added`;
             htmx.trigger(input, 'keyup');
         }
     }

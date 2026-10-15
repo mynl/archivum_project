@@ -136,6 +136,31 @@ def test_query_bibtex_exports_download(client):
 @pytest.mark.web
 @pytest.mark.route
 @pytest.mark.active_library
+def test_query_read_orders_and_mine(client, active_library):
+    prefix = "q top 50 select last_read, read_count, * where read_count > 0 order by "
+    queries = {
+        "read-blend": prefix + "-read_rank",
+        "read-count": prefix + "-read_count, -last_read",
+        "read-recent": prefix + "-last_read",
+    }
+    pattern = active_library.config.owner_author_pattern
+    if pattern:
+        queries["mine"] = f"q select year, * ! /{pattern}/ order by -year, -added"
+
+    for name, query in queries.items():
+        with logged_step("query-buttons", scenario=name):
+            response = client.get("/search", query_string={"q": query}, headers={"HX-Request": "true"})
+            html = assert_ok_html(response, context=f"query {name}")
+            assert "Query error" not in html
+
+    page = assert_ok_html(client.get("/"), context="query page")
+    assert "Read by count" in page and "Read by recent" in page
+    assert ("disabled" in page[page.index("executeMine()") - 50:page.index("executeMine()") + 200]) == (not pattern)
+
+
+@pytest.mark.web
+@pytest.mark.route
+@pytest.mark.active_library
 def test_about_reports_version_and_menu_order(client):
     from archivum import __version__
 

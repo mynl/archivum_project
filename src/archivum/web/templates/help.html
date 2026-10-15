@@ -209,7 +209,8 @@
                     <li><strong>Quick Actions</strong>:
                         <ul>
                             <li><strong>Recent</strong>: The last 50, 100, or 250 references added to the library, newest first. This is the reference's own date added, not its document's: replacing a document does not move a reference up. <strong>Reference only</strong>, below the divider, lists references with no document.</li>
-                            <li><strong>Read</strong>: Quick access to your reading history, ordered by most recent.</li>
+                            <li><strong>Read</strong>: Your reading history, top 50. The main button blends how often and how recently you read: it sorts by <code>read_rank</code> = log<sub>2</sub>(read count) + (days since a fixed date of the last read) / <em>h</em>, so one doubling of reads is worth <em>h</em> days of recency. With <em>h</em> = 30 (<code>read_half_life_days</code> in the config), a paper read 8 times and last opened 90 days ago ties with one read once today. The dropdown also offers <strong>Read by count</strong> and <strong>Read by recent</strong>.</li>
+                            <li><strong>Mine</strong>: Your own works, newest first: every reference whose author matches <code>owner_author_pattern</code> in the config (a regex). Disabled while that is empty.</li>
                             <li><strong>Random</strong>: Discovers papers using a random 2-digit hex hash prefix.</li>
                         </ul>
                     </li>
