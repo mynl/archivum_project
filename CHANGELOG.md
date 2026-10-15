@@ -5,6 +5,15 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.8.0 (2026-10-15)
+
+### Added
+
+- Query and Authors list view: each line ends with the hash (or a muted
+  `no doc` for a reference without a document), then the **date added** and
+  the **read count** (`×N`, blank when never read). They are looked up by tag,
+  so they show whatever the query selected.
+
 ## 2.7.0 (2026-10-15)
 
 ### Added

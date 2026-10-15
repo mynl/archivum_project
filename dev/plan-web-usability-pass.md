@@ -582,3 +582,10 @@ Review-time divergences:
 - Tests use a new `make_tmp_library` / `tmp_library` factory in `tests/conftest.py`: a real `Library` over feathers in `tmp_path` with a real `Configurator` and no BibTeX link, so `save()` runs for real without touching production. Later steps reuse it.
 - The `--undated` fallback for a library in `Europe/London` lands at `2026-01-01 00:00+00:00` (GMT in January), midnight local as specified.
 - Backfill dry run on `uber-library` (CLI, nothing written): 7,195 references from documents (earliest 2019-05-28, latest 2026-10-15), 168 undated at 2026-01-01; no existing values. `-x` awaits the user's word. `Library.database` today: 168 references with `docs == 0`, 5 with `docs == 2`.
+
+[result-line] 2.8.0:
+
+- The activity frame also carries `docs`, so `no doc` shows only for a reference that truly has no document. Keyed on a blank hash alone, it would also have fired when a query's `select` dropped `hash`.
+- The verbose view's `skip_keys` gained the three new display columns, which would otherwise have appeared there as metadata.
+- Dates format per value in their own timezone: converting the column to UTC first would put a 23:30 BST addition on the next day (covered by the test).
+- Manual acceptance done programmatically on the production library (GET only, counts only): `top 50 recent` gives 50 lines with dates in descending order; Reference only gives 168 lines, all `no doc`; the Read query gives 50 lines, all with `×N`.

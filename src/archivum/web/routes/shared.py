@@ -56,9 +56,19 @@ AUTHOR_VIEW_MODES = [
 ]
 
 
+def _activity_frame():
+    """Per-tag date added, read count, and document count for the result line."""
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        return None
+    database = lib.database
+    columns = [c for c in ("tag", "added", "read_count", "docs") if c in database.columns]
+    return database[columns] if "tag" in columns else None
+
+
 def render_search_results(df, view_mode='list'):
     """Render search results consistently across query and author views."""
-    prepared_df = prepare_search_results(df)
+    prepared_df = prepare_search_results(df, activity=_activity_frame())
     return render_template('components/results.html', results=prepared_df, view_mode=view_mode)
 
 

@@ -50,7 +50,7 @@
         <div class="author text-muted small mb-2">{{ row.author_display }}</div>
         
         <!-- Dynamic Metadata Grid -->
-        {% set skip_keys = ['tag', 'title', 'author', 'year', 'journal', 'publisher', 'hash', 'path', 'is_book', 'title_display', 'author_display', 'year_display', 'hash_display', 'querex', 'version', 'type', 'node', 'links', 'suffix', 'mod', 'create', 'access', 'last_caller'] %}
+        {% set skip_keys = ['tag', 'title', 'author', 'year', 'journal', 'publisher', 'hash', 'path', 'is_book', 'title_display', 'author_display', 'year_display', 'hash_display', 'added_display', 'reads_display', 'has_doc', 'querex', 'version', 'type', 'node', 'links', 'suffix', 'mod', 'create', 'access', 'last_caller'] %}
         <div class="metadata-grid d-flex flex-wrap gap-2 mb-2">
             {% for key, value in row.items() %}
                 {% if key not in skip_keys and value is not none and value|string|trim != '' and value|string|lower != 'nan' and value|string != 'NaT' %}
@@ -91,7 +91,9 @@
             <span class="title {{ 'fw-bold' if row.is_book else '' }}">"{{ row.title_display }}"</span>
             <span class="author text-muted small ms-1">{{ row.author_display }}</span>
             <span class="journal small ms-1"><i>{{ row.journal if 'journal' in row else (row.publisher if 'publisher' in row else '') }}</i></span>
-            {% if row.hash_display %}<span class="doc-hash text-muted ms-1">{{ row.hash_display|upper }}</span>{% endif %}
+            {% if row.hash_display %}<span class="doc-hash text-muted ms-1">{{ row.hash_display|upper }}</span>{% elif row.has_doc == false %}<span class="doc-hash text-muted ms-1">no doc</span>{% endif %}
+            {% if row.added_display %}<span class="doc-added text-muted ms-1" title="Date added">{{ row.added_display }}</span>{% endif %}
+            {% if row.reads_display %}<span class="doc-reads text-muted ms-1" title="Times read">{{ row.reads_display }}</span>{% endif %}
         </span>
     </div>
     {% endfor %}

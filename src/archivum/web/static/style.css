@@ -138,7 +138,9 @@ header img {
     font-family: SFMono-Regular, Consolas, monospace;
 }
 
-.dense-list .doc-hash {
+.dense-list .doc-hash,
+.dense-list .doc-added,
+.dense-list .doc-reads {
     font-family: SFMono-Regular, Consolas, monospace;
     font-size: 0.7rem;
     letter-spacing: 0.03em;
