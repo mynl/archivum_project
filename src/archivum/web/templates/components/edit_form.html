@@ -7,8 +7,9 @@
             <div class="mb-4">
                 <label for="bibtex" class="form-label fw-bold small text-muted text-uppercase">BibTeX Entry</label>
                 <textarea class="form-control font-monospace p-3 border-2" 
-                          id="bibtex" 
-                          name="bibtex" 
+                          id="bibtex"
+                          name="bibtex"
+                          data-tag="{{ tag }}"
                           rows="18" 
                           style="font-size: 0.85rem; line-height: 1.5; background-color: #fcfcfc;">{{ bib_str }}</textarea>
                 <div class="form-text mt-2">
@@ -21,7 +22,7 @@
                 <div class="d-flex gap-2">
                     <button type="button" 
                             class="btn btn-light px-4 fw-medium border"
-                            onclick="document.getElementById('editor-container').innerHTML = '<div class=\'text-center py-5\'><p class=\'text-muted\'>Select a tag to edit.</p></div>'">Cancel</button>
+                            onclick="cancelEdit()">Cancel</button>
                     <button type="submit" class="btn btn-primary px-5 fw-bold">Save Changes</button>
                 </div>
             </div>

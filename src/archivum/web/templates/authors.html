@@ -92,7 +92,11 @@
     // Keyboard Navigation
     window.addEventListener('keydown', (e) => {
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-        
+        // arrows inside a text field move the caret; the author filter is the
+        // exception, since it navigates the list through this listener
+        const field = e.target.closest && e.target.closest('input, textarea, select, [contenteditable]');
+        if (field && field.id !== 'author-filter') return;
+
         const active = document.querySelector('.author-item.active');
         const visibleItems = Array.from(document.querySelectorAll('.author-item:not(.d-none)'));
         if (visibleItems.length === 0) return;

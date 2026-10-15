@@ -45,7 +45,7 @@
                     hx-get="{{ url_for('main.edit_tag', tag=tag) }}" 
                     hx-target="#editor-container"
                     hx-trigger="click"
-                    onclick="setActiveTag(this)">
+                    onclick="selectTag(event, this)">
                 {{ tag }}
             </button>
             {% endfor %}
@@ -93,6 +93,8 @@
     function navigateList(direction) {
         const visible = getVisibleItems();
         if (visible.length === 0) return;
+        // ask before moving the selection, so a refusal leaves it where it was
+        if (!confirmDiscard()) return;
 
         selectedIndex += direction;
         if (selectedIndex < 0) selectedIndex = visible.length - 1;
@@ -103,14 +105,52 @@
         active.scrollIntoView({ block: 'nearest' });
     }
 
-    // Global keyboard listener for when the input isn't focused
+    // Global keyboard listener for when no text field has focus. Arrows inside
+    // a field (the BibTeX textarea above all) move the caret; the tag filter
+    // navigates through its own keyup handler, filterTags.
     window.addEventListener('keydown', (e) => {
         if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-        if (document.activeElement.id === 'tag-filter') return; // Already handled in filterTags
+        if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
 
         e.preventDefault();
         navigateList(e.key === 'ArrowDown' ? 1 : -1);
     });
+
+    // Unsaved-change guard. Typing in #bibtex marks the editor dirty; loading
+    // another tag asks first. Any swap into the editor (a loaded tag, a
+    // successful save) clears it; failed saves do not swap, so it stays set.
+    let editorDirty = false;
+    document.addEventListener('input', (e) => {
+        if (e.target.id === 'bibtex') editorDirty = true;
+    });
+    document.body.addEventListener('htmx:afterSwap', (e) => {
+        if (e.detail.target && e.detail.target.id === 'editor-container') editorDirty = false;
+    });
+
+    function confirmDiscard() {
+        if (!editorDirty) return true;
+        const textarea = document.getElementById('bibtex');
+        const tag = textarea ? textarea.dataset.tag : 'this reference';
+        if (!confirm(`Discard unsaved changes to ${tag}?`)) return false;
+        editorDirty = false;
+        return true;
+    }
+
+    function selectTag(event, element) {
+        // inline onclick runs before the htmx listener on the same button, so
+        // stopping it here also stops the request
+        if (!confirmDiscard()) {
+            event.stopImmediatePropagation();
+            return;
+        }
+        setActiveTag(element);
+    }
+
+    function cancelEdit() {
+        editorDirty = false;
+        document.getElementById('editor-container').innerHTML =
+            '<div class="text-center py-5"><p class="text-muted">Select a tag to edit.</p></div>';
+    }
 
     function clearFilter() {
         const input = document.getElementById('tag-filter');

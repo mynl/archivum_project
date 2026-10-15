@@ -150,6 +150,55 @@ def test_edit_direct_tag_renders_form_without_htmx_load(browser_page, live_serve
 @pytest.mark.web
 @pytest.mark.browser
 @pytest.mark.active_library
+def test_edit_arrow_keys_stay_inside_bibtex(browser_page, live_server, sample_tag):
+    page = browser_page
+    answers = {"accept": False}
+    dialogs: list[str] = []
+
+    def on_dialog(dialog):
+        dialogs.append(dialog.message)
+        dialog.accept() if answers["accept"] else dialog.dismiss()
+
+    page.on("dialog", on_dialog)
+    with logged_step("browser-edit-arrow-keys", tag=sample_tag):
+        page.goto(f"{live_server}/edit?tag={quote(sample_tag, safe='')}", wait_until="domcontentloaded")
+        bibtex = page.locator("#bibtex")
+        bibtex.wait_for(timeout=120_000)
+        bibtex.focus()
+        page.evaluate("() => document.getElementById('bibtex').setSelectionRange(0, 0)")
+
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("ArrowDown")
+
+        # the caret moved inside the entry; no other tag was loaded
+        assert page.evaluate("() => document.getElementById('bibtex').selectionStart") > 0
+        assert bibtex.get_attribute("data-tag") == sample_tag
+
+        # an edit, then list navigation from outside the field: refused, then accepted
+        original = bibtex.input_value()
+        page.keyboard.type(" ")
+        page.evaluate("() => document.activeElement.blur()")
+        page.keyboard.press("ArrowDown")
+        assert dialogs and sample_tag in dialogs[-1]
+        assert page.locator("#bibtex").get_attribute("data-tag") == sample_tag
+
+        assert bibtex.input_value() != original
+
+        # accepted: a tag loads and the edit is gone (sample_tag is the first in
+        # the list, so the first step down may reload that same tag)
+        answers["accept"] = True
+        page.keyboard.press("ArrowDown")
+        page.wait_for_function(
+            "(text) => document.getElementById('bibtex')?.value === text",
+            arg=original,
+            timeout=120_000,
+        )
+        assert len(dialogs) == 2
+
+
+@pytest.mark.web
+@pytest.mark.browser
+@pytest.mark.active_library
 def test_authors_direct_author_renders_results_without_auto_click(browser_page, live_server, sample_author):
     page = browser_page
     with logged_step("browser-authors-direct-author", author=sample_author):

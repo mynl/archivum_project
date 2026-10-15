@@ -559,3 +559,9 @@ Review-time divergences:
 - Manual check run on the production library: a 25-row BibTeX+ export, all 25 `file` paths exist, all under `D:\archivum\ShardedDocLibrary`.
 - Every bump also carries `uv.lock`, whose `archivum` version line `uv run` rewrites; 2.5.2 was amended (unpushed) to include it.
 - Finding, outside this plan: the 6 `test_network_browser_data_reaches_graph_smoke` cases fail at baseline (2.5.1 code). `network.html:230` declares `let currentData` at the top level of a classic script, which never becomes `window.currentData`, so the test's `wait_for_function` times out after 180 s each. Not fixed here. Browser gates in this plan run with `-k "not network_browser_data"`; the other 9 browser tests passed at baseline.
+
+[edit-keys] 2.5.4:
+
+- `authors.html`'s filter input does rely on the global listener for navigation (its keyup handler only filters), so it is exempted by id as the plan anticipated.
+- The guard is one `confirmDiscard()` called from `navigateList` (before the index moves) and from the sidebar button's inline `onclick`, which runs before htmx's listener and stops it with `stopImmediatePropagation` on refusal. The flag clears on any swap into `#editor-container` (htmx does not swap 4xx/5xx, so a failed save keeps it) and in a new `cancelEdit()`.
+- The Playwright test also exercises the guard: Playwright answers the confirm (dismiss, then accept). `sample_tag` is the first tag in the list, so the accepted step reloads that same tag; the test checks the edit was discarded rather than the tag changing.

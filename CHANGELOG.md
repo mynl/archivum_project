@@ -5,6 +5,18 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.5.4 (2026-10-15)
+
+### Fixed
+
+- Edit: Up/Down inside the BibTeX box move the caret instead of loading the
+  adjacent tag and silently discarding the edit. Outside text fields they still
+  walk the tag list.
+- Edit: loading another tag after typing in the BibTeX box asks before
+  discarding the unsaved change.
+- Authors: the same guard, so arrows in any other text field stay in it; the
+  author filter still navigates the list.
+
 ## 2.5.3 (2026-10-15)
 
 ### Fixed
