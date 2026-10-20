@@ -191,7 +191,7 @@ committed tag can differ if the library moved in between. Do not reintroduce the
 - `docs/` — **Sphinx only** (`api.rst`, `quickstart.rst`, …), built by `doc-test.bat` and
   published to ReadTheDocs (`.readthedocs.yaml`). No planning or design docs here.
 - `dev/` — plan documents, per the house convention: `dev/plan-<desc>.md`, moved to
-  `dev/done/` when the user says the work is done. `dev/projects/` holds the numbered cold-start
+  `dev/done/` when execution starts and edited there. `dev/projects/` holds the numbered cold-start
   briefs for the SQLite migration (`00-dev-rig.md` … `11-mendeley-onramp.md`), written before
   that convention settled; leave them where they are.
 - `scripts/` — PowerShell, chiefly `Test-ArchivumWeb.ps1`.
