@@ -5,6 +5,24 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.14.0 (2026-10-24)
+
+### Added
+
+- Up/Down history in the Query, Ripgrep and Network search boxes, built from
+  the searches you run: one entry per burst of typing, filed after 10 seconds
+  without a new search, on clearing the box, or on Up.
+- The history is kept per library in `search-history.csv` beside
+  `read.feather`, shared by every browser and address. Bridge visitors
+  neither add to it nor see it.
+
+### Changed
+
+- Browser autocomplete is off in the search and help boxes, so Chrome's
+  small-font popup no longer takes over the arrow keys.
+- The browser-stored history of earlier versions (saved only on Enter) is
+  retired and removed.
+
 ## 2.13.3 (2026-10-24)
 
 ### Changed

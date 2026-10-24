@@ -8,6 +8,7 @@ from ..services.ripgrep import (
     warm_ripgrep_cache,
 )
 from ..services.exports import export_dataframe_to_bibtex
+from ..services.search_history import note_search
 
 @bp.route('/ripgrep')
 def ripgrep_page():
@@ -24,10 +25,13 @@ def rg_warm():
 @bp.route('/rg-search')
 def rg_search():
     options = RipgrepSearchOptions.from_request_args(request.args)
+    lib = LibraryContext.get()
+    # before the no-work and cache returns, so every search, and an empty one, is noted
+    if not lib.is_empty:
+        note_search(lib, "ripgrep", options.query)
     if not options.has_work:
         return ""
 
-    lib = LibraryContext.get()
     if lib.is_empty:
         return "No library open."
 

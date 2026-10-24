@@ -98,6 +98,22 @@ def active_library():
         return lib
 
 
+@pytest.fixture(autouse=True)
+def isolated_search_history(tmp_path, monkeypatch):
+    """
+    Point search history at ``tmp_path`` for every test.
+
+    The shared ``app`` runs on the production library, and its search routes,
+    called as admin, would otherwise file test queries into the real
+    ``search-history.csv``. ``live_server`` serves in-process, so the patch
+    reaches it too.
+    """
+    from archivum.web.services import search_history
+
+    monkeypatch.setattr(search_history, "history_file", lambda lib: tmp_path / "search-history.csv")
+    monkeypatch.setattr(search_history, "_INSTANCES", {})
+
+
 @pytest.fixture()
 def app(active_library):
     from archivum.cli import LibraryContext

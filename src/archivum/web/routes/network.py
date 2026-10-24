@@ -8,6 +8,7 @@ from ..services.exports import (
     export_dataframe_to_csv,
     galaxy_export_filename,
 )
+from ..services.search_history import note_search
 
 @bp.route('/network')
 def network_page():
@@ -21,6 +22,7 @@ def network_data():
     case_sensitive = request.args.get('case') == 'sensitive'
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
+    note_search(lib, "network", raw_query)
 
     try:
         return get_social_network_payload(lib, raw_query, verbosity=verbosity, case_sensitive=case_sensitive)
@@ -38,6 +40,7 @@ def semantic_data():
     case_sensitive = request.args.get('case') == 'sensitive'
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
+    note_search(lib, "network", raw_query)
 
     try:
         return get_semantic_network_payload(

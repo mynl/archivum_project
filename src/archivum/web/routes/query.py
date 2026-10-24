@@ -1,3 +1,5 @@
+from flask import jsonify
+
 from .shared import *
 from ...search.query import QUERY_HELP_TEXT
 from ..services.exports import (
@@ -5,6 +7,7 @@ from ..services.exports import (
     export_dataframe_to_csv,
     query_export_filename,
 )
+from ..services.search_history import BOXES, get_search_history, note_search
 
 @bp.route('/')
 def index():
@@ -116,7 +119,9 @@ def search():
     lib = LibraryContext.get()
     if lib.is_empty:
         return "No library open."
-    
+
+    # before the empty-query return: clearing the box files the pending entry
+    note_search(lib, "query", raw_query)
     if not raw_query:
         return _render_query_feedback(QUERY_HELP_TEXT, state="muted")
 
@@ -144,6 +149,18 @@ def search():
     except Exception as e:
         logger.error(f"Search error: {e}")
         return _render_query_feedback(_query_error_message(spec.expression, e), state="error")
+
+
+@bp.route('/search-history/<box>')
+@admin_required
+def search_history_entries(box):
+    """Return a search box's history, newest first, as a JSON list of texts."""
+    if box not in BOXES:
+        abort(404)
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        return jsonify([])
+    return jsonify(get_search_history(lib).entries(box))
 
 
 @bp.route('/search-export-csv')

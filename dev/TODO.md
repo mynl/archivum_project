@@ -28,7 +28,7 @@ Key
 | >>CC | None | None | Closed, no work (Steve, 2026-10-24): call page from  http://127.0.0.1:9124 on DOOB to avoid. |
 | **A.03** | ✅| | Add paper tag and title in windows bar (currently says archivum, want PAPERTAG \| title of displayed pdf. Make the title bar a distinctive color (blue) would help distinguish the app. |
 | >>CC | Low | None | Easy: the title becomes `TAG \| title`, and the brand blue goes into the manifest and pages. ⚠ The blue shows only in an installed-app window (or on a phone), never in a normal browser tab. The app reinstalled from 127.0.0.1 qualifies. |
-| **A.04** | ⚪| | Text input boxes (eg query box, ripgrep box) do not store their history nicely; sometimes you see large and sometimes small fonts; no up/down to cycle through  |
+| **A.04** | ✅| | Text input boxes (eg query box, ripgrep box) do not store their history nicely; sometimes you see large and sometimes small fonts; no up/down to cycle through  |
 | >>CC | Medium | None | Today only Enter saves, and the app has no Enter, hence about 6 entries after months. Fix: the server already sees every search, so it keeps the last one per box and files it once you stop (10 s quiet, box cleared, or ↑). One history shared by local and VPN use. Also switch off Chrome's own autocomplete list, the small-font popup that grabs the arrows. Decided: 10 s; one history per library. |
 | **A.05** | | |   |
 | >>CC | | |
@@ -449,3 +449,18 @@ There is no thread, no polling, and nothing on page load. The first ↑ is one s
 **Acceptance.** The default suite and browser tests pass, and the production
 `search-history.csv` is not created or touched by the test run. Kick the tires (Steve): use the
 Query box normally for a few searches, then ↑ walks them, newest first, with no Chrome popup.
+
+**Execution notes (2.14.0, 2026-10-24).**
+
+- Names: module `web/services/search_history.py` (`SearchHistory.note` / `.entries`, `history_file`, `get_search_history`, `note_search`, `QUIET_SECONDS`, `LIMIT`, `BOXES`); route endpoint `main.search_history_entries`. No collisions in `src/`.
+- Divergence: `#tag-filter`, `#author-filter` and `#tag-search` already had `autocomplete="off"`; it went onto `#search-input`, `#rg-input`, `#network-search` and `#help-search` only.
+- Divergence (robustness, not in the plan): a failed CSV write (say, the file open in Excel) is logged and retried at the next filing, and `note_search` logs any history failure rather than raising, so a search never fails because of history. `/search-history/<box>` returns `[]` when no library is open.
+- Divergence: `last_used` is the time the search ran (the pending entry's time), not the time it was filed.
+- Divergence: the client keeps a counter bumped by typing, so a history fetch that returns after typing resumed is dropped instead of landing on new text.
+- Divergence: the production-path test builds its own app with the semantic warmups stubbed, not the shared `client`. With the shared fixture its warmup thread started the real transformer load, which raced the fakes in `tests/test_semantic_model_cache.py` (run next, alphabetically): one failure seen, gone after the change, two clean runs since.
+- Help: the Network bullet sits in the Social Graph list beside Live Interpretation, the list about the search box.
+- Not verified: Chrome's own autocomplete popup as the small-font cause. Headless Chromium shows no such popup, so this rests on Steve's kick of the tires.
+- Prod check: a snapshot of every file in the production library folder (189 files, size and mtime) taken before A.01 was identical after the A.04 gate, and no `search-history.csv` exists there.
+- Gate: default suite 135 passed, 26 skipped (twice); browser (`-m "web and browser and not slow" --run-browser`) 14 passed; both `uv run --no-sync`, `read.feather` writer deselected.
+- After the server restarts it writes `search-history.csv` into the library folder, by design: the first server write this feature makes.
+

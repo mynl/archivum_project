@@ -17,7 +17,7 @@
             <!-- In-page Search -->
             <div class="mb-4">
                 <div class="search-wrapper">
-                    <input type="text" id="help-search" class="form-control form-control-sm border-2" placeholder="Search help..." onkeyup="searchHelp()">
+                    <input type="text" id="help-search" class="form-control form-control-sm border-2" placeholder="Search help..." autocomplete="off" onkeyup="searchHelp()">
                     <i class="bi bi-x-circle clear-input" onclick="document.getElementById('help-search').value=''; searchHelp();"></i>
                 </div>
             </div>
@@ -205,7 +205,7 @@
                 <h5 class="fw-bold"><i class="bi bi-search me-2"></i>Query Page</h5>
                 <p>The default landing page for searching your library.</p>
                 <ul>
-                    <li><strong>Search Bar</strong>: Supports history (Up/Down arrows). Results appear instantly as you type, and the live status line shows the interpreted querexfuzz expression.</li>
+                    <li><strong>Search Bar</strong>: Results appear instantly as you type, and the live status line shows the interpreted querexfuzz expression. Up/Down walk your past searches, newest first, and run the one shown. A search is remembered once you stop: 10 seconds without a new search, clearing the box, or pressing Up. A burst of typing leaves one entry, its final text. The server keeps the history in the library folder (<code>search-history.csv</code>), so every browser and address shares it; read-only bridge visitors neither add to it nor see it.</li>
                     <li><strong>Quick Actions</strong>:
                         <ul>
                             <li><strong>Recent</strong>: The last 50, 100, or 250 references added to the library, newest first. This is the reference's own date added, not its document's: replacing a document does not move a reference up. <strong>Reference only</strong>, below the divider, lists references with no document.</li>
@@ -232,6 +232,7 @@
                     <li><strong>Interaction</strong>: Click an author to see their papers. Double-click to "Rebase" the graph onto that author.</li>
                     <li><strong>Ripgrep Universe</strong>: Searches using <code>rg</code> are case insensitive by default, matching the Ripgrep page behavior. Use <strong>Options &rarr; Case sensitive rg</strong> when exact case matters.</li>
                     <li><strong>Live Interpretation</strong>: The status box shows whether the current text is a raw query universe, a <code>q</code> querex universe, an <code>rg</code> full-text universe, or a combined <code>q ... rg ...</code> universe.</li>
+                    <li><strong>Search History</strong>: Up/Down in the search box recall past Social and Semantic searches, kept by the server as on the Query page. A recalled search runs on Enter or a button, as a typed one does.</li>
                 </ul>
 
                 <h6 class="fw-bold text-success small">2. Semantic Galaxy (Thematic Clustering)</h6>
@@ -252,6 +253,7 @@
                 <p>Search inside the actual text of your PDF collection.</p>
                 <ul>
                     <li><strong>Streaming Results</strong>: Matches are streamed to the browser in real-time.</li>
+                    <li><strong>Search History</strong>: Up/Down in the search box recall past searches, kept by the server as on the Query page. A recalled search runs on Enter or a button, as a typed one does.</li>
                     <li><strong>Regex Feedback</strong>: The small status line below the input checks whether the typed pattern is valid JavaScript regex syntax before running ripgrep.</li>
                     <li><strong>Context Control</strong>: Specify how many lines of context to show before and after matches.</li>
                     <li><strong>Summary Mode</strong>: Groups matches by year and author to provide statistical insights into your library's content.</li>

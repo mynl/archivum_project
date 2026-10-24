@@ -137,43 +137,54 @@
         });
 
         // --- Search History & Input Utilities ---
-        const searchHistories = {};
+        // The server keeps the history, built from the searches each box sends
+        // (services/search_history.py): one entry per burst of typing.
+        const SEARCH_BOXES = {'search-input': 'query', 'rg-input': 'ripgrep', 'network-search': 'network'};
 
         function initSearchInput(inputId) {
             const input = document.getElementById(inputId);
             if (!input) return;
-            
-            const storageKey = 'history_' + inputId;
-            searchHistories[inputId] = JSON.parse(localStorage.getItem(storageKey) || '[]');
-            let historyIndex = -1;
 
-            input.addEventListener('keydown', function(e) {
-                const history = searchHistories[inputId];
-                
-                if (e.key === 'Enter') {
-                    const val = input.value.trim();
-                    if (val && history[0] !== val) {
-                        history.unshift(val);
-                        if (history.length > 50) history.pop();
-                        localStorage.setItem(storageKey, JSON.stringify(history));
-                    }
-                    historyIndex = -1;
-                } else if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    if (historyIndex < history.length - 1) {
-                        historyIndex++;
-                        input.value = history[historyIndex];
-                    }
-                } else if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    if (historyIndex > 0) {
-                        historyIndex--;
-                        input.value = history[historyIndex];
-                    } else if (historyIndex === 0) {
-                        historyIndex = -1;
-                        input.value = '';
-                    }
+            // retire the browser-stored history of earlier versions
+            try { localStorage.removeItem('history_' + inputId); } catch (err) {}
+
+            const box = SEARCH_BOXES[inputId];
+            let entries = null;   // null until the first Up fetches them
+            let index = -1;       // -1 is the typed text
+            let typed = '';
+            let walk = 0;         // bumped by typing, so a slow fetch cannot land on new text
+
+            // fired by typing, not by setting the value from code
+            input.addEventListener('input', () => { entries = null; index = -1; walk++; });
+
+            input.addEventListener('keydown', async (e) => {
+                if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                e.preventDefault();
+                if (entries === null) {
+                    if (e.key === 'ArrowDown') return;
+                    typed = input.value;
+                    entries = [];
+                    const started = walk;
+                    let list = [];
+                    try {
+                        const response = await fetch('/search-history/' + box);
+                        if (response.ok) list = await response.json();
+                    } catch (err) {}
+                    if (walk !== started) return;
+                    // fetching files the pending search, usually the text in the box; recalling it would look like nothing happened
+                    entries = list.filter(text => text !== typed.trim());
                 }
+                if (e.key === 'ArrowUp') {
+                    if (index >= entries.length - 1) return;
+                    index++;
+                    input.value = entries[index];
+                } else {
+                    if (index < 0) return;
+                    index--;
+                    input.value = index < 0 ? typed : entries[index];
+                }
+                // the first Up awaits a fetch, so the real keyup can come before the value changes
+                htmx.trigger(input, 'keyup');
             });
 
             // Add clear icon functionality if present
@@ -193,6 +204,7 @@
         window.addEventListener('load', () => {
             initSearchInput('search-input');
             initSearchInput('rg-input');
+            initSearchInput('network-search');
         });
     </script>
 </body>
