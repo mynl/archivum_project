@@ -130,3 +130,39 @@ def test_reader_opens_one_page_at_a_time(app, page):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+@pytest.mark.web
+@pytest.mark.browser
+def test_reader_fits_the_page_and_the_wheel_turns_pages(app, page):
+    # the default 1280x720 viewport is height-limited: the case that left 14px of scroll slack
+    require_module("playwright")
+    server = make_server("127.0.0.1", 0, app)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        page.goto(f"http://127.0.0.1:{server.server_port}/view/Paper2024", wait_until="domcontentloaded")
+        frame = page.locator("#reader").element_handle().content_frame()
+        frame.wait_for_function(
+            """() => window.PDFViewerApplication?.pdfViewer?.pagesCount > 0
+                && PDFViewerApplication.pdfViewer.currentScaleValue === 'page-fit'""",
+            timeout=60_000,
+        )
+        fit = frame.evaluate(
+            """() => {
+                const c = document.getElementById('viewerContainer');
+                return {scroll: c.scrollHeight, client: c.clientHeight};
+            }"""
+        )
+        assert fit["scroll"] <= fit["client"]
+
+        viewport = page.viewport_size
+        page.mouse.move(viewport["width"] / 2, viewport["height"] / 2)
+        page.mouse.wheel(0, 100)
+        frame.wait_for_function("() => PDFViewerApplication.pdfViewer.currentPageNumber === 2", timeout=10_000)
+        page.wait_for_timeout(200)  # a notch inside the 50 ms cooldown after a turn is swallowed
+        page.mouse.wheel(0, -100)
+        frame.wait_for_function("() => PDFViewerApplication.pdfViewer.currentPageNumber === 1", timeout=10_000)
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)

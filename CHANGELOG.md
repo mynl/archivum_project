@@ -5,6 +5,15 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.13.2 (2026-10-24)
+
+### Fixed
+
+- The reader's Page Fit shows the whole page with no scrollbar; before, a
+  hidden page border left 14 pixels of slack and the page jiggled.
+- The mouse wheel turns pages at Page Fit, one notch one page, and scrolls
+  within the page when zoomed in. Ctrl+wheel still zooms.
+
 ## 2.13.1 (2026-10-15)
 
 ### Fixed

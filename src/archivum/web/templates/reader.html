@@ -18,12 +18,42 @@
         // document before it initializes: the supported hook for its options.
         // Registered before the iframe exists, so it cannot miss the event.
         document.addEventListener('webviewerloaded', (event) => {
-            const options = event.detail.source.PDFViewerApplicationOptions;
+            const win = event.detail.source;
+            const options = win.PDFViewerApplicationOptions;
             // stored viewer preferences would otherwise override what follows
             options.set('disablePreferences', true);
             options.set('scrollModeOnLoad', 3);       // ScrollMode.PAGE: one page at a time
             options.set('spreadModeOnLoad', 0);       // SpreadMode.NONE
             options.set('defaultZoomValue', 'page-fit');
+
+            // Page Fit allows 5px of padding, but each page carries a 9px transparent border and a
+            // 1px / -8px margin: 14px of scroll slack in one-page view. The viewer's CSP
+            // (style-src 'self') blocks a <style> element; variables set through the CSSOM are allowed.
+            const viewer = win.document.getElementById('viewer');
+            viewer.style.setProperty('--page-margin', '2px auto 0');
+            viewer.style.setProperty('--page-border', '0 solid transparent');
+
+            // The wheel turns pages while the page fits; zoomed in, it scrolls within the page.
+            // Thresholds follow PDF.js presentation mode: delta in pages (pixels / 900, lines / 30),
+            // turn at 0.1, 50 ms cooldown after a turn.
+            const container = win.document.getElementById('viewerContainer');
+            let accumulated = 0, lastTurn = 0;
+            container.addEventListener('wheel', (e) => {
+                const pdfViewer = win.PDFViewerApplication.pdfViewer;
+                if (e.ctrlKey || e.metaKey || pdfViewer.scrollMode !== 3 || pdfViewer.isInPresentationMode) return;
+                if (container.scrollHeight > container.clientHeight + 1) return;   // zoomed in
+                e.preventDefault();
+                const now = Date.now();
+                if (now - lastTurn < 50) return;
+                const delta = e.deltaMode === 0 ? e.deltaY / 900 : e.deltaMode === 1 ? e.deltaY / 30 : e.deltaY;
+                if (accumulated * delta < 0) accumulated = 0;      // direction changed
+                accumulated += delta;
+                if (Math.abs(accumulated) >= 0.1) {
+                    const turned = accumulated > 0 ? pdfViewer.nextPage() : pdfViewer.previousPage();
+                    accumulated = 0;
+                    if (turned) lastTurn = now;
+                }
+            }, {passive: false});
         });
     </script>
 </head>
