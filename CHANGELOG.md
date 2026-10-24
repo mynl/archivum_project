@@ -5,6 +5,14 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.13.3 (2026-10-24)
+
+### Changed
+
+- Reader windows are titled `TAG | title`; before, `TAG: title`.
+- The app's theme color is the brand blue, in the manifest and on every page.
+  It colors the title bar of the installed app; a normal browser tab ignores it.
+
 ## 2.13.2 (2026-10-24)
 
 ### Fixed

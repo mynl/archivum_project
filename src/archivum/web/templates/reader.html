@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     {# tabs read as tags, not shard filenames #}
-    <title>{{ tag }}{% if short_title %}: {{ short_title }}{% endif %}</title>
+    <title>{{ tag }}{% if short_title %} | {{ short_title }}{% endif %}</title>
+    <meta name="theme-color" content="#0d6efd">
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='icon/favicon-32x32.png') }}">
     <link rel="icon" href="{{ url_for('static', filename='icon/android-chrome-192x192.png') }}" sizes="192x192">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon/apple-touch-icon.png') }}">

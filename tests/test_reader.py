@@ -65,7 +65,8 @@ def test_view_renders_the_reader_and_counts_one_read(app, lib):
 
     html = client.get("/view/Paper2024").get_data(as_text=True)
 
-    assert "<title>Paper2024: A Paper to Read</title>" in html
+    assert "<title>Paper2024 | A Paper to Read</title>" in html
+    assert '<meta name="theme-color" content="#0d6efd">' in html
     assert "vendor/pdfjs/web/viewer.html?file=/file/Paper2024" in html
     assert "webviewerloaded" in html
     assert _reads(lib, HPDF) == 1
@@ -73,6 +74,13 @@ def test_view_renders_the_reader_and_counts_one_read(app, lib):
     by_hash = client.get(f"/view-hash/{HPDF}").get_data(as_text=True)
     assert f"viewer.html?file=/file-hash/{HPDF}" in by_hash
     assert _reads(lib, HPDF) == 2
+
+
+def test_app_pages_and_manifest_carry_the_brand_theme_color(app):
+    client = app.test_client()
+
+    assert '<meta name="theme-color" content="#0d6efd">' in client.get("/").get_data(as_text=True)
+    assert client.get("/static/manifest.json").get_json()["theme_color"] == "#0d6efd"
 
 
 def test_file_serves_raw_bytes_with_ranges_and_no_read(app, lib):

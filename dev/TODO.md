@@ -26,7 +26,7 @@ Key
 | >>CC | Low | None | PDF.js wraps each page in an invisible 9px border, so "page fit" ends up 14px taller than the window: you get a scrollbar and the wheel nudges the page instead of turning it. Fix: drop the border, make the wheel turn pages. Both checked in a test browser. |
 | **A.02** | ⚪|✅ | Opened files have "Not Secure..." in header - can that be removed  |
 | >>CC | None | None | Closed, no work (Steve, 2026-10-24): call page from  http://127.0.0.1:9124 on DOOB to avoid. |
-| **A.03** | ⚪| | Add paper tag and title in windows bar (currently says archivum, want PAPERTAG \| title of displayed pdf. Make the title bar a distinctive color (blue) would help distinguish the app. |
+| **A.03** | ✅| | Add paper tag and title in windows bar (currently says archivum, want PAPERTAG \| title of displayed pdf. Make the title bar a distinctive color (blue) would help distinguish the app. |
 | >>CC | Low | None | Easy: the title becomes `TAG \| title`, and the brand blue goes into the manifest and pages. ⚠ The blue shows only in an installed-app window (or on a phone), never in a normal browser tab. The app reinstalled from 127.0.0.1 qualifies. |
 | **A.04** | ⚪| | Text input boxes (eg query box, ripgrep box) do not store their history nicely; sometimes you see large and sometimes small fonts; no up/down to cycle through  |
 | >>CC | Medium | None | Today only Enter saves, and the app has no Enter, hence about 6 entries after months. Fix: the server already sees every search, so it keeps the last one per box and files it once you stop (10 s quiet, box cleared, or ↑). One history shared by local and VPN use. Also switch off Chrome's own autocomplete list, the small-font popup that grabs the arrows. Decided: 10 s; one history per library. |
@@ -252,6 +252,13 @@ is the brand blue, which colors the installed app's title bar.
 
 **Acceptance.** Tests pass. Kick the tires (Steve): open a paper from the installed app and
 check the window title and the blue bar.
+
+**Execution notes (2.13.3, 2026-10-24).**
+
+- Landed as specified, no divergence. The new test is `test_app_pages_and_manifest_carry_the_brand_theme_color` in `tests/test_reader.py`, on the temp library.
+- For Steve: the manifest has `"display_override": ["tabbed"]`, so the installed app may open in tabbed mode, where each tab carries the page title and the window bar carries the app name. If the window bar still reads only "archivum", that is Chrome showing the manifest `name`, as the caveat above says; not chased.
+- Templates and the manifest change only after the running server restarts, and Chrome refreshes an installed app's manifest lazily.
+- Gate: default suite 126 passed, 25 skipped; browser (`-m "web and browser and not slow" --run-browser`) 13 passed; both with `uv run --no-sync` and the `read.feather` writer deselected, as in A.01.
 
 #### A.04 Search box history from typed searches
 
