@@ -5,6 +5,22 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.15.0 (2026-10-25)
+
+### Changed
+
+- Ingest no longer refuses a duplicate. A match warns in the preview, red for
+  the same file, amber for the same DOI or title, and **Import anyway as TAG**
+  adds it as a separate reference with its own tag.
+- The same file under different metadata and a title or DOI match with a
+  document-less reference used to import silently; both now wait for Import
+  anyway too.
+- **GO: Archive Document** on an unconfirmed match stays on the document with
+  its edited BibTeX, instead of marking it failed and moving on.
+- A title or DOI match with a reference that has no document offers **Attach
+  this file to TAG**, beside Replace document for one that has.
+- Reference-only adds get the same amber warning and Import anyway.
+
 ## 2.14.0 (2026-10-24)
 
 ### Added

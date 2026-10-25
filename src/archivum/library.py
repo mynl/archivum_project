@@ -1883,6 +1883,7 @@ class Library(LibraryBase):
         known_hash: str | None = None,
         source_label: str = "web-ingest",
         extract_text: bool = True,
+        allow_duplicate: bool = False,
     ):
         """
         Import one staged document through the same incremental BibTeX path as the CLI.
@@ -1894,16 +1895,21 @@ class Library(LibraryBase):
         ``staged_document_path=None`` adds a reference with no document: no
         ``file`` field, and the importer runs with no document directory. Tag
         allocation, name normalization, and duplicate checks are unchanged.
+
+        A file, DOI, or title match with the library (see :meth:`import_conflict`)
+        raises :class:`LibraryImportBlocked` unless ``allow_duplicate`` is True,
+        the web ingest's Import anyway. Then the entry is added as a new
+        reference with its own tag, even when file and metadata both match.
         """
         if staged_document_path is None:
             with tempfile.TemporaryDirectory(prefix="archivum-ref-") as review_dir:
                 return self._import_staged(bibtex_text, None, Path(review_dir), known_hash,
-                                           source_label, extract_text)
+                                           source_label, extract_text, allow_duplicate)
         return self._import_staged(bibtex_text, staged_document_path, None, known_hash,
-                                   source_label, extract_text)
+                                   source_label, extract_text, allow_duplicate)
 
     def _import_staged(self, bibtex_text, staged_document_path, review_dir, known_hash,
-                       source_label, extract_text):
+                       source_label, extract_text, allow_duplicate):
         """Body of :meth:`import_staged_document`, inside any temporary review dir."""
         importer = self._make_staged_document_importer(
             bibtex_text,
@@ -1912,14 +1918,15 @@ class Library(LibraryBase):
             source_label=source_label,
             write_audit=False,
             review_dir=review_dir,
+            skip_duplicates=not allow_duplicate,
         )
 
-        analysis = importer.import_analysis()
-        self._raise_for_blocked_import(
-            analysis,
-            fallback_tag=self._first_bibtex_tag(bibtex_text),
-            reference_only=staged_document_path is None,
-        )
+        if not allow_duplicate:
+            self._raise_for_blocked_import(
+                importer.import_analysis(),
+                fallback_tag=self._first_bibtex_tag(bibtex_text),
+                reference_only=staged_document_path is None,
+            )
 
         if importer.ported_df.empty:
             raise LibraryImportBlocked("Import did not produce any new entries.")
@@ -2011,7 +2018,8 @@ class Library(LibraryBase):
 
         Used when an ingest turns out to be a better copy of something already
         in the library (analysis action ``Merge/Warn``): same paper, different
-        file. The new document is registered, sharded under the *existing*
+        file; or the file for a reference that has none (``Import (Fill)``,
+        nothing to demote). The new document is registered, sharded under the *existing*
         reference's metadata, and linked at priority 0; the previous document
         is demoted to priority 1 but keeps its doc row and its sharded hard
         link, so the change is reversible by zeroing its priority.
@@ -2124,6 +2132,7 @@ class Library(LibraryBase):
         Return the BibTeX and analysis that the real staged import would produce.
 
         ``staged_document_path=None`` previews a reference with no document.
+        Duplicates are kept, so the preview shows what Import anyway would add.
         """
         if staged_document_path is None:
             with tempfile.TemporaryDirectory(prefix="archivum-ref-") as review_dir:
@@ -2142,6 +2151,7 @@ class Library(LibraryBase):
             source_label=source_label,
             write_audit=False,
             review_dir=review_dir,
+            skip_duplicates=False,
         )
         analysis = importer.import_analysis()
         conflict = self.import_conflict(
@@ -2185,6 +2195,7 @@ class Library(LibraryBase):
         source_label: str,
         write_audit: bool,
         review_dir: Path | None = None,
+        skip_duplicates: bool = True,
     ):
         """
         Run ``Bib2df_Incremental`` on one edited entry, with or without a document.
@@ -2193,7 +2204,7 @@ class Library(LibraryBase):
         is injected as the ``file`` field. Without one (``staged_document_path``
         None) the review bib goes in ``review_dir``, any ``file`` field is
         dropped, and the importer gets no document directory, which is its
-        no-documents path.
+        no-documents path. ``skip_duplicates`` passes through to the importer.
         """
         from .bibtex import bibtex_to_dict
         from .import_bibtex import Bib2df_Incremental
@@ -2220,6 +2231,7 @@ class Library(LibraryBase):
                 incremental=True,
                 fillna=True,
                 write_audit=write_audit,
+                skip_duplicates=skip_duplicates,
             )
             importer.import_bibtex_file()
             return importer
@@ -2251,6 +2263,7 @@ class Library(LibraryBase):
             incremental=True,
             fillna=True,
             write_audit=write_audit,
+            skip_duplicates=skip_duplicates,
         )
         importer.import_bibtex_file()
 
@@ -2276,51 +2289,68 @@ class Library(LibraryBase):
         if blocked_message:
             raise LibraryImportBlocked(blocked_message)
 
-    # actions that stop a staged import; "Merge/Warn" is resolvable by replacing
-    # the document on the matched reference, "SKIP (Dupe)" is not
-    BLOCKING_ACTIONS = ("SKIP (Dupe)", "Merge/Warn")
-    # with no document there is nothing to fill: a DOI or title match with a
-    # document-less reference is simply a duplicate reference
-    REFERENCE_ONLY_BLOCKING_ACTIONS = BLOCKING_ACTIONS + ("Import (Fill)",)
+    # analysis actions that hold a staged import until the user confirms Import
+    # anyway: a file match warns red, a DOI or title match alone warns amber
+    SAME_FILE_ACTIONS = ("SKIP (Dupe)", "Link Existing")
+    SAME_METADATA_ACTIONS = ("Merge/Warn", "Import (Fill)")
 
     @classmethod
     def import_conflict(cls, analysis: pd.DataFrame, *, fallback_tag: str = "",
                         reference_only: bool = False) -> dict | None:
         """
-        Describe the first blocking row of an import analysis, or None if clean.
+        Describe the first matching row of an import analysis, or None if clean.
 
-        Returns ``{action, tag, match_tag, title, resolvable, message}``.
-        ``resolvable`` marks a Merge/Warn -- the new file is a different
-        document that matches an existing reference by DOI or title, so the
-        user can choose to replace that reference's document.
+        Returns ``{action, tag, match_tag, title, same_file, matched_on, level,
+        match_has_doc, resolvable, message}``. ``same_file`` is a hash match
+        (``level`` "danger", red); otherwise the match is on DOI or title only
+        (``level`` "warning", amber). ``matched_on`` lists what matched, e.g.
+        "file and title". Either way the import goes ahead only on Import
+        anyway.
 
-        ``reference_only`` (an import with no document) blocks on any DOI or
-        title match, and nothing is resolvable: there is no file to swap in.
+        ``resolvable`` marks a new file whose metadata matches an existing
+        reference, so the file can instead become that reference's primary
+        document: a replacement when it has one (``Merge/Warn``), its first
+        document when not (``Import (Fill)``). Never for ``reference_only``,
+        which has no file to attach.
         """
         if analysis.empty or "action" not in analysis.columns:
             return None
-        blocking = cls.REFERENCE_ONLY_BLOCKING_ACTIONS if reference_only else cls.BLOCKING_ACTIONS
-        blocked = analysis[analysis["action"].isin(blocking)]
-        if blocked.empty:
+        held = analysis[analysis["action"].isin(cls.SAME_FILE_ACTIONS + cls.SAME_METADATA_ACTIONS)]
+        if held.empty:
             return None
 
-        row = blocked.iloc[0]
-        action = str(row.get("action", "duplicate warning"))
+        row = held.iloc[0]
+        action = str(row.get("action", ""))
         tag = str(row.get("tag", "") or fallback_tag)
         match_tag = str(row.get("match tag", "") or "")
         title = str(row.get("title", "") or "")
+        same_file = action in cls.SAME_FILE_ACTIONS
 
-        parts = [f"Import blocked: {action}", f"tag {tag}"]
-        if title:
-            parts.append(f"title {title}")
+        # match columns read "Y (doc)" / "Y (no doc)" / "N"
+        parts = ["file"] if same_file else []
+        parts += [kind for kind in ("DOI", "title")
+                  if str(row.get(f"{kind.lower()} match", "")).startswith("Y")]
+        if not parts:
+            parts = ["DOI or title"]
+        matched_on = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+        # a hash match with no tag is an orphan document: no reference links it
+        where = match_tag or ("a document" if same_file else "a reference") + " already in the library"
+        message = (f"{tag} has the same {matched_on} as {where}. "
+                   f"Import anyway adds it as a separate reference.")
 
         return {
             "action": action,
             "tag": tag,
             "match_tag": match_tag,
             "title": title,
-            "resolvable": action == "Merge/Warn" and bool(match_tag) and not reference_only,
-            "message": "; ".join(parts),
+            "same_file": same_file,
+            "matched_on": matched_on,
+            "level": "danger" if same_file else "warning",
+            "match_has_doc": action != "Import (Fill)",
+            "resolvable": (action in cls.SAME_METADATA_ACTIONS and bool(match_tag)
+                           and not reference_only),
+            "message": message,
         }
 
     @classmethod
@@ -2329,7 +2359,6 @@ class Library(LibraryBase):
         conflict = cls.import_conflict(analysis, fallback_tag=fallback_tag,
                                        reference_only=reference_only)
         return conflict["message"] if conflict else None
-        return None
 
     def history(self):
         """The history of how self was built from the audit files."""

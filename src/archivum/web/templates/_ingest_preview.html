@@ -6,17 +6,22 @@
         {% endif %}
     </div>
     <div class="card-body p-0">
-        {% if conflict and conflict.resolvable %}
-            {# Merge/Warn: a different file that matches a reference which already
-               has a document. Offer the swap instead of refusing the import. #}
-            <div class="alert alert-warning m-3 mb-0" role="alert">
+        {% if conflict %}
+            {# A file, DOI, or title match with the library. Nothing is refused:
+               the import waits for Import anyway, red for the same file, amber
+               for the same DOI or title. A new file whose metadata matches can
+               instead become that reference's primary document. #}
+            <div class="alert alert-{{ conflict.level }} m-3 mb-0" role="alert">
                 <div>
-                    This looks like a duplicate of
-                    <a href="{{ url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>,
-                    which already has a document{% if conflict.title %} &mdash; <em>{{ conflict.title }}</em>{% endif %}.
-                    The file itself is new. Replace the existing document?
+                    <strong>Same {{ conflict.matched_on }}</strong> as
+                    {% if conflict.match_tag %}<a href="{{ url_for('main.editor_page', tag=conflict.match_tag) if reference_only else url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>{% else %}{{ 'a document' if conflict.same_file else 'a reference' }} already in the library{% endif %}
+                    {%- if conflict.same_file %}: this file is already archived. Import anyway adds a separate reference to the same file.
+                    {%- elif conflict.resolvable and conflict.match_has_doc %}, which already has a document; this file is new. Replace that document, or import anyway as a separate reference.
+                    {%- elif conflict.resolvable %}, which has no document. Attach this file to it, or import anyway as a separate reference.
+                    {%- else %}. Import anyway adds a separate reference.{% endif %}
                 </div>
-                <div class="d-flex gap-2 mt-3 align-items-start">
+                <div class="d-flex flex-wrap gap-2 mt-3 align-items-start">
+                    {% if conflict.resolvable %}
                     <form hx-post="{{ url_for('main.ingest_replace') }}"
                           hx-target="#ingest-workbench"
                           hx-include="#workbench-bibtex"
@@ -25,9 +30,9 @@
                         <input type="hidden" name="idx" value="{{ idx }}">
                         <input type="hidden" name="hash" value="{{ known_hash }}">
                         <input type="hidden" name="match_tag" value="{{ conflict.match_tag }}">
-                        <button type="submit" class="btn btn-sm btn-warning fw-bold">
+                        <button type="submit" class="btn btn-sm btn-primary fw-bold">
                             <span id="replace-indicator-{{ idx }}" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
-                            Replace document on {{ conflict.match_tag }}
+                            {{ 'Replace document on' if conflict.match_has_doc else 'Attach this file to' }} {{ conflict.match_tag }}
                         </button>
                         <div class="form-check mt-2 small">
                             <input class="form-check-input" type="checkbox" name="update_metadata" id="update-metadata-{{ idx }}">
@@ -36,6 +41,23 @@
                             </label>
                         </div>
                     </form>
+                    {% endif %}
+                    <form hx-post="{{ url_for('main.ingest_reference_commit') if reference_only else url_for('main.ingest_commit') }}"
+                          hx-target="#ingest-workbench"
+                          hx-include="#workbench-bibtex"
+                          hx-indicator="#anyway-indicator-{{ idx }}">
+                        {% if not reference_only %}
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <input type="hidden" name="idx" value="{{ idx }}">
+                        <input type="hidden" name="hash" value="{{ known_hash }}">
+                        {% endif %}
+                        <input type="hidden" name="import_anyway" value="on">
+                        <button type="submit" class="btn btn-sm btn-{{ conflict.level }} fw-bold">
+                            <span id="anyway-indicator-{{ idx }}" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+                            Import anyway{% if preview_tag %} as {{ preview_tag }}{% endif %}
+                        </button>
+                    </form>
+                    {% if not reference_only %}
                     <form hx-post="{{ url_for('main.ingest_next') }}" hx-target="#ingest-workbench">
                         <input type="hidden" name="batch_id" value="{{ batch_id }}">
                         <input type="hidden" name="idx" value="{{ idx }}">
@@ -45,28 +67,13 @@
                         <input type="hidden" name="batch_id" value="{{ batch_id }}">
                         <button type="submit" class="btn btn-sm btn-outline-secondary">Cancel</button>
                     </form>
+                    {% endif %}
                 </div>
             </div>
         {% elif preview_blocked %}
+            {# the preview itself failed, e.g. an incomplete entry #}
             <div class="alert alert-danger m-3 mb-0" role="alert">
                 {{ preview_message }}
-                {% if reference_only and conflict and conflict.match_tag %}
-                    <div class="mt-2 small">
-                        A reference with this DOI or title is already in the library:
-                        <a href="{{ url_for('main.editor_page', tag=conflict.match_tag) }}" class="fw-bold">{{ conflict.match_tag }}</a>.
-                    </div>
-                {% elif conflict and conflict.match_tag %}
-                    <div class="mt-2 small">
-                        Already in the library as
-                        <a href="{{ url_for('main.view', tag=conflict.match_tag) }}" target="_blank" class="fw-bold">{{ conflict.match_tag }}</a>
-                        &mdash; same file and same metadata, so there is nothing to replace.
-                    </div>
-                    <form class="mt-2" hx-post="{{ url_for('main.ingest_next') }}" hx-target="#ingest-workbench">
-                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
-                        <input type="hidden" name="idx" value="{{ idx }}">
-                        <button type="submit" class="btn btn-sm btn-outline-secondary">Skip this document</button>
-                    </form>
-                {% endif %}
             </div>
         {% else %}
             <div class="alert alert-success m-3 mb-0" role="alert">

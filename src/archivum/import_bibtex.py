@@ -164,6 +164,7 @@ class Bib2df_Incremental(LibraryBase):
         incremental=False,
         qd=None,
         write_audit=True,
+        skip_duplicates=True,
     ):
         """
         Read Path p into bibtex df, doc_dir is a Path to pdf files (must exist)
@@ -218,6 +219,10 @@ class Bib2df_Incremental(LibraryBase):
         ``Library.history`` reads. When False nothing is written and neither
         directory is created. Bulk CLI imports audit; staged single-document
         imports from the web do not.
+
+        ``skip_duplicates`` (incremental mode only) drops entries whose file and
+        metadata both match the library ("SKIP (Dupe)"). The web ingest passes
+        False when the user confirms Import anyway.
         """
         self.bibtex_file_path = Path(bibtex_file_path)
         self.name = self.bibtex_file_path.stem
@@ -229,6 +234,7 @@ class Bib2df_Incremental(LibraryBase):
         self._add_hashes = add_hashes or incremental
         self.incremental = incremental
         self.write_audit = write_audit
+        self.skip_duplicates = skip_duplicates
         assert self.bibtex_file_path.exists(), "Bibtex file must exist"
         if self.doc_dir and not self.doc_dir.exists():
             logger.info("PDF directory is None or does not exist")
@@ -1098,7 +1104,7 @@ class Bib2df_Incremental(LibraryBase):
         self._analysis_cache = self.import_analysis(lib_test=True)
         
         # 2. Filter duplicates in Incremental Mode
-        if self.incremental:
+        if self.incremental and self.skip_duplicates:
             logger.info("Incremental Mode: Identifying and removing duplicates...")
             if not self._analysis_cache.empty:
                 # ONLY kick out if it is a Skip action (Hash + Metadata match)

@@ -304,6 +304,8 @@ def ingest_commit():
     batch_id = request.form.get('batch_id', '')
     idx = request.form.get('idx', '0')
     h = request.form.get('hash')
+    # the preview's Import anyway button, after a file, DOI, or title match
+    import_anyway = request.form.get('import_anyway') == 'on'
 
     from ...library import LibraryImportBlocked
 
@@ -317,6 +319,7 @@ def ingest_commit():
     try:
         importer = lib.import_staged_document(
             bibtex, path, known_hash=h, source_label="web-ingest",
+            allow_duplicate=import_anyway,
         )
         tag = str(importer.ref_df.iloc[0].tag)
         mark(batch_id, idx, "done", tag=tag, hash=h)
@@ -329,8 +332,11 @@ def ingest_commit():
             ),
         )
     except LibraryImportBlocked as e:
-        mark(batch_id, idx, "failed", message=str(e))
-        banner = _banner('danger', message=f"{name}: {e}")
+        # an unconfirmed match: stay on this document, whose preview offers
+        # Import anyway, rather than failing it and moving on
+        return _render_workbench(lib, state, int(idx), bibtex_override=bibtex) + _banner(
+            'warning', message=f"{name}: not imported. {e}"
+        )
     except Exception as e:
         logger.error(f"Commit error: {e}")
         mark(batch_id, idx, "failed", message=str(e))
@@ -370,13 +376,18 @@ def ingest_replace():
         )
         mark(batch_id, idx, "replaced", tag=target_tag, hash=result["hash"])
         extra = " and metadata updated" if update_meta else ""
+        # a reference that had no document has nothing to keep
+        kept = (
+            '<span class="text-muted ms-2">previous document kept as an alternate</span>'
+            if result.get("demoted") else ""
+        )
         banner = _banner(
             'success',
             html_message=(
                 f'<strong>{html.escape(name)}</strong> is now the primary document for '
                 f'<strong>{html.escape(target_tag)}</strong>{extra} '
                 f'<a href="/view/{html.escape(target_tag, quote=True)}" target="_blank">View</a>'
-                f'<span class="text-muted ms-2">previous document kept as an alternate</span>'
+                f'{kept}'
             ),
         )
     except Exception as e:
@@ -427,11 +438,15 @@ def ingest_reference_commit():
 
     lib = LibraryContext.get()
     bibtex = request.form.get('bibtex', '')
+    import_anyway = request.form.get('import_anyway') == 'on'
     try:
-        importer = lib.import_staged_document(bibtex, None, source_label="web-ingest-reference")
+        importer = lib.import_staged_document(bibtex, None, source_label="web-ingest-reference",
+                                              allow_duplicate=import_anyway)
         tag = str(importer.ref_df.iloc[0].tag)
     except LibraryImportBlocked as e:
-        return _render_reference_workbench(lib, bibtex) + _banner('danger', message=str(e))
+        return _render_reference_workbench(lib, bibtex) + _banner(
+            'warning', message=f"Not added. {e}"
+        )
     except Exception as e:
         logger.error(f"Reference commit error: {e}")
         return _render_reference_workbench(lib, bibtex) + _banner('danger', message=f"Error: {e}")

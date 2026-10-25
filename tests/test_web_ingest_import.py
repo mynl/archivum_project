@@ -138,12 +138,48 @@ def test_import_staged_document_blocks_duplicate_analysis(tmp_path, monkeypatch)
 
     monkeypatch.setattr("archivum.import_bibtex.Bib2df_Incremental", FakeImporter)
 
-    with pytest.raises(LibraryImportBlocked, match="Merge/Warn"):
+    with pytest.raises(LibraryImportBlocked, match="same DOI or title"):
         lib.import_staged_document(
             "@article{smith2024, title = {A Paper}, year = {2024}}",
             staged,
             extract_text=False,
         )
+
+
+def test_import_staged_document_allow_duplicate_keeps_the_entry(tmp_path, monkeypatch):
+    """Import anyway: no conflict check, and the importer keeps SKIP (Dupe) rows."""
+    staged = tmp_path / "paper.pdf"
+    staged.write_bytes(b"%PDF-1.4\n")
+    lib = _fake_library(tmp_path)
+    calls = {}
+
+    class FakeImporter:
+        ported_df = pd.DataFrame([{"tag": "smith2024a"}])
+        doc_df = pd.DataFrame()
+
+        def __init__(self, **kwargs):
+            calls["skip_duplicates"] = kwargs["skip_duplicates"]
+
+        def import_bibtex_file(self):
+            return pd.DataFrame()
+
+        def import_analysis(self):
+            raise AssertionError("Import anyway must not consult the analysis")
+
+        def update_library(self, save=True):
+            calls["update_library_save"] = save
+
+    monkeypatch.setattr("archivum.import_bibtex.Bib2df_Incremental", FakeImporter)
+
+    lib.import_staged_document(
+        "@article{smith2024, title = {A Paper}, year = {2024}}",
+        staged,
+        extract_text=False,
+        allow_duplicate=True,
+    )
+
+    assert calls["skip_duplicates"] is False
+    assert calls["update_library_save"] is True
 
 
 def test_import_staged_document_writes_no_audit_files(tmp_path, monkeypatch):
@@ -293,14 +329,39 @@ def test_ingest_commit_delegates_to_library_helper(tmp_path, monkeypatch):
     assert "Zone A: The Documents" in html
     assert lib.calls["kwargs"]["known_hash"] == "abc123"
     assert lib.calls["kwargs"]["source_label"] == "web-ingest"
+    assert lib.calls["kwargs"]["allow_duplicate"] is False
 
 
-def test_ingest_commit_renders_duplicate_block_alert(tmp_path, monkeypatch):
+def test_ingest_commit_import_anyway_allows_the_duplicate(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+
+    class FakeLibrary(_FakePreviewLibrary):
+        def import_staged_document(self, bibtex, staged_document_path, **kwargs):
+            self.calls["kwargs"] = kwargs
+            return SimpleNamespace(ref_df=pd.DataFrame([{"tag": "Smith2024a"}]))
+
+    lib = FakeLibrary()
+    client = _batch_app(monkeypatch, lib).test_client()
+    start = _stage_one(client).get_data(as_text=True)
+    batch_id = start.split('name="batch_id" value="')[1].split('"')[0]
+
+    html = client.post(
+        "/ingest/commit",
+        data={"bibtex": "@article{s, title={A}}", "batch_id": batch_id,
+              "idx": "0", "hash": "abc123", "import_anyway": "on"},
+    ).get_data(as_text=True)
+
+    assert lib.calls["kwargs"]["allow_duplicate"] is True
+    assert "archived as" in html and "Smith2024a" in html
+
+
+def test_ingest_commit_on_a_match_stays_on_the_document(tmp_path, monkeypatch):
+    """GO on an unconfirmed match keeps the document and the edited BibTeX."""
     monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
 
     class FakeLibrary(_FakePreviewLibrary):
         def import_staged_document(self, *args, **kwargs):
-            raise LibraryImportBlocked("Import blocked: SKIP (Dupe); tag smith2024")
+            raise LibraryImportBlocked("smith2024 has the same file and title as Old2020.")
 
     lib = FakeLibrary()
     app = _batch_app(monkeypatch, lib)
@@ -311,14 +372,16 @@ def test_ingest_commit_renders_duplicate_block_alert(tmp_path, monkeypatch):
 
     response = client.post(
         "/ingest/commit",
-        data={"bibtex": "@article{s, title={A}}", "batch_id": batch_id,
+        data={"bibtex": "@article{s, title={Edited Title}}", "batch_id": batch_id,
               "idx": "0", "hash": "abc123"},
     )
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "alert-danger" in html
-    assert "SKIP (Dupe)" in html
+    assert "Ingest Workbench" in html
+    assert "title={Edited Title}" in html
+    assert "not imported" in html and "same file and title as Old2020" in html
+    assert ib.load_batch(batch_id)["items"][0]["status"] == "pending"
 
 
 def test_ingest_preview_route_uses_library_preview(tmp_path, monkeypatch):
@@ -360,11 +423,12 @@ def test_ingest_offers_replace_for_resolvable_duplicate(tmp_path, monkeypatch):
                     [{"tag": "New2024", "action": "Merge/Warn", "match tag": "Old2020"}]
                 ),
                 "blocked": True,
-                "blocked_message": "Import blocked: Merge/Warn; tag New2024",
+                "blocked_message": "New2024 has the same title as Old2020.",
                 "conflict": {
                     "action": "Merge/Warn", "tag": "New2024", "match_tag": "Old2020",
-                    "title": "A Paper", "resolvable": True,
-                    "message": "Import blocked: Merge/Warn; tag New2024",
+                    "title": "A Paper", "same_file": False, "matched_on": "title",
+                    "level": "warning", "match_has_doc": True, "resolvable": True,
+                    "message": "New2024 has the same title as Old2020.",
                 },
             }
 
@@ -372,9 +436,34 @@ def test_ingest_offers_replace_for_resolvable_duplicate(tmp_path, monkeypatch):
     html = _stage_one(app.test_client()).get_data(as_text=True)
 
     assert "alert-warning" in html
+    assert "Same title" in html
     assert "Replace document on Old2020" in html
     assert "Also update the reference metadata" in html
     assert "/view/Old2020" in html
+    assert "Import anyway as New2024" in html
+    assert 'name="import_anyway" value="on"' in html
+
+
+def test_ingest_same_file_warns_red_with_import_anyway(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+
+    class FakeLibrary(_FakePreviewLibrary):
+        def preview_staged_document_import(self, bibtex, path, **kwargs):
+            conflict = {
+                "action": "SKIP (Dupe)", "tag": "New2024a", "match_tag": "New2024",
+                "title": "A Paper", "same_file": True, "matched_on": "file and title",
+                "level": "danger", "match_has_doc": True, "resolvable": False,
+                "message": "New2024a has the same file and title as New2024.",
+            }
+            return {"bibtex": "@article{New2024a}", "tag": "New2024a",
+                    "analysis": pd.DataFrame(), "blocked": True,
+                    "blocked_message": conflict["message"], "conflict": conflict}
+
+    html = _stage_one(_batch_app(monkeypatch, FakeLibrary()).test_client()).get_data(as_text=True)
+
+    assert "alert-danger" in html and "Same file and title" in html
+    assert "btn-danger" in html and "Import anyway as New2024a" in html
+    assert "Replace document on" not in html
 
 
 def test_ingest_replace_calls_library_and_advances(tmp_path, monkeypatch):
@@ -454,12 +543,74 @@ def test_reference_only_commit_blocked_keeps_the_workbench(tmp_path, monkeypatch
 
     class FakeLibrary(_FakePreviewLibrary):
         def import_staged_document(self, *args, **kwargs):
-            raise LibraryImportBlocked("Import blocked: Import (Fill); tag Smith2024")
+            raise LibraryImportBlocked("Smith2024 has the same title as Other2020.")
 
     client = _batch_app(monkeypatch, FakeLibrary()).test_client()
 
     html = client.post("/ingest/reference/commit", data={"bibtex": REF_BIB}).get_data(as_text=True)
 
-    assert "alert-danger" in html and "Import (Fill)" in html
+    assert "alert-warning" in html and "same title as Other2020" in html
     assert "GO: Add Reference" in html
     assert "title = {No File}" in html
+
+
+def test_reference_only_import_anyway_reaches_the_library(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "STAGING_ROOT", tmp_path / "staging")
+
+    class FakeLibrary(_FakePreviewLibrary):
+        def import_staged_document(self, bibtex, staged_document_path=None, **kwargs):
+            self.calls["commit_kwargs"] = kwargs
+            return SimpleNamespace(ref_df=pd.DataFrame([{"tag": "Smith2024a"}]))
+
+    lib = FakeLibrary()
+    client = _batch_app(monkeypatch, lib).test_client()
+
+    html = client.post("/ingest/reference/commit",
+                       data={"bibtex": REF_BIB, "import_anyway": "on"}).get_data(as_text=True)
+
+    assert lib.calls["commit_kwargs"]["allow_duplicate"] is True
+    assert "added as a reference with no document" in html
+
+
+# ------------------------------------------------------------- real importer
+
+def test_same_file_and_title_imports_anyway_through_the_real_importer(tmp_library, tmp_path):
+    """SKIP (Dupe) is held, red, then Import anyway adds a second reference to the file."""
+    from archivum.hasher import hash_many3
+
+    staged_dir = tmp_path / "staged"
+    staged_dir.mkdir()
+    staged = (staged_dir / "paper.pdf").resolve()
+    staged.write_bytes(b"%PDF-1.4\n% import anyway probe\n")
+    h = hash_many3([staged], workers=1)[staged]
+    tz = "Europe/London"
+    lib = tmp_library(
+        [{"tag": "Smith2024", "type": "article", "author": "Smith, John",
+          "title": "A Probe Paper", "year": "2024", "journal": "J", "doi": "",
+          "added": pd.Timestamp("2024-01-01", tz=tz)}],
+        [{"hash": h, "version": 0, "path": "ab/existing.pdf",
+          "create": pd.Timestamp("2024-01-01", tz=tz)}],
+        [{"tag": "Smith2024", "hash": h, "version": 0, "priority": 0}],
+    )
+    bib = ("@article{Smith2024,\n  author = {Smith, John},\n  title = {A Probe Paper},\n"
+           "  journal = {J},\n  year = {2024},\n}")
+
+    preview = lib.preview_staged_document_import(bib, staged, known_hash=h)
+    conflict = preview["conflict"]
+    assert conflict["action"] == "SKIP (Dupe)"
+    assert conflict["level"] == "danger" and conflict["match_tag"] == "Smith2024"
+    # the preview keeps the entry, so it shows the tag Import anyway would take
+    assert preview["tag"] != "Smith2024"
+
+    with pytest.raises(LibraryImportBlocked, match="same file and title"):
+        lib.import_staged_document(bib, staged, known_hash=h, extract_text=False)
+
+    importer = lib.import_staged_document(bib, staged, known_hash=h, extract_text=False,
+                                          allow_duplicate=True)
+
+    new_tag = str(importer.ref_df.iloc[0].tag)
+    assert new_tag != "Smith2024"
+    refs = pd.read_feather(lib.config_path / "ref.feather")
+    assert {"Smith2024", new_tag} <= set(refs.tag)
+    links = pd.read_feather(lib.config_path / "ref-doc.feather")
+    assert set(links[links.hash == h].tag) == {"Smith2024", new_tag}

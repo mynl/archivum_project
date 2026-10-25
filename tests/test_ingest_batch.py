@@ -406,18 +406,54 @@ def test_import_conflict_marks_merge_warn_resolvable():
     conflict = Library.import_conflict(analysis)
     assert conflict["resolvable"] is True
     assert conflict["match_tag"] == "Old2020"
+    assert conflict["level"] == "warning"
+    assert conflict["match_has_doc"] is True
 
 
-def test_import_conflict_marks_hash_dupe_unresolvable():
+def test_import_conflict_marks_hash_dupe_red_and_unresolvable():
     from archivum.library import Library
 
     analysis = pd.DataFrame([{
-        "tag": "New2024", "title": "A Paper",
+        "tag": "New2024", "title": "A Paper", "hash match": "Y",
+        "doi match": "N", "title match": "Y (doc)",
         "action": "SKIP (Dupe)", "match tag": "Old2020",
     }])
     conflict = Library.import_conflict(analysis)
     assert conflict["resolvable"] is False
-    assert "SKIP (Dupe)" in conflict["message"]
+    assert conflict["level"] == "danger"
+    assert conflict["matched_on"] == "file and title"
+    assert "same file and title as Old2020" in conflict["message"]
+    assert "Import anyway" in conflict["message"]
+
+
+def test_import_conflict_holds_a_file_only_match():
+    """Same file, different metadata: red, where it used to pass silently."""
+    from archivum.library import Library
+
+    analysis = pd.DataFrame([{
+        "tag": "New2024", "hash match": "Y", "doi match": "N", "title match": "N",
+        "action": "Link Existing", "match tag": "Book2020",
+    }])
+    conflict = Library.import_conflict(analysis)
+    assert conflict["level"] == "danger"
+    assert conflict["matched_on"] == "file"
+    assert conflict["resolvable"] is False
+
+
+def test_import_conflict_offers_attach_when_the_match_has_no_document():
+    from archivum.library import Library
+
+    analysis = pd.DataFrame([{
+        "tag": "New2024", "hash match": "N", "doi match": "Y (no doc)",
+        "title match": "Y (no doc)", "action": "Import (Fill)", "match tag": "Old2020",
+    }])
+    conflict = Library.import_conflict(analysis)
+    assert conflict["level"] == "warning"
+    assert conflict["matched_on"] == "DOI and title"
+    assert conflict["resolvable"] is True
+    assert conflict["match_has_doc"] is False
+    # with no document there is no file to attach
+    assert Library.import_conflict(analysis, reference_only=True)["resolvable"] is False
 
 
 def test_import_conflict_none_when_clean():

@@ -80,7 +80,23 @@ def test_reference_only_title_duplicate_blocks(tmp_library):
 
     preview = lib.preview_staged_document_import(duplicate)
 
-    # the match has no document either: "Import (Fill)", which blocks here
+    # the match has no document either: "Import (Fill)", held for Import anyway
     assert preview["blocked"]
     assert preview["conflict"]["match_tag"] == "Other2020"
     assert not preview["conflict"]["resolvable"]
+
+
+def test_reference_only_title_duplicate_imports_anyway(tmp_library):
+    lib = tmp_library(REFS, [], [])
+    duplicate = BIB.replace("A Paper Without a File", "Something Else")
+
+    preview = lib.preview_staged_document_import(duplicate)
+    assert preview["conflict"]["level"] == "warning"
+
+    importer = lib.import_staged_document(duplicate, allow_duplicate=True)
+
+    tag = str(importer.ref_df.iloc[0].tag)
+    assert tag != "Other2020"
+    refs = pd.read_feather(lib.config_path / "ref.feather").set_index("tag")
+    assert {"Other2020", tag} <= set(refs.index)
+    assert refs.loc[tag, "title"].strip("{}") == "Something Else"
