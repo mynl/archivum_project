@@ -5,6 +5,14 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.15.1 (2026-11-01)
+
+### Changed
+
+- Query and author results link a tag only when the reference has a document,
+  in List, Verbose and Table. A reference with no document shows its tag muted
+  and unlinked, instead of a link to a 404 page.
+
 ## 2.15.0 (2026-10-25)
 
 ### Changed

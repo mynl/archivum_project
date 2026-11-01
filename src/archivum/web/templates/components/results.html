@@ -1,3 +1,11 @@
+{# No document means /view/<tag> is a 404. has_doc None is "unknown" and keeps the link. #}
+{% macro tag_label(row, classes) -%}
+    {% if row.has_doc == false -%}
+    <span class="{{ classes }} text-muted">{{ row.tag }}</span>
+    {%- else -%}
+    <a href="{{ url_for('main.view', tag=row.tag) }}" class="{{ classes }}" target="_blank">{{ row.tag }}</a>
+    {%- endif %}
+{%- endmacro %}
 {% if results is not none and not results.empty %}
 {% if view_mode == 'table' %}
 <div class="table-responsive shadow-sm rounded">
@@ -15,7 +23,7 @@
             <tr class="{{ 'table-info-subtle' if row.is_book else '' }}">
                 <td class="ps-3 py-2">
                     <div class="d-flex align-items-center">
-                        <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none fw-bold" target="_blank">{{ row.tag }}</a>
+                        {{ tag_label(row, 'tag text-decoration-none fw-bold') }}
                         {% if is_admin %}
                         <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-2 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
                             <i class="bi bi-pencil-square"></i>
@@ -37,7 +45,7 @@
     <div class="list-item mb-3 p-3 bg-white rounded shadow-sm border-start border-4 {{ 'border-primary' if row.is_book else 'border-secondary' }}">
         <div class="d-flex justify-content-between align-items-start mb-1">
             <span class="tag-container">
-                <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none fw-bold" target="_blank">{{ row.tag }}</a>
+                {{ tag_label(row, 'tag text-decoration-none fw-bold') }}
                 {% if is_admin %}
                 <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
                     <i class="bi bi-pencil-square" style="font-size: 0.8rem;"></i>
@@ -79,7 +87,7 @@
     {% for _, row in results.iterrows() %}
     <div class="list-item {{ 'book-row' if row.is_book else '' }}">
         <span class="tag-container">
-            <a href="{{ url_for('main.view', tag=row.tag) }}" class="tag text-decoration-none" target="_blank">{{ row.tag }}</a>
+            {{ tag_label(row, 'tag text-decoration-none') }}
             {% if is_admin %}
             <a href="{{ url_for('main.editor_page') }}?tag={{ row.tag }}" class="ms-1 text-muted opacity-25 hover-opacity-100" title="Edit Tag">
                 <i class="bi bi-pencil-square" style="font-size: 0.7rem;"></i>

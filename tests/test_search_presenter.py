@@ -1,8 +1,9 @@
-"""The dense result line's date added, read count, and "no doc" marker."""
+"""The dense result line's date added, read count, and "no doc" marker; tag links."""
 
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
 from archivum.web.presenters.search import prepare_search_results
 
@@ -43,3 +44,33 @@ def test_without_activity_uses_the_frame_and_tolerates_missing_columns():
     assert out.loc[0, "added_display"] == ""
     assert out.loc[0, "reads_display"] == ""
     assert out.loc[0, "has_doc"] is None
+
+
+@pytest.fixture()
+def app(tmp_library, monkeypatch):
+    from archivum.cli import LibraryContext
+    from archivum.web.app import create_app
+
+    h1 = "a1" + "0" * 62
+    lib = tmp_library(
+        [{"tag": "WithDoc2020", "type": "article", "title": "Paper One", "author": "Doe, Jane", "year": "2020"},
+         {"tag": "RefOnly2021", "type": "article", "title": "Paper Two", "author": "Roe, R.", "year": "2021"}],
+        [{"hash": h1, "version": 0, "path": "a1/one.pdf", "name": "one.pdf", "suffix": ".pdf",
+          "size": 1000, "create": pd.Timestamp("2020-01-01", tz=TZ)}],
+        [{"tag": "WithDoc2020", "hash": h1, "version": 0, "priority": 0}],
+    )
+    monkeypatch.setattr(LibraryContext, "get", classmethod(lambda cls: lib))
+    monkeypatch.setattr("archivum.analytics.semantic.warm_transformer_model", lambda background=True: None)
+    monkeypatch.setattr("archivum.analytics.semantic.warm_semantic_projection", lambda background=True: None)
+    application = create_app()
+    application.config.update(TESTING=True)
+    return application
+
+
+@pytest.mark.parametrize("view_mode", ["list", "verbose", "table"])
+def test_tag_links_only_when_the_reference_has_a_document(app, view_mode):
+    html = app.test_client().get(f"/search?q=Paper&view_mode={view_mode}").get_data(as_text=True)
+
+    assert 'href="/view/WithDoc2020"' in html
+    assert "/view/RefOnly2021" not in html
+    assert 'text-muted">RefOnly2021</span>' in html
