@@ -293,7 +293,12 @@ def test_unlink_and_replace_reorder_priority(tmp_path, monkeypatch):
     saved = {"count": 0}
     lib.save = lambda: saved.__setitem__("count", saved["count"] + 1)
 
-    result = lib.replace_document("Old2020", staged, extract_text=False)
+    result = lib.replace_document("Old2020", staged, extract_text=False,
+                                  update_bibtex="@article{Old2020,\n  title = {A Paper, Revised},\n}")
+
+    # the metadata refresh overlays: fields the new entry lacks keep their values
+    ref = lib._ref_df.set_index("tag").loc["Old2020"]
+    assert ref["title"] == "A Paper, Revised" and ref["author"] == "Smith, J"
 
     links = lib._ref_doc_df.sort_values("priority")
     assert links.priority.tolist() == [0, 1]

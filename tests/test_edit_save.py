@@ -14,8 +14,10 @@ TZ = "Europe/London"
 H1 = "a1" + "0" * 62
 
 REFS = [
-    {"tag": "Keep2020", "type": "article", "title": "One Work", "author": "Doe, Jane", "year": "2020"},
-    {"tag": "Other2019", "type": "book", "title": "Other", "author": "Roe, R.", "year": "2019"},
+    {"tag": "Keep2020", "type": "article", "title": "One Work", "author": "Doe, Jane", "year": "2020",
+     "journal": "J. One", "doi": "10.1/one", "arc-source": "mendeley"},
+    {"tag": "Other2019", "type": "book", "title": "Other", "author": "Roe, R.", "year": "2019",
+     "journal": "", "doi": "", "arc-source": "mendeley"},
 ]
 DOCS = [{"hash": H1, "version": 0, "path": "a1/one.pdf", "name": "one.pdf", "suffix": ".pdf",
          "size": 1000, "create": pd.Timestamp("2020-01-01", tz=TZ)}]
@@ -67,11 +69,36 @@ def test_rename_reports_and_updates_the_sidebar(app, lib):
     assert "/view/Renamed2019" not in html  # no document, no View link
     assert '"other2019"' in html and '"/edit-tag/Renamed2019"' in html  # sidebar script
     assert "Renamed2019" in _refs(lib).index and "Other2019" not in _refs(lib).index
+    assert _refs(lib).loc["Renamed2019", "arc-source"] == "mendeley"
+
+
+def test_save_deletes_fields_dropped_from_the_box(app, lib):
+    # the box holds no journal and no doi, as if both lines were deleted
+    html = app.test_client().post(
+        "/edit-tag/Keep2020", data={"bibtex": _entry("Keep2020", "One Work")}).get_data(as_text=True)
+
+    refs = _refs(lib)
+    assert refs.loc["Keep2020", "journal"] == "" and refs.loc["Keep2020", "doi"] == ""
+    assert "J. One" not in html and "10.1/one" not in html
+    # never shown in the box, so never deleted from it
+    assert refs.loc["Keep2020", "arc-source"] == "mendeley"
+
+
+def test_save_warns_of_fields_outside_ref_columns(app, lib):
+    bibtex = "@article{Keep2020,\n  title = {One Work},\n  DOI = {10.1/two},\n  note = {Read later},\n}"
+    html = app.test_client().post("/edit-tag/Keep2020", data={"bibtex": bibtex}).get_data(as_text=True)
+
+    assert "<strong>Keep2020</strong> updated; not saved: note (not in ref_columns)" in html
+    assert "alert-warning" in html and "data-autoclose" not in html
+    refs = _refs(lib)
+    assert refs.loc["Keep2020", "doi"] == "10.1/two"  # field names ignore case
+    assert refs.loc["Keep2020", "author"] == "" and "note" not in refs.columns
 
 
 @pytest.mark.parametrize("bibtex, reason", [
     (_entry("Other2019", "One Work"), "already exists"),
     ("", "cannot be empty"),
+    (_entry("Keep2020", "One Work").replace("{2020}", "2021"), "Could not read year; nothing was saved"),
 ])
 def test_refused_save_lands_in_the_status_slot(app, lib, bibtex, reason):
     response = app.test_client().post("/edit-tag/Keep2020", data={"bibtex": bibtex})

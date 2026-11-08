@@ -694,16 +694,22 @@ def edit_tag(tag, info):
         click.echo("No changes made.")
         return
 
-    # 4. Parse the edited BibTeX
-    new_data = Bib2df_Incremental.parse_line(edited_bib)
+    # 4. Parse the edited BibTeX: a field it cannot read would be deleted
+    try:
+        new_data = Bib2df_Incremental.parse_edit(edited_bib)
+    except ValueError as e:
+        click.echo(str(e))
+        return
     if not new_data:
         click.echo("Error parsing edited BibTeX.")
         return
 
     # 5. Update the library
     try:
-        lib.update_reference(tag, new_data)
+        ignored = lib.update_reference(tag, new_data)
         click.echo(f"Reference '{tag}' updated.")
+        if ignored:
+            click.echo(f"Not saved: {', '.join(ignored)} (not in ref_columns).")
     except Exception as e:
         click.echo(f"Error updating reference: {e}")
 

@@ -840,6 +840,34 @@ class Bib2df_Incremental(LibraryBase):
         return result
 
     @staticmethod
+    def parse_edit(entry):
+        """
+        :meth:`parse_line` for a hand-edited entry, refusing fields it cannot read.
+
+        Raises
+        ------
+        ValueError
+            Naming each field written as ``name = ...`` that the parse missed.
+
+        Notes
+        -----
+        ``parse_line`` reads only braced values, so ``year = 2017`` or
+        ``doi = "10.1/x"`` is skipped without complaint. An edit replaces the
+        stored fields (:meth:`Library.update_reference`), so a skipped field
+        would be deleted.
+        """
+        result = Bib2df_Incremental.parse_line(entry)
+        if result:
+            named = re.findall(r"^\s*([A-Za-z][\w\-]*)\s*=", entry, flags=re.MULTILINE)
+            unread = [name for name in dict.fromkeys(named) if name not in result]
+            if unread:
+                raise ValueError(
+                    f"Could not read {', '.join(unread)}; nothing was saved. "
+                    "Put each value in braces, as in year = {2017}."
+                )
+        return result
+
+    @staticmethod
     def parse_line_slow(entry):
         result = {}
 

@@ -897,10 +897,10 @@ class Library(LibraryBase):
 
         refs = self.ref_df.copy()
         keep_idx = refs.index[refs.tag == keep][0]
-        allowed = set(self.config.ref_columns) | set(self.structural_ref_columns)
-        for k, v in merged_fields.items():
-            if k in allowed and k not in ("tag", "added"):
-                refs.loc[keep_idx, k] = v
+        # replace, as Save does: a field deleted from the merged entry is deleted
+        values, _ = self._edited_fields(refs.loc[keep_idx], merged_fields)
+        for k, v in values.items():
+            refs.loc[keep_idx, k] = v
         if "added" in refs.columns:
             dates = pd.to_datetime(refs.loc[refs.tag.isin([keep, absorb]), "added"], utc=True).dropna()
             if not dates.empty:
@@ -922,49 +922,98 @@ class Library(LibraryBase):
         self.save()
         return audit
 
-    def update_reference(self, old_tag: str, new_data: dict):
-        """Update or add a reference. Handles tag changes."""
+    def _edited_fields(self, stored, entry: dict) -> tuple[dict, list[str]]:
+        """
+        The values that replace ``stored``'s editable fields with ``entry``'s.
+
+        Parameters
+        ----------
+        stored : pandas.Series or dict
+            The reference as stored; empty for a new one.
+        entry : dict
+            The whole entry as edited: ``tag``, ``type`` and the fields.
+
+        Returns
+        -------
+        values : dict
+            Column to new value, for every editable column ``stored`` has and
+            every one ``entry`` gives.
+        ignored : list of str
+            Names in ``entry`` outside ``ref_columns``, which are not saved.
+
+        Notes
+        -----
+        Replace, not overlay: an editable field (``ref_columns`` except
+        ``tag`` and ``type``) that ``entry`` lacks is set to ``""``, the library's
+        blank, so a line deleted in the editor deletes the field. The other
+        columns (``added``, ``arc-*``, ``mendeley-*``, ``merge_count``) never
+        appear in the editor and keep their stored values. Names match the
+        columns ignoring case, as BibTeX field names are case-insensitive.
+        """
+        editable = {c.lower(): c for c in [*self.config.ref_columns, "type"] if c not in ("tag", "added")}
+        values = {c: "" for c in editable.values() if c != "type" and c in stored}
+        ignored = []
+        for name, value in entry.items():
+            column = editable.get(str(name).lower())
+            if column is not None:
+                values[column] = value
+            elif name not in ("tag", "added"):  # the date added is structural, never hand-edited
+                ignored.append(name)
+        return values, ignored
+
+    def update_reference(self, old_tag: str, new_data: dict) -> list[str]:
+        """
+        Replace a reference's fields with ``new_data``, or add a new reference.
+
+        Parameters
+        ----------
+        old_tag : str
+            The reference to replace; empty or unknown adds a new one.
+        new_data : dict
+            The whole entry, as parsed from an editor. A ``tag`` other than
+            ``old_tag`` renames the reference and its document links.
+
+        Returns
+        -------
+        list of str
+            Names in ``new_data`` outside ``ref_columns``, which were not saved.
+
+        Notes
+        -----
+        An editable field missing from ``new_data`` is deleted; see
+        :meth:`_edited_fields`. A new reference has no ``added``; save()
+        stamps it.
+        """
         new_tag = new_data.get("tag")
         if not new_tag:
             raise ValueError("New data must contain a 'tag'")
-        # the date added is structural, never hand-edited
-        new_data = {k: v for k, v in new_data.items() if k != "added"}
 
-        # 0. ensure data loaded
+        # ensure data loaded
         ref_df = self.ref_df
         ref_doc_df = self.ref_doc_df
 
-        # 1. Handle tag change or new tag
         if old_tag != new_tag:
-            if new_tag in self.ref_df.tag.values:
+            if new_tag in ref_df.tag.values:
                 raise ValueError(f"Tag '{new_tag}' already exists in library.")
             if old_tag:
-                # Update links in ref_doc_df
                 self._ref_doc_df.loc[self._ref_doc_df.tag == old_tag, "tag"] = new_tag
 
-        # 2. Prepare new row
-        # Use existing row as base if updating
-        if old_tag and old_tag in self.ref_df.tag.values:
-            idx = self.ref_df.index[self.ref_df.tag == old_tag][0]
-            row = self.ref_df.loc[idx].copy()
-            for k, v in new_data.items():
-                row[k] = v
-            # If tag changed, we'll replace the old one
-            self._ref_df = self.ref_df.drop(idx)
+        if old_tag and old_tag in ref_df.tag.values:
+            idx = ref_df.index[ref_df.tag == old_tag][0]
+            row = ref_df.loc[idx].copy()
+            # the edited row goes back in at the end, under its new tag if renamed
+            self._ref_df = ref_df.drop(idx)
         else:
-            # Adding new
-            row = pd.Series(new_data)
+            row = pd.Series(dtype=object)
+        values, ignored = self._edited_fields(row, new_data)
+        for column, value in {"tag": new_tag, **values}.items():
+            row[column] = value
 
-        # 3. Restrict to configured columns, but ENSURE the structural ones
-        # (tag, type, added) are kept. A new tag has no added; save() stamps it.
-        keep_cols = set(self.config.ref_columns) | set(self.structural_ref_columns)
-        row = row[row.index.isin(keep_cols)]
-
-        # 4. Append and save
         self._ref_df = pd.concat(
             [self.ref_df, row.to_frame().T], ignore_index=True
         )
         self.save()
+        return ignored
 
     def _stamp_added(self, added: pd.Series) -> pd.Series:
         """
@@ -2096,8 +2145,9 @@ class Library(LibraryBase):
             if len(entries) != 1:
                 raise ValueError("Expected exactly one BibTeX entry.")
             _, data = next(iter(entries.items()))
-            data = dict(data)
-            data["tag"] = tag
+            # a refresh from the new file's entry, not an edit: fields it
+            # lacks keep their values
+            data = {**ref_row.to_dict(), **dict(data), "tag": tag}
             # update_reference saves for us
             self.update_reference(tag, data)
         else:

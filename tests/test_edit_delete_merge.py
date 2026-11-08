@@ -94,6 +94,19 @@ def test_merge_repoints_links_keeps_earlier_date_and_saves_once(lib, monkeypatch
     assert "@article{Keep2020," in text and "@article{Dupe2020," in text
 
 
+def test_merge_deletes_a_field_dropped_from_the_merged_entry(lib):
+    keep_row = lib.ref_df[lib.ref_df.tag == "Keep2020"].iloc[0]
+    absorb_row = lib.ref_df[lib.ref_df.tag == "Dupe2020"].iloc[0]
+    merged, _ = propose_merge(keep_row, absorb_row)
+    del merged["doi"]
+
+    lib.merge_references("Keep2020", "Dupe2020", merged)
+
+    refs = _feather(lib, "ref.feather").set_index("tag")
+    assert refs.loc["Keep2020", "doi"] == ""
+    assert refs.loc["Keep2020", "journal"] == "J. Works"
+
+
 @pytest.mark.parametrize("keep, absorb, fields, match", [
     ("Keep2020", "Keep2020", {"tag": "Keep2020"}, "into itself"),
     ("Keep2020", "Nope", {"tag": "Keep2020"}, "not found"),

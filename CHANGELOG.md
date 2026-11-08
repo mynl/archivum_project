@@ -5,6 +5,25 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a1 (2026-11-08)
+
+### Fixed
+
+- Deleting a field's line in Edit and saving now deletes the field; before, the
+  stored value came back. Merge treats a field deleted from its merged entry
+  the same way, and so does `archivum edit`.
+- Saving an edit no longer wipes `arc-source`, `merge_count` and
+  `mendeley-tags`, which the box never shows.
+
+### Changed
+
+- A field the parser cannot read, such as `year = 2017` without braces, refuses
+  the save and is named in the status line, instead of being silently dropped.
+- A field outside `ref_columns`, such as `note`, is still not saved, but the
+  status line now names it and stays up. Field names ignore case.
+- Ingest's Replace document with update metadata still overlays: fields the new
+  entry lacks keep their values.
+
 ## 2.15.1 (2026-11-01)
 
 ### Changed
