@@ -18,7 +18,7 @@ from ...doi_audit.doi import (
     MALFORMED, NOT_CHECKED, NOT_SEARCHED, PUBLISHED_OTHER_YEAR, PUBLISHED_SAME_YEAR, WORK_NO_DOI, normalize_doi,
 )
 from ...doi_audit.proposals import (
-    BACKFILL_FIELDS, CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, PUBLISHED_CLASSES, SEARCH_CLASSES,
+    BACKFILL_FIELDS, CHECK_CLASSES, CHECK_COMMIT_LISTS, LOCAL_CLASSES, PUBLISHED_CLASSES, SEARCH_CLASSES,
     SEARCH_COMMIT_CLASSES, check_counts, check_rows, checked_dois, local_proposals, published_counts,
     published_versions, search_counts, searched_references, subset_rows, summarize,
 )
@@ -257,7 +257,7 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
         review = {
             "kind": "check", "cls": cls, "label": CHECK_CLASSES[cls], "total": counts[cls], "page": page, "pages": pages,
             "rows": [{"p": p, "old_json": json.dumps(p.current)} for p in shown],
-            "can_commit": cls in CHECK_COMMIT_CLASSES,
+            "can_commit": cls in CHECK_COMMIT_LISTS,
             "pills": [(c, label, counts[c]) for c, label in CHECK_CLASSES.items()],
         }
     elif cls == SEARCH_CLASS or cls in SEARCH_CLASSES:

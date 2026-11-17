@@ -29,6 +29,8 @@ CHECK_CLASSES = {
 }
 # check classes whose rows can be ticked: the DOI is replaced by hand, or cleared
 CHECK_COMMIT_CLASSES = (UNRESOLVED, MISMATCH, WEAK_MATCH)
+# the lists with tick boxes: those classes, and Shared, where a row keeps its own class
+CHECK_COMMIT_LISTS = CHECK_COMMIT_CLASSES + (SHARED,)
 SEARCH_CLASSES = {
     PROPOSED_EXACT: "Exact match", PROPOSED_STRONG: "Strong match", AMBIGUOUS: "Ambiguous",
     WORK_NO_DOI: "Work without a DOI", NOT_FOUND: "Not found", NOT_SEARCHED: "Not searched",
@@ -88,6 +90,9 @@ class Proposal:
         side by side for a checked DOI.
     shared_with : tuple of str
         The other tags with the same DOI.
+    sharing_accepted : bool
+        Whether the user has rejected the row in the Shared list, which says
+        the shared DOI is right for this reference.
     candidates : tuple of dict
         For a searched reference, the candidates at or above the weak
         threshold, best first: ``doi``, ``title``, ``author``, ``year``,
@@ -117,6 +122,7 @@ class Proposal:
     library: dict = field(default_factory=dict)
     record: dict = field(default_factory=dict)
     shared_with: tuple = ()
+    sharing_accepted: bool = False
     candidates: tuple = ()
     work_id: str = ""
     work_accepted: bool = False
@@ -235,7 +241,8 @@ def checked_dois(rows: pd.DataFrame, all_rows: pd.DataFrame, latest: dict,
         neither has the DOI but ``doi.org`` does; ``unresolved`` when
         ``doi.org`` does not; ``not checked`` when the sources have not been
         asked. ``shared_with`` lists the other tags with the DOI; sharing is
-        shown beside the class, not instead of it.
+        shown beside the class, not instead of it. A rejected row of any other
+        class stays, with ``sharing_accepted`` set, and leaves the Shared list.
     """
     sharing: dict[str, list[str]] = {}
     for tag, doi in _dois(all_rows):
@@ -268,26 +275,40 @@ def checked_dois(rows: pd.DataFrame, all_rows: pd.DataFrame, latest: dict,
             cls = NOT_CHECKED
 
         proposed = "" if cls in CHECK_COMMIT_CLASSES else None
-        if proposed is not None and (tag, "doi", doi, proposed) in rejected:
+        left_as_is = (tag, "doi", doi, "") in rejected
+        if proposed is not None and left_as_is:
             continue
         found.append(Proposal(
             tag, "doi", cls, doi, proposed, source=source, note=CHECK_NOTES[cls], score=score,
             library=library, record=record, shared_with=tuple(t for t in sharing.get(key, []) if t != tag),
+            sharing_accepted=left_as_is,
         ))
     return found
 
 
+def _is_shared(p: Proposal) -> bool:
+    """Whether a row belongs in the Shared list: its DOI is on another tag and the sharing has not been accepted."""
+    return bool(p.shared_with) and not p.sharing_accepted
+
+
 def check_counts(checked: list[Proposal]) -> dict[str, int]:
-    """Count the rows of each check class; ``shared`` counts the rows whose DOI is on another tag."""
+    """Count the rows of each check class; ``shared`` counts the rows of the Shared list."""
     counts = Counter(p.cls for p in checked)
-    counts[SHARED] = sum(1 for p in checked if p.shared_with)
+    counts[SHARED] = sum(1 for p in checked if _is_shared(p))
     return {cls: counts[cls] for cls in CHECK_CLASSES}
 
 
 def check_rows(checked: list[Proposal], cls: str) -> list[Proposal]:
-    """The rows of one check class; for ``shared``, the rows whose DOI is on another tag."""
+    """
+    The rows of one check class.
+
+    For ``shared``, the rows whose DOI is on another tag, the DOI on the most
+    references first and the references of one DOI together: a DOI on twenty
+    unrelated references is a wrong DOI, and it should be the first thing seen.
+    """
     if cls == SHARED:
-        return [p for p in checked if p.shared_with]
+        return sorted((p for p in checked if _is_shared(p)),
+                      key=lambda p: (-len(p.shared_with), doi_key(p.current), p.tag))
     return [p for p in checked if p.cls == cls]
 
 

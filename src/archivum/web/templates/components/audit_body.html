@@ -406,7 +406,7 @@
                     <td>{{ p.library.title|replace('{', '')|replace('}', '') }}<div class="text-muted">{{ p.library.author|replace('{', '')|replace('}', '')|truncate(60) }}, {{ p.library.year }}</div></td>
                     <td>{% if p.record %}{{ p.record.title }}<div class="text-muted">{{ p.record.author }}, {{ p.record.year }}{% if p.record.container %}, <i>{{ p.record.container }}</i>{% endif %} ({{ p.source }})</div>{% else %}<span class="text-muted">{{ p.source }}</span>{% endif %}</td>
                     <td class="text-end">{{ '%.2f'|format(p.score) if p.score is not none else '' }}</td>
-                    <td class="text-muted pe-3">{{ p.note }}{% if p.shared_with %}<div>Same DOI as {% for other in p.shared_with %}<a href="{{ url_for('main.editor_page', tag=other) }}">{{ other }}</a>{{ ', ' if not loop.last }}{% endfor %}; merge duplicates in Edit.</div>{% endif %}</td>
+                    <td class="text-muted pe-3">{{ p.note }}{% if p.shared_with %}<div>Same DOI as {% for other in p.shared_with %}<a href="{{ url_for('main.editor_page', tag=other) }}">{{ other }}</a>{{ ', ' if not loop.last }}{% endfor %}{% if review.cls == 'shared' %}. A duplicate is merged in Edit; a wrong DOI is replaced or cleared here; reject a row whose DOI is right.{% else %}; merge duplicates in Edit.{% endif %}</div>{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>

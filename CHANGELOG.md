@@ -5,6 +5,18 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a16 (2026-11-17)
+
+### Changed
+
+- **Shared** rows on the Audit page can be ticked: type a replacement DOI, or
+  leave the box empty to clear it, then **Commit ticked**. Before, the list
+  was information only.
+- **Reject ticked** on a Shared row records that the shared DOI is right, two
+  chapters of one book for instance, and takes the row off the list.
+- The Shared list is ordered by the number of references on the DOI, largest
+  first, with the references of one DOI together.
+
 ## 2.16.0a15 (2026-11-17)
 
 ### Fixed

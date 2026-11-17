@@ -11,6 +11,7 @@ import pytest
 from archivum import egress
 from archivum.doi_audit import doi as rules
 from archivum.doi_audit import journal, runner
+from archivum.doi_audit import proposals
 from archivum.doi_audit.proposals import check_counts, checked_dois
 
 REFS = [
@@ -300,11 +301,9 @@ def test_a_check_from_the_page_then_its_results(client, lib):
 
 def test_information_classes_have_no_tick_box(client, lib):
     _run_check(client, lib)
-    for cls in ("year differs", "shared", "not compared", "verified"):
+    for cls in ("year differs", "not compared", "verified"):
         html = client.get(f"/audit/review?cls={cls}").get_data(as_text=True)
         assert 'name="row"' not in html and "Commit ticked" not in html
-    shared = client.get("/audit/review?cls=shared").get_data(as_text=True)
-    assert "Same DOI as" in shared and 'href="/edit?tag=Share2013b"' in shared
     mismatch = client.get("/audit/review?cls=mismatch").get_data(as_text=True)
     assert "A completely different paper about fish" in mismatch and "Capital Allocation by Percentile Layer" in mismatch
     assert "A. Fisher" in mismatch and 'name="row" value="Wrong2018|doi"' in mismatch
@@ -331,6 +330,40 @@ def test_a_rejected_mismatch_is_not_listed_again(client, lib):
 
     assert "Rejected 1 rows" in html and "Mismatch 0" in html
     assert _disk(lib).loc["Wrong2018", "doi"] == "10.1/wrong"
+
+
+def test_shared_rows_are_listed_together_and_can_be_ticked(client, lib):
+    _run_check(client, lib)
+    html = client.get("/audit/review?cls=shared").get_data(as_text=True)
+    assert "Same DOI as" in html and 'href="/edit?tag=Share2013b"' in html
+    assert 'name="row" value="Share2013a|doi"' in html and 'name="row" value="Share2013b|doi"' in html
+    assert "Commit ticked" in html and 'placeholder="empty clears the DOI"' in html
+
+
+def test_the_doi_on_the_most_references_is_listed_first():
+    def row(tag, doi, others):
+        return proposals.Proposal(tag, "doi", rules.VERIFIED, doi, None, shared_with=others)
+
+    checked = [row("B2", "10.1/b", ("B1",)), row("A1", "10.1/A", ("A2", "A3")), row("B1", "10.1/b", ("B2",)),
+               row("A3", "10.1/a", ("A1", "A2")), row("A2", "10.1/a", ("A1", "A3")), row("C1", "10.1/c", ())]
+    assert [p.tag for p in proposals.check_rows(checked, rules.SHARED)] == ["A1", "A2", "A3", "B1", "B2"]
+
+
+def test_clearing_a_shared_doi_ends_the_sharing(client, lib):
+    _run_check(client, lib)
+    html = client.post("/audit/commit", data=_form("Share2013a", "10.1/Share", "", cls="shared")).get_data(as_text=True)
+
+    assert "Committed 1 of 1 rows" in html and "Shared 0" in html
+    disk = _disk(lib)
+    assert disk.loc["Share2013a", "doi"] == "" and disk.loc["Share2013b", "doi"] == "10.1/share"
+
+
+def test_a_rejected_shared_row_leaves_the_shared_list_and_keeps_its_class(client, lib):
+    _run_check(client, lib)
+    html = client.post("/audit/reject", data=_form("Share2013a", "10.1/Share", "", cls="shared")).get_data(as_text=True)
+
+    assert "Shared 1" in html and "Verified 4" in html and 'name="row" value="Share2013a|doi"' not in html
+    assert 'name="row" value="Share2013b|doi"' in html and _disk(lib).loc["Share2013a", "doi"] == "10.1/Share"
 
 
 # ---- the commands ----
