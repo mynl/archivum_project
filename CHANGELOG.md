@@ -5,6 +5,32 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a5 (2026-11-17)
+
+### Added
+
+- `egress.py`, the one outbound point for public reference data. It allows
+  only `api.openalex.org`, `api.crossref.org`, `doi.org` and
+  `export.arxiv.org`, over https, and never follows a redirect.
+- Two paces: speedy (3 at once per host, 2 searches or 5 single lookups a
+  second) and polite (one at a time, 1 a second). arXiv is one request per
+  3 seconds in both.
+- For a run: retry with backoff on 429 and 5xx, a host stopped after five
+  failures in a row, and OpenAlex stopped when under 2% of the day's budget
+  is left.
+- `contact_email` in the config, sent to Crossref and OpenAlex as the polite
+  caller's address. The OpenAlex key is read from `OPENALEX_API_KEY`.
+
+### Changed
+
+- The Crossref lookups (`archivum crossref`, ingest enrichment) go through
+  `egress`. Results are unchanged; the email is no longer hard-coded.
+
+### Removed
+
+- `alex.py`, which nothing imported and which needed a package that was never
+  a dependency.
+
 ## 2.16.0a4 (2026-11-17)
 
 ### Added

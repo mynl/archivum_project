@@ -549,3 +549,38 @@ if the OpenAlex counts prove sufficient.
   `semantic-embeddings.feather`.
 - **Left for the user:** review and commit the 12 malformed DOIs on the real library, and
   revert one as a trial.
+
+### 2.16.0a5 [egress client] (2026-11-17)
+
+- **Source terms, measured with six real requests for public works** (through `egress`, polite):
+
+  | source | request | cost | notes |
+  |---|---|---|---|
+  | OpenAlex | works filtered by a DOI list, one page | $0.0001 (1 credit) | up to 100 DOIs per filter |
+  | OpenAlex | title search, one page | $0.001 (10 credits) | |
+  | OpenAlex | one work by DOI | free | |
+  | Crossref | title search | free | headers: 3 per second, concurrency 3 |
+  | doi.org | HEAD | free | 302 for a DOI that exists, 404 for one that does not |
+
+  The free OpenAlex key has 10,000 credits ($1) a day; `X-RateLimit-Limit` and
+  `X-RateLimit-Remaining` are in credits. Counts for the 3,037 DOI holders cost 31 credits.
+  Title search for the 4,403 without a DOI would cost about $4.40 at OpenAlex, so R6
+  (Crossref first) stands.
+- **Divergence: no redirect is followed.** `doi.org` answers an existing DOI with a redirect to
+  the publisher, a host outside the list. The transport returns the redirect as the answer.
+- **Divergence: two ways of failing.** A run retries with backoff. The Crossref lookups used by
+  ingest and the CLI pass `retry=False`: one attempt, 10 s timeout, nothing on failure, as
+  before. A 30 s backoff inside an ingest would have been a regression.
+- **Divergence: the budget stop** is a fraction (under 2% of the day's limit left), read from
+  the two headers, so it does not depend on the unit.
+- **Divergence: `EgressFailed`** wraps a transport failure for a `retry=False` caller, so
+  `crossref.py` needs nothing from `requests`.
+- **R5 done:** `contact_email` appended to the live `global-config.yaml`. A process running
+  older code ignores an unknown key with a warning.
+- **Finding, not changed:** `arxiv.py` reaches arXiv through the `arxiv` package, outside
+  `egress`. [published versions] will ask arXiv through `egress`; moving `arxiv.py` is a
+  separate item.
+- No background work in this step, so no idle check: `egress` runs only when called.
+- Tests: `tests/test_egress.py` (36), none sending a request. Gate:
+  `uv run --extra test pytest -q`, 266 passed, 26 skipped. `archivum crossref -d
+  10.1111/1467-9965.00068` returns the entry.

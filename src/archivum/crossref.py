@@ -1,54 +1,69 @@
 """
-Code for interacting with the crossref api.
+Lookups against the Crossref REST API.
 
-With GPT.
-
-v2 Gemini updates
-v1 GPT
+Each function makes one attempt through :mod:`archivum.egress` and returns
+nothing on any failure, since the callers (ingest, the ``crossref`` command)
+are interactive and carry on without the answer.
 """
 from functools import lru_cache
 import logging
 from typing import Union, List, Dict, Optional, Any
 
-import requests
-from requests.exceptions import RequestException
-
-from . import __version__ as version
+from . import egress
 
 logger = logging.getLogger(__name__)
 
-HEADERS = {"User-Agent": f"archivum/{version} (mailto:stephenjmildenhall@gmail.com)"}
 BASE_URL = "https://api.crossref.org/works"
+TIMEOUT_SECONDS = 10
+
+
+def _get_json(url: str, params: Optional[dict], kind: str, what: str) -> Optional[dict]:
+    """
+    Fetch one Crossref answer.
+
+    Parameters
+    ----------
+    url : str
+        The Crossref address.
+    params : dict or None
+        Query parameters.
+    kind : str
+        ``egress.SINGLE`` or ``egress.SEARCH``, which sets the pace.
+    what : str
+        The lookup, for the log line on failure.
+
+    Returns
+    -------
+    dict or None
+        The parsed JSON, or ``None`` when the request failed or the status
+        was not 200.
+    """
+    try:
+        resp = egress.default().get(url, params=params, kind=kind, retry=False, timeout=TIMEOUT_SECONDS)
+    except (egress.EgressFailed, egress.HostStopped) as e:
+        logger.error("Error %s: %s", what, e)
+        return None
+    if resp.status_code != 200:
+        logger.error("Error %s: HTTP %s", what, resp.status_code)
+        return None
+    return resp.json()
 
 
 @lru_cache(maxsize=None)
 def lookup_doi(doi: str) -> Union[Dict[str, Any], None]:
     """Lookup an individual doi string."""
     logger.info("crossref doi %s", doi)
-    url = f"{BASE_URL}/{doi}"
-    try:
-        resp = requests.get(url, headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        return resp.json()["message"]
-    except RequestException as e:
-        logger.error("Error looking up DOI %s: %s", doi, e)
-        return None
+    data = _get_json(f"{BASE_URL}/{doi}", None, egress.SINGLE, f"looking up DOI {doi}")
+    return data["message"] if data else None
 
 
 @lru_cache(maxsize=None)
 def search_by_title(title: str, rows: int = 1) -> Union[Dict[str, Any], None]:
     """Reverse lookup via title search."""
     logger.info("crossref title %s", title)
-    params = {"query.title": title, "rows": rows}
-    try:
-        resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        items = data.get("message", {}).get("items", [])
-        return items[0] if items else None
-    except RequestException as e:
-        logger.error("Error searching title %s: %s", title, e)
-        return None
+    data = _get_json(BASE_URL, {"query.title": title, "rows": rows}, egress.SEARCH, f"searching title {title}")
+    items = (data or {}).get("message", {}).get("items", [])
+    return items[0] if items else None
 
 
 @lru_cache(maxsize=None)
@@ -72,66 +87,5 @@ def search(
     if book_mode:
         params["filter"] = ("type:book",)  # Filters specifically for books
 
-    try:
-        resp = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=10)
-        resp.raise_for_status()
-        return resp.json().get("message", {}).get("items", [])
-    except RequestException as e:
-        logger.error("Error in generic search: %s", e)
-        return []
-
-
-# # v1
-# from functools import lru_cache
-# import logging
-# from typing import Union
-
-# import requests
-
-# from . import __version__ as version
-
-# logger = logging.getLogger(__name__)
-
-# HEADERS = {
-#     "User-Agent": f"archivum/{version} (mailto:stephenjmildenhall@gmail.com)"
-# }
-# BASE_URL = 'https://api.crossref.org/works'
-
-# @lru_cache
-# def lookup_doi(doi: str) -> dict | None:
-#     """Lookup an individual doi string."""
-#     logger.info('crossref doi %s', doi)
-#     url = f"{BASE_URL}/{doi}"
-#     resp = requests.get(url, headers=HEADERS)
-#     if resp.status_code == 200:
-#         return resp.json()["message"]
-#     return None
-
-
-# @lru_cache
-# def search_by_title(title: str, rows=1) -> dict | None:
-#     """Reverse lookup via title search."""
-#     logger.info('crossref title %s', title)
-#     params = {"query.title": title, "rows": rows}
-#     resp = requests.get(BASE_URL, params=params, headers=HEADERS)
-#     if resp.status_code == 200:
-#         items = resp.json()["message"]["items"]
-#         return items[0] if items else None
-#     return None
-
-
-# @lru_cache
-# def search(query=None, title=None, author=None, rows=5):
-#     """Generic search: keywords, title, and/or author."""
-#     logger.info('crossref search %s %s', title, author)
-#     params = {"rows": rows}
-#     if query:
-#         params["query"] = query
-#     if author:
-#         params["query.author"] = author
-#     if title:
-#         params["query.title"] = title
-#     resp = requests.get(BASE_URL, params=params, headers=HEADERS)
-#     if resp.status_code == 200:
-#         return resp.json()["message"]["items"]
-#     return []
+    data = _get_json(BASE_URL, params, egress.SEARCH, "in generic search")
+    return (data or {}).get("message", {}).get("items", [])

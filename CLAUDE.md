@@ -116,7 +116,9 @@ Three Feather DataFrames per library, plus one BibTeX file kept in sync:
 | `analytics/` | `semantic.py` (sentence-transformers + UMAP + HDBSCAN), `networks.py` (NetworkX coauthor and semantic graphs, Matplotlib SVG for reports), `timing.py` verbose spans |
 | `web/` | the Flask app — see below |
 | `configurations/` | packaged YAML for logging and querexfuzz DataFrame configs, shipped via `setuptools.package-data` |
-| `quarto.py`, `rg_tools.py`, `definitive_loader.py`, `alex.py`, `gui.py` | Quarto/QMD parsing, ripgrep wrappers, full-store loader, OpenAlex helpers, Tkinter metadata editor |
+| `egress.py` | the one outbound HTTP point for public reference data: host allow-list, per-host pacing, backoff. `crossref.py` and the DOI audit go through it; `requests` is used nowhere else except Ingest's download of a typed URL. A test enforces both. |
+| `doi_audit/` | the Audit page's engine: DOI rules (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
+| `quarto.py`, `rg_tools.py`, `definitive_loader.py`, `gui.py` | Quarto/QMD parsing, ripgrep wrappers, full-store loader, Tkinter metadata editor |
 
 ### The web app
 
@@ -124,7 +126,7 @@ Three Feather DataFrames per library, plus one BibTeX file kept in sync:
 in the background. Below it:
 
 - `routes/` — one file per topic: `query`, `ripgrep`, `ingest`, `edit`, `reports`, `network`,
-  `qmd`, `documents`, `analytics`, `status`. They share state via `routes/shared.py`, currently
+  `qmd`, `documents`, `analytics`, `status`, `audit`. They share state via `routes/shared.py`, currently
   by `from .shared import *`; making those imports explicit is a known cleanup item.
 - `services/` — heavier logic lifted out of the routes (`ripgrep.py`, `network.py`,
   `exports.py`).
