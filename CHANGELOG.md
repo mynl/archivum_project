@@ -5,6 +5,14 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a14 (2026-11-17)
+
+### Added
+
+- **Cited** on the Query page, between Mine and Random: the 50 most cited
+  references by OpenAlex count. Its dropdown offers the top 100 or 200, and
+  everything over 1,000, 500, or 100 citations.
+
 ## 2.16.0a13 (2026-11-17)
 
 ### Added
