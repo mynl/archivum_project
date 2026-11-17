@@ -23,6 +23,8 @@ def _library_signature(lib) -> tuple:
         lib.config_path / "ref.feather",
         lib.config_path / "doc.feather",
         lib.config_path / "ref-doc.feather",
+        # counts are a database column, so a cached universe is stale when they change
+        lib.config_path / "doi-audit" / "cites.feather",
     ]
     mtimes = tuple(p.stat().st_mtime if p.exists() else 0 for p in paths)
     return (lib.name, *mtimes)

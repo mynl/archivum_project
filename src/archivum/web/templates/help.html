@@ -146,6 +146,7 @@
                     <li><strong>Sorting</strong>: Use <code>order by field</code> or <code>order by -field</code> for descending.</li>
                     <li><strong>Limits</strong>: Add <code>top 50</code> to restrict result size.</li>
                     <li><strong>Library fields</strong>: <code>added</code> is when the reference entered the library, and is what <code>recent</code> sorts by; <code>create</code> is when its primary document's file was created. <code>docs</code> counts the documents linked to the reference: <code>where docs == 0</code> finds references with no document, <code>where docs &gt; 1</code> those with alternates.</li>
+                    <li><strong>Citation counts</strong>: <code>cites</code> is the latest count collected on the Audit page, <code>cites_asof</code> its date, and <code>cites_1y</code> the growth over the last year (empty until a count is a year old). <code>q !wang where cites &gt; 100</code> finds Wang's works cited more than 100 times, and <code>q where cites &gt; 0 order by -cites</code> lists the most cited first. A reference with no count matches no comparison, so it is left out. New counts are picked up on the next search. The counts are not part of the references and never appear in the BibTeX.</li>
                 </ul>
                 <p class="small">For the complete grammar, visit the <a href="https://github.com/mynl/querexfuzz_project" target="_blank">Querexfuzz Project</a>.</p>
             </div>

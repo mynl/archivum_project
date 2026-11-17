@@ -3154,6 +3154,9 @@ def uber(lib_name="", auto_open=True, debug=False):
             # Note: SkimMatchCompleter uses get_candidates_func which calls
             # LibraryContext.get_library_tags etc. Since we just cleared the 
             # candidates in refresh(), they will be rebuilt on next tab press.
+        elif not lib.is_empty:
+            # citation counts fetched from the web page or another terminal
+            lib.refresh_cites()
 
         chain = os.environ.get("UBERSHELL_CHAIN", shell.prompt_label)
         return HTML(

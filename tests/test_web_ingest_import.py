@@ -253,6 +253,11 @@ def _stage_one(client, name="paper.pdf"):
 class _FakePreviewLibrary:
     is_empty = False
     needs_reload = False
+
+    def refresh_cites(self):
+        """The before-request hook asks whether citation counts changed; never, here."""
+        return False
+
     ref_df = pd.DataFrame({"tag": []})
     doc_df = pd.DataFrame({"hash": [], "version": []})
     ref_doc_df = pd.DataFrame({"tag": [], "hash": [], "version": []})

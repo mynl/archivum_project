@@ -698,6 +698,8 @@ class Library(LibraryBase):
             if "added" not in merged.columns and "create" in merged.columns:
                 merged["added"] = merged["create"]
 
+            merged = self._join_cites(merged)
+
             # Note: We don't truncate hash here because querex might need it for filtering,
             # and truncating before merging or using it in query logic is risky.
             # But the display code usually handles the truncation.
@@ -712,6 +714,62 @@ class Library(LibraryBase):
                 "querex",
             )
         return self._database
+
+    def _cites_file_mtime(self) -> float:
+        """Modification time of ``doi-audit/cites.feather``; 0.0 when there is none."""
+        try:
+            return (self.config_path / "doi-audit" / "cites.feather").stat().st_mtime
+        except OSError:
+            return 0.0
+
+    def _join_cites(self, merged: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add the citation counts collected by the DOI audit to the database.
+
+        Parameters
+        ----------
+        merged : pandas.DataFrame
+            The database being built, one row per reference.
+
+        Returns
+        -------
+        pandas.DataFrame
+            ``merged`` with ``cites``, ``cites_1y`` (nullable integers) and
+            ``cites_asof`` (ISO date text), missing where a reference has no
+            count. The columns exist even with no counts at all, so a query
+            on ``cites`` selects nothing instead of failing.
+
+        Notes
+        -----
+        The join is made here and never in ``ref_df``: counts are derived data
+        and must not reach ``ref.feather`` or ``bibtex.bib``.
+        """
+        from .doi_audit.journal import read_cites
+
+        self._cites_mtime = self._cites_file_mtime()
+        cites = read_cites(self.config_path)[["tag", "cites", "cites_asof", "cites_1y"]].drop_duplicates("tag")
+        merged = merged.merge(cites, on="tag", how="left")
+        for column in ("cites", "cites_1y"):
+            merged[column] = merged[column].astype("Int64")
+        return merged
+
+    def refresh_cites(self) -> bool:
+        """
+        Drop the cached database if the citation counts have changed on disk.
+
+        One ``stat`` of ``cites.feather``. The file changes once per DOI audit
+        run, in this process or another, and the database is rebuilt on its
+        next use. Nothing else is reloaded.
+
+        Returns
+        -------
+        bool
+            Whether the database was dropped.
+        """
+        if self._database.empty or getattr(self, "_cites_mtime", None) == self._cites_file_mtime():
+            return False
+        self._database = pd.DataFrame()
+        return True
 
     def _read_rank(self, merged: pd.DataFrame) -> pd.Series:
         r"""

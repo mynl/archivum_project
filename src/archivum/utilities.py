@@ -181,6 +181,17 @@ def safe_file_size(s):
 
 
 # make the library display function
+def format_count(x) -> str:
+    """
+    Format a count that may be missing, for a terminal table.
+
+    Thousands separators, and ``-`` for no value. Not blank: greater_tables
+    5.2.1 fails on a column with no visible content (see TODO.md,
+    [import-bibtex-vv]), and a column of counts is often all missing.
+    """
+    return "-" if pd.isna(x) else f"{int(x):,d}"
+
+
 def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
     """
     Make a qd function with sensible defaults.
@@ -206,10 +217,15 @@ def make_qd(max_string_length=50, max_rows=10, display_func=None, **gt_kwargs):
         "show_index": False,
         "formatters": {
             "size": safe_file_size,
+            # citation counts: commas, and a dash where a reference has none
+            "cites": format_count,
+            "cites_1y": format_count,
+            "cites_asof": lambda x: "-" if pd.isna(x) else str(x),
         },
         "raw_cols": ["year", "index", "node", "links", "number"],
         "aligners": {
             "year": "r",
+            "cites_asof": "c",
             "index": "l",
             "node": "r",
             "links": "r",

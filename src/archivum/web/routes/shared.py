@@ -38,6 +38,9 @@ def check_for_reload():
         logger.info(f"External changes detected. Reloading library '{lib.name}' in web context.")
         lib.reset()
         LibraryContext.refresh()
+    elif not lib.is_empty:
+        # one stat: a DOI audit run rewrites cites.feather once, at its end
+        lib.refresh_cites()
 
 def _render_export_button(id_prefix, hashes, input_id='rg-input'):
     """Render the active export button as an HTMX out-of-band swap."""

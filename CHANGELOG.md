@@ -5,6 +5,23 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a8 (2026-11-17)
+
+### Added
+
+- Citation counts are fields in queries: `cites`, `cites_asof` and `cites_1y`.
+  `q !wang where cites > 100` works on the Query page, the Network and Audit
+  subset boxes, and in the shell; `order by -cites` puts the most cited first.
+- A reference with no count matches no comparison on `cites`, without error.
+- Counts fetched on the Audit page or in another terminal are picked up on
+  the next search; nothing needs reloading.
+- In terminal tables a count shows with commas, and `-` where there is none.
+
+### Notes
+
+- The counts are joined into the query database only. They are not written to
+  `ref.feather` or `bibtex.bib`.
+
 ## 2.16.0a7 (2026-11-17)
 
 ### Changed

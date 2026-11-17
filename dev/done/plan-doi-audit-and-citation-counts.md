@@ -640,3 +640,22 @@ if the OpenAlex counts prove sufficient.
   trigger was tried for a quicker first update and dropped: each swap of the line would have
   re-armed it, making the rate one request a second.
 - Gate: `.venv\Scripts\python -m pytest -q`, 292 passed, 26 skipped. Browser check repeated.
+
+### 2.16.0a8 [citation counts in query] (2026-11-17)
+
+- **Build time of `Library.database` on the real library** (7,440 rows, 171 with a count,
+  median of 7 builds, read only): 14 ms without the join, 18 ms with it.
+- **Background cost of the counts reload:** one `stat` of `cites.feather` per web request, in
+  the existing before-request hook, and one per shell prompt. The database is dropped and
+  rebuilt only when the file's time has changed, which a run does once, at its end.
+- `cites` and `cites_1y` are nullable `Int64` in the database, so a count is an integer and a
+  missing one compares false in querex. The columns exist with no counts at all.
+- **Divergence: a missing count shows as `-` in terminal tables, not blank.** greater_tables
+  5.2.1 fails on a column with no visible content (the open [import-bibtex-vv] item), and
+  `cites_1y` is entirely missing for the first year. Blank can return when that item is fixed.
+- **Not done, as the plan's Deferred list says:** the count is not shown on the Query result
+  line. The Query page's Table view has fixed columns, so `select tag, cites` shows there only
+  in a CSV export; the shell shows it.
+- **Checked:** every BibTeX path that takes database rows passes the `ref_columns` whitelist,
+  and the paths without a whitelist take `ref_df` rows, so `cites` cannot reach a `.bib`.
+- Tests: `tests/test_doi_audit_query.py` (9).
