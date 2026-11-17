@@ -5,6 +5,21 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a2 (2026-11-17)
+
+### Changed
+
+- `bibtex.bib` is written to a temporary file, checked, and then moved into
+  place. A write that fails part-way leaves the existing file as it was;
+  before, it could leave a truncated file.
+- A save refuses to write `bibtex.bib` when the entry count differs from the
+  reference count. The Feathers are already saved at that point.
+- The file being replaced is copied to `backups/bibtex_<stamp>.bib`, last ten
+  kept, like the Feathers. The single `bibtex.bak` is no longer written; an
+  existing one is left where it is.
+- If another program has `bibtex.bib` open, the save retries for a second and
+  then fails with the old file intact and the new text in `bibtex.bib.tmp`.
+
 ## 2.16.0a1 (2026-11-08)
 
 ### Fixed

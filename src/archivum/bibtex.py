@@ -200,6 +200,46 @@ def rows_to_bibtex(
     return "\n\n".join(entries)
 
 
+def count_bibtex_entries(text: str) -> int:
+    """
+    Count the entries in text built by :func:`rows_to_bibtex`.
+
+    Parameters
+    ----------
+    text : str
+        BibTeX text whose entries are separated by a blank line.
+
+    Returns
+    -------
+    int
+        The number of entry headers, ``@type{``, at the start of the text or
+        after a blank line.
+
+    Notes
+    -----
+    A header is counted only after a blank line, so an ``@`` that starts a
+    line inside a field value, as in an abstract, is not taken for an entry.
+    """
+    return len(re.findall(r"(?:\A|\n\n)@[A-Za-z]+\{", text))
+
+
+def bibtex_entry_rows(df: pd.DataFrame) -> int:
+    """
+    Count the entries :func:`rows_to_bibtex` should build from a frame.
+
+    Parameters
+    ----------
+    df : pandas.DataFrame
+        Reference rows, as passed to :func:`rows_to_bibtex`.
+
+    Returns
+    -------
+    int
+        The number of rows after duplicate tags are dropped.
+    """
+    return len(_dedupe_bibtex_dataframe(df))
+
+
 def _is_blank(value: Any) -> bool:
     """None, NaN, or text that is empty or the string ``nan``."""
     if value is None:

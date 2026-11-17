@@ -32,7 +32,7 @@ from .trie import Trie
 from .utilities import TagAllocator, assign_ref_doc_priority, inode_or_zero
 from .config import load_configuration
 from .library_base import LibraryBase
-from .bibtex import dict_to_bibtex, rows_to_bibtex
+from .bibtex import bibtex_entry_rows, count_bibtex_entries, dict_to_bibtex, rows_to_bibtex
 from .hasher import hash_many3 as hash_many
 from .document import Document, extract_text_for_paths
 from .enhancements import (
@@ -45,6 +45,11 @@ from .enhancements import (
 )
 
 logger = logging.getLogger(__name__)
+
+# write_bibtex retries the move onto bibtex.bib while another program holds
+# the file open: five tries, one second in all.
+BIBTEX_REPLACE_ATTEMPTS = 5
+BIBTEX_REPLACE_WAIT_SECONDS = 0.25
 
 
 class LibraryImportBlocked(ValueError):
@@ -1568,6 +1573,27 @@ class Library(LibraryBase):
         Write out bibtex file of the library.
 
         Lives in library/LIB_NAME/lib-name.bib with a symlink to config location.
+
+        The text goes to ``bibtex.bib.tmp`` first and is moved onto
+        ``bibtex.bib`` only after it has been checked, so a failed or short
+        write leaves the existing file untouched. The file being replaced is
+        copied to ``backups/bibtex_<stamp>.bib``, and the last ten are kept.
+
+        Raises
+        ------
+        ValueError
+            If the text has a different number of entries from the references
+            it was built from. ``bibtex.bib`` is left as it was.
+        OSError
+            If the temporary file cannot be written, or another program keeps
+            ``bibtex.bib`` open through every retry of the replace. The old
+            ``bibtex.bib`` is intact and the new text is in ``bibtex.bib.tmp``.
+
+        Notes
+        -----
+        The Feathers are written in place, not replaced: a replace raises a
+        moved event, and the watcher that reports another process's writes
+        listens for modified events only.
         """
         bibtex_path = self.config_path / "bibtex.bib"
         bibtex_path = Path(bibtex_path).absolute()
@@ -1576,15 +1602,45 @@ class Library(LibraryBase):
         # Use ref_columns as the whitelist
         allowed_fields = self.config.ref_columns
         txt = rows_to_bibtex(self.ref_df, allowed_fields=allowed_fields)
-        entry_count = txt.count("\n@") + (1 if txt else 0)
+        entry_count = count_bibtex_entries(txt)
+        expected_count = bibtex_entry_rows(self.ref_df)
+        if entry_count != expected_count:
+            raise ValueError(
+                f"BibTeX not written: {entry_count} entries built for {expected_count} references. "
+                f"{bibtex_path.name} is unchanged."
+            )
 
-        # backup existing
-        # A real copy, not a hardlink: write_text truncates the inode in place.
+        # Write beside the target and check what reached the disk before the
+        # target is touched: write_text on the target truncates it in place.
+        tmp_path = bibtex_path.with_name(bibtex_path.name + ".tmp")
+        payload = txt.encode("utf-8")
+        with open(tmp_path, "wb") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        if tmp_path.stat().st_size != len(payload):
+            raise OSError(f"Short write to {tmp_path}; {bibtex_path.name} is unchanged.")
+
+        # backup existing, dated like the Feather backups
+        backup_dir = self.config_path / "backups"
         if bibtex_path.exists():
-            shutil.copy2(bibtex_path, bibtex_path.with_suffix(".bak"))
+            backup_dir.mkdir(exist_ok=True)
+            stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            shutil.copy2(bibtex_path, backup_dir / f"bibtex_{stamp}.bib")
+            for old in sorted(backup_dir.glob("bibtex_*.bib"))[:-10]:
+                old.unlink()
 
-        # write out
-        bibtex_path.write_text(txt, encoding="utf-8")
+        # On Windows the replace fails while another program (an editor, a
+        # Quarto render) has the target open; such holds are usually brief.
+        for attempt in range(BIBTEX_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp_path, bibtex_path)
+                break
+            except PermissionError:
+                if attempt == BIBTEX_REPLACE_ATTEMPTS - 1:
+                    logger.error("Could not replace %s; the new text is in %s", bibtex_path, tmp_path)
+                    raise
+                time.sleep(BIBTEX_REPLACE_WAIT_SECONDS)
         logger.info("Wrote %s bibtex entries to %s", entry_count, bibtex_path)
 
         # create a link to the config location...but remember the version in the
