@@ -85,6 +85,8 @@ class Configurator(BaseModel):
         description="Half-life in days of a read's weight in the Read blend: one doubling of reads is worth this many days of recency.")
     doi_audit_refresh_days: int = Field(30, gt=0,
         description="Days before a citation count collected by the DOI audit is stale and fetched again.")
+    doi_audit_search_days: int = Field(180, gt=0,
+        description="Days before the DOI audit searches again for the DOI of a reference it has already searched for.")
     contact_email: str = Field("",
         description="Sent to Crossref and OpenAlex in the User-Agent and as mailto, which is how both identify a polite caller. Empty sends neither.")
     owner_author_pattern: str = Field("",

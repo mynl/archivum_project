@@ -733,6 +733,7 @@ def doi_audit_revert(changeset, execute):
 @click.argument("query", type=str, default="")
 @click.option("--counts", is_flag=True, help="Fetch citation counts from OpenAlex for references with a DOI.")
 @click.option("--dois", is_flag=True, help="Check each DOI against OpenAlex, Crossref and doi.org; collects the counts too.")
+@click.option("--missing", is_flag=True, help="Search Crossref, then OpenAlex, for the DOI of each reference that has none.")
 @click.option(
     "--mode",
     type=click.Choice(["auto", "speedy", "polite"]),
@@ -747,7 +748,7 @@ def doi_audit_revert(changeset, execute):
     show_default=True,
     help="Actually send the requests; otherwise, show what the run would do.",
 )
-def doi_audit_run(query, counts, dois, mode, execute):
+def doi_audit_run(query, counts, dois, missing, mode, execute):
     """
     Collect from the public sources for a subset of the library.
 
@@ -769,8 +770,8 @@ def doi_audit_run(query, counts, dois, mode, execute):
     if lib.is_empty:
         click.echo("No library open. Returning")
         return
-    if not counts and not dois:
-        click.secho("Choose what to collect: --counts or --dois.", fg="yellow")
+    if sum((counts, dois, missing)) != 1:
+        click.secho("Choose one thing to collect: --counts, --dois or --missing.", fg="yellow")
         return
 
     try:
@@ -780,7 +781,10 @@ def doi_audit_run(query, counts, dois, mode, execute):
         return
     rows, days = subset_rows(lib.ref_df, tags), lib.config.doi_audit_refresh_days
     # a DOI check asks OpenAlex first and so collects the counts as well
-    if dois:
+    if missing:
+        plan, make = runner.plan_search(lib.config_path, rows, lib.config.doi_audit_search_days), runner.SearchRun
+        most = plan.requests_most
+    elif dois:
         plan, make = runner.plan_check(lib.config_path, rows, days), runner.CheckRun
         most = plan.requests_most
     else:
@@ -790,15 +794,24 @@ def doi_audit_run(query, counts, dois, mode, execute):
         mode = egress.choose_mode(most)
 
     click.echo(f"Subset:        {plan.subset:,} references")
-    if dois:
+    if missing:
+        low, high = plan.openalex_searches
+        click.echo(f"To search for: {plan.tags:,} references in {plan.requests:,} to {most:,} requests "
+                   "(Crossref, then OpenAlex where Crossref has nothing close)")
+        click.echo(f"OpenAlex cost: {low * 10:,} to {high * 10:,} of the day's 10,000 credits; the run stops when they run low")
+        click.echo(f"Skipped:       {plan.has_doi:,} that have a DOI, {plan.no_title:,} with no title, "
+                   f"{plan.fresh:,} searched for under {lib.config.doi_audit_search_days} days ago")
+        duration = f"{runner.format_duration(plan.seconds(mode))} to {runner.format_duration(plan.seconds(mode, most))}"
+    elif dois:
         click.echo(f"To check:      {plan.tags:,} references in {plan.requests:,} to {most:,} requests "
                    "(OpenAlex, then Crossref and doi.org for the DOIs not confirmed)")
         duration = f"{runner.format_duration(plan.seconds(mode))} to {runner.format_duration(plan.seconds(mode, most))}"
     else:
         click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org")
         duration = runner.format_duration(plan.seconds(mode))
-    click.echo(f"Skipped:       {plan.no_doi:,} with no DOI, {plan.unusable:,} whose DOI needs attention, "
-               f"{plan.fresh:,} with a result under {days} days old")
+    if not missing:
+        click.echo(f"Skipped:       {plan.no_doi:,} with no DOI, {plan.unusable:,} whose DOI needs attention, "
+                   f"{plan.fresh:,} with a result under {days} days old")
     click.echo(f"Mode:          {mode}, about {duration}")
     if not os.environ.get("OPENALEX_API_KEY"):
         click.secho("OPENALEX_API_KEY is not set: the daily allowance is a tenth of a keyed one.", fg="yellow")
@@ -831,7 +844,10 @@ def _echo_run_state(state: dict) -> None:
     click.secho(f"Run {state['run_id']} {state['status']}: {state['done']:,} of {state['total']:,} references, "
                 f"{state['requests']:,} of {state['requests_planned']:,} requests, {state['mode']}, "
                 f"{runner.format_duration(runner.elapsed_seconds(state))}.", fg=color)
-    if state.get("action") == "check":
+    if state.get("action") == "search":
+        click.echo(f"Something found for {state['found']:,}, nothing for {state['not_found']:,}, errors {state['errors']:,}. "
+                   "Review the proposals on the Audit page.")
+    elif state.get("action") == "check":
         click.echo(f"Errors {state['errors']:,}. See the classes with doi-audit-status.")
     else:
         click.echo(f"Found {state['found']:,}, not at OpenAlex {state['not_found']:,}, errors {state['errors']:,}.")
@@ -856,7 +872,10 @@ def doi_audit_status():
     """
     from .doi_audit import journal, runner
     from .doi_audit.doi import NOT_CHECKED, STRONG_TITLE, WEAK_TITLE
-    from .doi_audit.proposals import CHECK_CLASSES, check_counts, checked_dois
+    from .doi_audit.doi import NOT_SEARCHED
+    from .doi_audit.proposals import (
+        CHECK_CLASSES, SEARCH_CLASSES, check_counts, checked_dois, search_counts, searched_references,
+    )
 
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -874,7 +893,14 @@ def doi_audit_status():
     else:
         click.echo("Citation counts: none.")
 
-    checked = checked_dois(lib.ref_df, lib.ref_df, journal.latest_observations(lib.config_path))
+    latest = journal.latest_observations(lib.config_path)
+    searched = search_counts(searched_references(lib.ref_df, latest))
+    if sum(searched.values()) == searched[NOT_SEARCHED]:
+        click.echo("DOI search: none.")
+    else:
+        click.echo("DOI search: " + ", ".join(f"{SEARCH_CLASSES[c].lower()} {n:,}" for c, n in searched.items() if n) + ".")
+
+    checked = checked_dois(lib.ref_df, lib.ref_df, latest)
     counts = check_counts(checked)
     if len(checked) == counts[NOT_CHECKED]:
         click.echo("DOI check: none.")

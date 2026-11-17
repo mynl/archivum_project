@@ -13,10 +13,10 @@ from ... import egress
 from ...cli import LibraryContext
 from ...doi_audit import changesets as cs
 from ...doi_audit import journal, runner
-from ...doi_audit.doi import MALFORMED, NOT_CHECKED
+from ...doi_audit.doi import MALFORMED, NOT_CHECKED, NOT_SEARCHED, WORK_NO_DOI, normalize_doi
 from ...doi_audit.proposals import (
-    CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, check_counts, check_rows, checked_dois, local_proposals,
-    subset_rows, summarize,
+    CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, SEARCH_CLASSES, SEARCH_COMMIT_CLASSES, check_counts,
+    check_rows, checked_dois, local_proposals, search_counts, searched_references, subset_rows, summarize,
 )
 from ...utilities import clean_latex
 from ...search.universe import resolve_universe_tags
@@ -30,7 +30,10 @@ PAGE_ROWS = 50
 CHANGESETS_SHOWN = 20
 COUNTS_CLASS = "counts"
 CHECK_CLASS = "check"
-COUNTS_ACTION, CHECK_ACTION = "counts", "check"
+SEARCH_CLASS = "search"
+COUNTS_ACTION, CHECK_ACTION, SEARCH_ACTION = "counts", "check", "search"
+# what the page shows when a run of each kind ends
+RESULT_CLASS = {COUNTS_ACTION: COUNTS_CLASS, CHECK_ACTION: CHECK_CLASS, SEARCH_ACTION: SEARCH_CLASS}
 
 
 def _subset(lib, raw_query: str):
@@ -108,10 +111,14 @@ def _plan_view(lib, rows, action: str) -> dict:
     rows : pandas.DataFrame
         The references of the subset.
     action : str
-        ``counts`` or ``check``.
+        ``counts``, ``check`` or ``search``.
     """
     days = lib.config.doi_audit_refresh_days
-    if action == CHECK_ACTION:
+    if action == SEARCH_ACTION:
+        plan = runner.plan_search(lib.config_path, rows, lib.config.doi_audit_search_days)
+        most = plan.requests_most
+        durations = {mode: (plan.seconds(mode), plan.seconds(mode, most)) for mode in egress.MODES}
+    elif action == CHECK_ACTION:
         plan = runner.plan_check(lib.config_path, rows, days)
         most = plan.requests_most
         durations = {mode: (plan.seconds(mode), plan.seconds(mode, most)) for mode in egress.MODES}
@@ -142,11 +149,19 @@ def _checked(lib, rows) -> list:
                         journal.rejected_proposals(lib.config_path))
 
 
-def _summary(lib, rows, checked=None) -> dict:
-    """The counts of the summary strip: the local ones, the citation counts, and the DOIs checked."""
+def _searched(lib, rows) -> list:
+    """Every reference of the subset with no DOI, with its class from the searches in the journal."""
+    return searched_references(rows, journal.latest_observations(lib.config_path),
+                               journal.rejected_proposals(lib.config_path), journal.accepted_works(lib.config_path))
+
+
+def _summary(lib, rows, checked=None, searched=None) -> dict:
+    """The counts of the summary strip: the local ones, the citation counts, the DOIs checked and searched for."""
     checked = _checked(lib, rows) if checked is None else checked
+    searched = _searched(lib, rows) if searched is None else searched
     return {**summarize(rows), **_counts_summary(lib, rows),
-            "checked": sum(1 for p in checked if p.cls != NOT_CHECKED)}
+            "checked": sum(1 for p in checked if p.cls != NOT_CHECKED),
+            "searched": sum(1 for p in searched if p.cls != NOT_SEARCHED)}
 
 
 def _page_of(found: list, page: int) -> tuple[list, int, int]:
@@ -200,7 +215,7 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
     except ValueError as e:
         return render_template("components/alert.html", level="danger", message=f"Query not understood: {e}")
 
-    checked = _checked(lib, rows)
+    checked, searched = _checked(lib, rows), _searched(lib, rows)
     review = None
     if cls in LOCAL_CLASSES:
         found = local_proposals(rows, cls, journal.rejected_proposals(lib.config_path))
@@ -222,12 +237,24 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
             "can_commit": cls in CHECK_COMMIT_CLASSES,
             "pills": [(c, label, counts[c]) for c, label in CHECK_CLASSES.items()],
         }
+    elif cls == SEARCH_CLASS or cls in SEARCH_CLASSES:
+        counts = search_counts(searched)
+        if cls == SEARCH_CLASS:
+            cls = next((c for c in SEARCH_CLASSES if counts[c]), next(iter(SEARCH_CLASSES)))
+        shown, page, pages = _page_of([p for p in searched if p.cls == cls], page)
+        review = {
+            "kind": "search", "cls": cls, "label": SEARCH_CLASSES[cls], "total": counts[cls], "page": page, "pages": pages,
+            "rows": [{"p": p, "old_json": json.dumps(p.current)} for p in shown],
+            "can_commit": cls in SEARCH_COMMIT_CLASSES,
+            "can_accept_work": cls == WORK_NO_DOI,
+            "pills": [(c, label, counts[c]) for c, label in SEARCH_CLASSES.items()],
+        }
     return render_template(
         "components/audit_body.html",
-        q=raw_query, summary=_summary(lib, rows, checked), review=review,
+        q=raw_query, summary=_summary(lib, rows, checked, searched), review=review,
         counts=_counts_table(lib, rows, page) if cls == COUNTS_CLASS else None,
         plan=_plan_view(lib, rows, show_plan) if show_plan else None, run=_run_view(lib),
-        refresh_days=lib.config.doi_audit_refresh_days,
+        refresh_days=lib.config.doi_audit_refresh_days, search_days=lib.config.doi_audit_search_days,
         changesets=_changeset_rows(lib), changeset_view=_changeset_view(lib, view_changeset) if view_changeset else None,
         message=message, level=level,
     )
@@ -295,6 +322,16 @@ def audit_commit():
     ticked = _ticked_rows()
     if not ticked:
         return _render_body(lib, raw_query, cls, page, "No rows ticked.", "warning")
+    for r in ticked:
+        # a DOI pasted as an address or with a prefix is stored bare
+        if r["field"] == "doi" and r["new"]:
+            r["new"] = normalize_doi(r["new"])
+    if cls in SEARCH_CLASSES:
+        # here an empty box is a DOI not yet chosen, never a request to clear one
+        empty = [r["tag"] for r in ticked if not r["new"]]
+        if empty:
+            return _render_body(lib, raw_query, cls, page,
+                                f"Nothing committed. No DOI given for {', '.join(empty)}.", "warning")
 
     changes = [
         {"tag": r["tag"], "field": r["field"], "old": r["old"], "new": r["new"],
@@ -337,7 +374,9 @@ def audit_reject():
         return _render_body(lib, raw_query, cls, page, "No rows ticked.", "warning")
     journal.append_lines(lib.config_path, journal.DECISIONS, [
         {"decision": journal.REJECTED, "class": cls, "tag": r["tag"], "field": r["field"], "old": r["old"],
-         "proposed": r["proposed"]}
+         "proposed": r["proposed"],
+         # a rejected work with no DOI is also withdrawn if it had been accepted
+         **({"openalex_id": r["proposed"]} if r["field"] == "work" else {})}
         for r in ticked
     ])
     return _render_body(lib, raw_query, cls, page, f"Rejected {len(ticked)} rows; they will not be proposed again.")
@@ -371,8 +410,9 @@ def audit_revert():
 
 
 def _action() -> str:
-    """The run a request is about: ``check``, or ``counts`` by default."""
-    return CHECK_ACTION if request.values.get("action") == CHECK_ACTION else COUNTS_ACTION
+    """The run a request is about: ``check``, ``search``, or ``counts`` by default."""
+    action = request.values.get("action")
+    return action if action in (CHECK_ACTION, SEARCH_ACTION) else COUNTS_ACTION
 
 
 @bp.route('/audit/plan')
@@ -400,21 +440,24 @@ def audit_run():
         rows = _subset(lib, raw_query)
     except ValueError as e:
         return _render_body(lib, raw_query, cls, page, f"Query not understood: {e}", "danger")
-    if action == CHECK_ACTION:
+    if action == SEARCH_ACTION:
+        plan = runner.plan_search(lib.config_path, rows, lib.config.doi_audit_search_days)
+        make, what = runner.SearchRun, "Search"
+    elif action == CHECK_ACTION:
         plan = runner.plan_check(lib.config_path, rows, days)
         make, what = runner.CheckRun, "DOI check"
     else:
         plan = runner.plan_counts(lib.config_path, rows, days)
         make, what = runner.CountsRun, "Run"
     if not plan.requests:
-        return _render_body(lib, raw_query, cls, page, "Nothing to ask: every DOI in the subset has a fresh result.", "info")
+        return _render_body(lib, raw_query, cls, page, "Nothing to ask: everything in the subset has a fresh result.", "info")
     try:
         make(lib.config_path, plan, mode).start()
     except runner.RunActive as e:
         return _render_body(lib, raw_query, cls, page, f"Not started. {e}", "warning")
     return _render_body(lib, raw_query, cls, page,
                         f"{what} started: {plan.tags:,} references, {plan.requests:,} requests or more, {mode}."
-                        if action == CHECK_ACTION else
+                        if action in (CHECK_ACTION, SEARCH_ACTION) else
                         f"{what} started: {plan.tags:,} references in {plan.requests:,} requests, {mode}.")
 
 
@@ -453,12 +496,12 @@ def audit_run_status():
             return html
         html += render_template(
             "components/audit_summary.html", oob=True, refresh_days=lib.config.doi_audit_refresh_days,
-            summary=_summary(lib, rows))
+            search_days=lib.config.doi_audit_search_days, summary=_summary(lib, rows))
     response = make_response(html)
     if not view["active"]:
         # the page then shows what the run produced: the counts table, or the check results
         action = (view["state"] or {}).get("action", COUNTS_ACTION)
-        response.headers["HX-Trigger"] = json.dumps({"audit-run-ended": {"cls": CHECK_CLASS if action == CHECK_ACTION else COUNTS_CLASS}})
+        response.headers["HX-Trigger"] = json.dumps({"audit-run-ended": {"cls": RESULT_CLASS.get(action, COUNTS_CLASS)}})
     return response
 
 
@@ -473,3 +516,26 @@ def audit_changeset():
     if _changeset_view(lib, name) is None:
         return _render_body(lib, raw_query, cls, page, f"No changeset {name!r}.", "warning")
     return _render_body(lib, raw_query, cls, page, view_changeset=name)
+
+
+@bp.route('/audit/accept-work', methods=['POST'])
+@admin_required
+def audit_accept_work():
+    """
+    Accept the ticked OpenAlex works, which have no DOI, as the works of their references.
+
+    Nothing is written to the references. The acceptance goes to
+    ``decisions.jsonl``, and from then on a citation-count run asks OpenAlex
+    for the work's count by its id.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    raw_query, cls, page = _form_state()
+    ticked = [r for r in _ticked_rows() if r["field"] == "work" and r["proposed"]]
+    if not ticked:
+        return _render_body(lib, raw_query, cls, page, "No rows ticked.", "warning")
+    journal.append_lines(lib.config_path, journal.DECISIONS, [
+        {"decision": journal.WORK_ACCEPTED, "class": cls, "tag": r["tag"], "openalex_id": r["proposed"]} for r in ticked
+    ])
+    return _render_body(lib, raw_query, cls, page,
+                        f"Accepted {len(ticked)} works. Fetch citation counts collects their counts.")

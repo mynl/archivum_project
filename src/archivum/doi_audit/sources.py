@@ -11,13 +11,16 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from .. import egress
-from .doi import doi_key
+from .doi import doi_key, plain_title
 
 CROSSREF_WORKS = "https://api.crossref.org/works"
 DOI_ORG = "https://doi.org"
 OPENALEX_WORKS = "https://api.openalex.org/works"
 # OpenAlex allows 100 values in one filter
 OPENALEX_BATCH = 100
+# candidates kept from one title search
+SEARCH_CANDIDATES = 3
+_CROSSREF_FIELDS = "DOI,title,author,issued,container-title,volume,issue,page,type,is-referenced-by-count,relation"
 _OPENALEX_FIELDS = "id,doi,title,publication_year,cited_by_count,type,authorships,primary_location,biblio"
 
 
@@ -217,3 +220,86 @@ def doi_exists(client: egress.Egress, doi: str) -> bool:
     if response.status_code == 404:
         return False
     raise SourceError(f"doi.org answered HTTP {response.status_code}")
+
+
+def crossref_search(client: egress.Egress, title: str, surname: str = "", year: str = "") -> list[dict]:
+    """
+    Search Crossref for a work by its title, first author's surname and year.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run.
+    title : str
+        The reference's title.
+    surname, year : str, optional
+        The first author's surname and the year, which sharpen the search.
+
+    Returns
+    -------
+    list of dict
+        Up to :data:`SEARCH_CANDIDATES` records, best first by Crossref's own
+        ranking. Empty when Crossref finds nothing.
+
+    Raises
+    ------
+    SourceError
+        If the status is not 200.
+
+    Notes
+    -----
+    The three are sent as one ``query.bibliographic``, the form Crossref asks
+    for when matching a citation. They are all of the reference that leaves
+    the machine.
+    """
+    query = " ".join(part for part in (plain_title(title), surname, year) if part)
+    response = client.get(
+        CROSSREF_WORKS,
+        params={"query.bibliographic": query, "rows": SEARCH_CANDIDATES, "select": _CROSSREF_FIELDS},
+        kind=egress.SEARCH,
+    )
+    if response.status_code != 200:
+        raise SourceError(f"Crossref answered HTTP {response.status_code}")
+    return [_crossref_record(work) for work in response.json().get("message", {}).get("items", [])]
+
+
+def openalex_search(client: egress.Egress, title: str) -> list[dict]:
+    """
+    Search OpenAlex for a work by its title.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run.
+    title : str
+        The reference's title.
+
+    Returns
+    -------
+    list of dict
+        Up to :data:`SEARCH_CANDIDATES` records, best first. A record may have
+        no DOI: OpenAlex has works, books especially, that were never given
+        one.
+
+    Raises
+    ------
+    SourceError
+        If the status is not 200.
+
+    Notes
+    -----
+    A search costs ten times a DOI lookup against the daily OpenAlex budget,
+    so the runner uses it only where Crossref found nothing. The search is of
+    titles only (``title.search``), not of abstracts and full text, which
+    return works that merely mention the words. Commas and bars are separators
+    in an OpenAlex filter, so they are sent as spaces.
+    """
+    words = " ".join(plain_title(title).replace(",", " ").replace("|", " ").split())
+    response = client.get(
+        OPENALEX_WORKS,
+        params={"filter": f"title.search:{words}", "per_page": SEARCH_CANDIDATES, "select": _OPENALEX_FIELDS},
+        kind=egress.SEARCH,
+    )
+    if response.status_code != 200:
+        raise SourceError(f"OpenAlex answered HTTP {response.status_code}")
+    return [_openalex_record(work) for work in response.json().get("results", [])]

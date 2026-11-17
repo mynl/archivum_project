@@ -23,6 +23,8 @@ OBSERVATIONS = "observations.jsonl"
 COUNTS = "counts.jsonl"
 CITES = "cites.feather"
 ACCEPTED, REJECTED = "accepted", "rejected"
+# an OpenAlex work with no DOI, accepted in review as the reference's work, so that its count can be attached
+WORK_ACCEPTED = "work accepted"
 OK, NOT_FOUND, ERROR = "ok", "not_found", "error"
 CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id"]
 
@@ -138,11 +140,13 @@ def fresh_count_keys(library_path: Path, refresh_days: float, now: dt.datetime |
     set of tuple
         ``(tag, doi_key)`` for each OpenAlex answer newer than
         ``refresh_days``, whether a count or a not-found. The DOI is part of
-        the key, so a reference whose DOI has changed is asked again.
+        the key, so a reference whose DOI has changed is asked again. A count
+        taken through an accepted work with no DOI has ``work:<id>`` in its
+        place.
     """
     now = now or dt.datetime.now(dt.timezone.utc)
     cutoff = now - dt.timedelta(days=refresh_days)
-    fresh = {(r["tag"], r.get("doi")) for r in read_lines(library_path, COUNTS)
+    fresh = {(r["tag"], r.get("doi") or f"work:{r.get('source_id')}") for r in read_lines(library_path, COUNTS)
              if r.get("source") == "openalex" and _when(r) >= cutoff}
     fresh |= {(r["tag"], r.get("query")) for r in read_lines(library_path, OBSERVATIONS)
               if r.get("source") == "openalex" and r.get("query_kind") == "doi"
@@ -238,3 +242,22 @@ def is_fresh(record: dict | None, days: float, now: dt.datetime | None = None) -
         return False
     now = now or dt.datetime.now(dt.timezone.utc)
     return _when(record) >= now - dt.timedelta(days=days)
+
+
+def accepted_works(library_path: Path) -> dict[str, str]:
+    """
+    The OpenAlex works accepted in review for references with no DOI.
+
+    Returns
+    -------
+    dict
+        ``tag -> OpenAlex work id``, the newest acceptance for each tag. A
+        later rejection of the same work for the tag withdraws it.
+    """
+    works: dict[str, str] = {}
+    for r in read_lines(library_path, DECISIONS):
+        if r.get("decision") == WORK_ACCEPTED and r.get("openalex_id"):
+            works[r["tag"]] = r["openalex_id"]
+        elif r.get("decision") == REJECTED and r.get("openalex_id") and works.get(r.get("tag")) == r["openalex_id"]:
+            del works[r["tag"]]
+    return works

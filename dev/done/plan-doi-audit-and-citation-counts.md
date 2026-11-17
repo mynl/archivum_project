@@ -710,3 +710,40 @@ if the OpenAlex counts prove sufficient.
   338 passed, 26 skipped.
 - **Left for the user:** Check DOIs on the real library, then `archivum doi-audit-status` for
   the distribution.
+
+### 2.16.0a11 [missing DOI search] (2026-11-17)
+
+- **Real requests for one public work** (Artzner et al., "Coherent Measures of Risk") to
+  confirm the parsing: Crossref `query.bibliographic` returned the right DOI first at title
+  similarity 1.00, the next two at 0.46 and 0.32; `crossref_work`, and `doi.org` for an
+  existing, a DataCite and a made-up DOI, answered as expected.
+- **Finding: a title must be sent without its LaTeX braces.** `Coherent Measures of {R}isk`
+  sent to OpenAlex as stored returned three unrelated works. `doi.plain_title` removes LaTeX
+  and HTML before a title is sent, to both sources.
+- **Divergence: OpenAlex is searched by title only** (`filter=title.search:`), not by its
+  general `search`, which also matches abstracts and full text.
+- **Divergence (R6, as ruled): Crossref first, OpenAlex only for a Crossref miss.** A miss is
+  no candidate at title similarity 0.6 or more.
+- **Divergence: `proposed` needs the first author to agree.** A candidate whose author could
+  not be compared is `ambiguous`, not proposed.
+- **Divergence: the year separates an article from its reprint.** Of several qualifying
+  published candidates, the only one whose year is within one of the reference's is proposed.
+  Found on the real probe: OpenAlex returned the 1999 article and a 2002 book chapter with the
+  same title and author.
+- **Divergence: a class the draft lacked, `work without a DOI`**, which is where P5 applies. The
+  acceptance is a `work accepted` line in `decisions.jsonl`; `plan_counts` then asks OpenAlex
+  for the work by id (free), and the count line has no DOI and `work:<id>` as its freshness
+  key. Rejecting the row withdraws the acceptance.
+- **Not done: the OpenAlex id is not stored when a DOI is accepted.** Once the DOI is
+  committed the count arrives through the DOI at the next count run, so the id adds nothing.
+- **Divergence: on a search row an empty box refuses the commit.** On a check row empty clears
+  the DOI; here it means no DOI has been picked.
+- A search is filed under the folded title, so a retitled reference is searched for again.
+- `doi_audit_search_days` (default 180) is a config field.
+- Browser check on a temp library with fake sources: plan, run, results at the end, Use this
+  DOI, Commit, Accept ticked for counts; no console errors, no overflow at 390 px.
+- Tests: `tests/test_doi_audit_search.py` (32). Gate: `.venv\Scripts\python -m pytest -q`,
+  370 passed, 26 skipped.
+- **Left for the user:** the search over the real library (4,403 references: about 75 minutes
+  polite at Crossref, then OpenAlex for the misses over as many days as the credits take), and
+  the run summary.

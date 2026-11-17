@@ -14,8 +14,9 @@ import pandas as pd
 from . import journal
 from .changesets import cell_value
 from .doi import (
-    ATTENTION, MALFORMED, MISMATCH, NOT_CHECKED, NOT_COMPARED, SHARED, UNRESOLVED, VERIFIED, WEAK_MATCH,
-    YEAR_DIFFERS, classify_stored_doi, doi_key, match, normalize_doi,
+    AMBIGUOUS, ATTENTION, MALFORMED, MISMATCH, NOT_CHECKED, NOT_COMPARED, NOT_FOUND, NOT_SEARCHED, PROPOSED_EXACT,
+    PROPOSED_STRONG, SHARED, UNRESOLVED, VERIFIED, WEAK_MATCH, WORK_NO_DOI, YEAR_DIFFERS, classify_candidates,
+    classify_stored_doi, doi_key, fold, is_preprint, match, normalize_doi,
 )
 
 # class -> label, in the order the page offers them
@@ -26,6 +27,20 @@ CHECK_CLASSES = {
 }
 # check classes whose rows can be ticked: the DOI is replaced by hand, or cleared
 CHECK_COMMIT_CLASSES = (UNRESOLVED, MISMATCH, WEAK_MATCH)
+SEARCH_CLASSES = {
+    PROPOSED_EXACT: "Exact match", PROPOSED_STRONG: "Strong match", AMBIGUOUS: "Ambiguous",
+    WORK_NO_DOI: "Work without a DOI", NOT_FOUND: "Not found", NOT_SEARCHED: "Not searched",
+}
+# search classes whose rows can be ticked to commit a DOI
+SEARCH_COMMIT_CLASSES = (PROPOSED_EXACT, PROPOSED_STRONG, AMBIGUOUS)
+SEARCH_NOTES = {
+    PROPOSED_EXACT: "same title and first author, years agree",
+    PROPOSED_STRONG: "title and first author match",
+    AMBIGUOUS: "close, or more than one candidate; pick a candidate's DOI or reject",
+    WORK_NO_DOI: "OpenAlex has the work but no DOI for it; accept it to attach its citation count",
+    NOT_FOUND: "nothing close at Crossref or OpenAlex",
+    NOT_SEARCHED: "run Find missing DOIs",
+}
 CHECK_NOTES = {
     UNRESOLVED: "doi.org has no such DOI; replace it or clear it",
     MISMATCH: "the DOI is another work's, by title or first author",
@@ -65,6 +80,14 @@ class Proposal:
         side by side for a checked DOI.
     shared_with : tuple of str
         The other tags with the same DOI.
+    candidates : tuple of dict
+        For a searched reference, the candidates at or above the weak
+        threshold, best first: ``doi``, ``title``, ``author``, ``year``,
+        ``container``, ``source``, ``score``, ``preprint``.
+    work_id : str
+        For a ``work without a DOI`` row, the OpenAlex work id.
+    work_accepted : bool
+        Whether that work has been accepted for the reference.
     """
 
     tag: str
@@ -78,6 +101,9 @@ class Proposal:
     library: dict = field(default_factory=dict)
     record: dict = field(default_factory=dict)
     shared_with: tuple = ()
+    candidates: tuple = ()
+    work_id: str = ""
+    work_accepted: bool = False
 
     @property
     def key(self) -> str:
@@ -244,3 +270,86 @@ def check_rows(checked: list[Proposal], cls: str) -> list[Proposal]:
     if cls == SHARED:
         return [p for p in checked if p.shared_with]
     return [p for p in checked if p.cls == cls]
+
+
+def _candidate_doi(record: dict) -> str | None:
+    """A candidate's DOI as its source wrote it: Crossref keeps the registrant's capitals."""
+    if record.get("source") == "crossref" and record.get("source_id"):
+        return record["source_id"]
+    return record.get("doi")
+
+
+def searched_references(rows: pd.DataFrame, latest: dict, rejected: set[tuple] = frozenset(),
+                        accepted_works: dict[str, str] | None = None) -> list[Proposal]:
+    """
+    Class every reference of a subset that has no DOI, from the searches in the journal.
+
+    Parameters
+    ----------
+    rows : pandas.DataFrame
+        The references of the subset.
+    latest : dict
+        From :func:`journal.latest_observations`.
+    rejected : set of tuple, optional
+        ``(tag, field, old, proposed)`` of rows already rejected, which are
+        left out. For a work with no DOI the field is ``work`` and the
+        proposal its OpenAlex id.
+    accepted_works : dict, optional
+        ``tag -> OpenAlex work id`` already accepted, from
+        :func:`journal.accepted_works`.
+
+    Returns
+    -------
+    list of Proposal
+        One per reference with a title and no DOI, in library order, classed
+        by :func:`doi.classify_candidates` on the Crossref and OpenAlex
+        candidates together; ``not searched`` when neither has been asked.
+        ``proposed`` is the DOI for the two ``proposed`` classes, empty for
+        ``ambiguous`` (one is picked by hand), and ``None`` otherwise.
+    """
+    accepted_works = accepted_works or {}
+    found = []
+    for row in rows.to_dict("records"):
+        doi = cell_value(row.get("doi"))
+        title = cell_value(row.get("title"))
+        if (doi and doi.strip()) or not title or not fold(title):
+            continue
+        tag, key = row["tag"], fold(title)
+        library = {"title": title, "author": cell_value(row.get("author")), "year": cell_value(row.get("year"))}
+        searches = [latest.get((tag, source, "title", key)) for source in ("crossref", "openalex")]
+        if not any(searches):
+            found.append(Proposal(tag, "doi", NOT_SEARCHED, doi, None, source="", note=SEARCH_NOTES[NOT_SEARCHED],
+                                  library=library))
+            continue
+        candidates = [c for s in searches if s for c in (s.get("candidates") or [])]
+        cls, record, scored = classify_candidates(library, candidates)
+        shown = tuple(
+            {"doi": _candidate_doi(c), "title": c.get("title"), "author": c.get("first_author"), "year": c.get("year"),
+             "container": c.get("container"), "source": c.get("source"), "score": m.title, "preprint": is_preprint(c)}
+            for c, m in scored
+        )
+        if cls == WORK_NO_DOI:
+            work_id = record["source_id"]
+            if (tag, "work", None, work_id) in rejected:
+                continue
+            accepted = accepted_works.get(tag) == work_id
+            note = "accepted; its citation count is collected with the others" if accepted else SEARCH_NOTES[cls]
+            found.append(Proposal(tag, "work", cls, None, None, source=record["source"], note=note,
+                                  library=library, candidates=shown, work_id=work_id, work_accepted=accepted))
+            continue
+        if cls in (PROPOSED_EXACT, PROPOSED_STRONG):
+            proposed = _candidate_doi(record)
+        else:
+            proposed = "" if cls == AMBIGUOUS else None
+        if proposed is not None and (tag, "doi", doi, proposed) in rejected:
+            continue
+        found.append(Proposal(tag, "doi", cls, doi, proposed, source=record["source"] if record else "",
+                              note=SEARCH_NOTES[cls], score=scored[0][1].title if scored else None,
+                              library=library, candidates=shown))
+    return found
+
+
+def search_counts(searched: list[Proposal]) -> dict[str, int]:
+    """Count the rows of each search class."""
+    counts = Counter(p.cls for p in searched)
+    return {cls: counts[cls] for cls in SEARCH_CLASSES}

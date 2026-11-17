@@ -31,7 +31,10 @@ import psutil
 from .. import egress
 from . import journal, sources
 from .changesets import cell_value
-from .doi import ATTENTION, VERIFIED, YEAR_DIFFERS, classify_stored_doi, doi_key, match
+from .doi import (
+    ATTENTION, NOT_FOUND, VERIFIED, YEAR_DIFFERS, classify_candidates, classify_stored_doi, doi_key, first_surname,
+    fold, match,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,9 @@ class CountsPlan:
     work : dict
         ``doi_key -> [tags]`` still to ask about. References sharing a DOI
         are asked about once.
+    works : dict
+        ``OpenAlex work id -> [tags]`` still to ask about: references with no
+        DOI whose work was accepted in review.
     """
 
     subset: int = 0
@@ -75,11 +81,12 @@ class CountsPlan:
     unusable: int = 0
     fresh: int = 0
     work: dict[str, list[str]] = field(default_factory=dict)
+    works: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def tags(self) -> int:
         """The number of references to ask about."""
-        return sum(len(tags) for tags in self.work.values())
+        return sum(len(tags) for tags in self.work.values()) + sum(len(tags) for tags in self.works.values())
 
     @property
     def batches(self) -> list[list[str]]:
@@ -95,7 +102,7 @@ class CountsPlan:
     @property
     def requests(self) -> int:
         """The number of requests the run will make."""
-        return len(self.batches) + len(self.singles)
+        return len(self.batches) + len(self.singles) + len(self.works)
 
     def seconds(self, mode: str) -> float:
         """
@@ -110,7 +117,7 @@ class CountsPlan:
         whichever binds.
         """
         pace = egress.MODES[mode]
-        paced = len(self.batches) * pace.search_interval + len(self.singles) * pace.single_interval
+        paced = len(self.batches) * pace.search_interval + (len(self.singles) + len(self.works)) * pace.single_interval
         return max(paced, self.requests * ASSUMED_LATENCY_SECONDS / pace.concurrency)
 
 
@@ -133,11 +140,18 @@ def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> 
     """
     plan = CountsPlan(subset=len(rows))
     fresh = journal.fresh_count_keys(library_path, refresh_days)
+    accepted = journal.accepted_works(library_path)
     dois = rows["doi"] if "doi" in rows.columns else [None] * len(rows)
     for tag, doi in zip(rows["tag"], dois):
         doi = cell_value(doi)
         if not doi or not doi.strip():
-            plan.no_doi += 1
+            # no DOI: counted only through a work the user accepted for it
+            if tag not in accepted:
+                plan.no_doi += 1
+            elif (tag, f"work:{accepted[tag]}") in fresh:
+                plan.fresh += 1
+            else:
+                plan.works.setdefault(accepted[tag], []).append(tag)
         elif classify_stored_doi(doi) == ATTENTION:
             plan.unusable += 1
         elif (tag, doi_key(doi)) in fresh:
@@ -642,8 +656,31 @@ class CountsRun(Run):
         super().__init__(library_path, mode, total=plan.tags, requests_planned=plan.requests,
                          client=client, on_progress=on_progress)
 
+    def _work_jobs(self) -> list[tuple]:
+        """Jobs asking OpenAlex, by work id, for the count of each accepted work with no DOI."""
+        def record(work_id, answer, error=""):
+            tags = self.plan.works[work_id]
+            base = {"run_id": self.run_id, "source": "openalex", "query_kind": "source_id", "query": work_id}
+            if error:
+                journal.append_lines(self.library_path, journal.OBSERVATIONS,
+                                     [{**base, "tag": tag, "status": journal.ERROR, "error": error} for tag in tags])
+                self.tally(requests=1, done=len(tags), errors=len(tags))
+                return
+            status = journal.OK if answer else journal.NOT_FOUND
+            journal.append_lines(self.library_path, journal.OBSERVATIONS,
+                                 [{**base, "tag": tag, "status": status, **(answer or {})} for tag in tags])
+            if answer:
+                journal.append_lines(self.library_path, journal.COUNTS, [
+                    {"tag": tag, "source": "openalex", "source_id": work_id, "doi": None,
+                     "count": answer["cited_by_count"]} for tag in tags])
+            self.tally(requests=1, done=len(tags), found=len(tags) if answer else 0,
+                       not_found=0 if answer else len(tags))
+
+        return [(lambda w=w: record(w, sources.openalex_work(self.client, w)),
+                 lambda message, w=w: record(w, None, error=message)) for w in self.plan.works]
+
     def phases(self):
-        yield "OpenAlex", self._openalex_jobs(self.plan.work)
+        yield "OpenAlex", self._openalex_jobs(self.plan.work) + self._work_jobs()
 
 
 class CheckRun(Run):
@@ -725,6 +762,208 @@ class CheckRun(Run):
         yield "doi.org", self._single_jobs(
             "doi.org", self._keys_at(DOI_ORG_STAGE),
             lambda key: {"exists": True} if sources.doi_exists(self.client, key) else None)
+
+
+CROSSREF_SEARCH, OPENALEX_SEARCH = "crossref", "openalex"
+
+
+def next_search_stage(reference: dict, latest: dict, search_days: float) -> str | None:
+    """
+    The next source to search for a reference's DOI, or ``None`` when it is settled.
+
+    Parameters
+    ----------
+    reference : dict
+        The library's ``tag``, ``title``, ``author``, ``year``, and ``key``,
+        the folded title, which is what a search is filed under.
+    latest : dict
+        From :func:`journal.latest_observations`.
+    search_days : float
+        A search older than this does not count.
+
+    Returns
+    -------
+    str or None
+        ``crossref`` first, since it is free. Then ``openalex``, only when
+        Crossref's candidates class as not found: an OpenAlex search costs ten
+        times a DOI lookup against the day's budget.
+    """
+    tag, key = reference["tag"], reference["key"]
+    crossref = latest.get((tag, "crossref", "title", key))
+    if not journal.is_fresh(crossref, search_days):
+        return CROSSREF_SEARCH
+    if classify_candidates(reference, crossref.get("candidates") or [])[0] != NOT_FOUND:
+        return None
+    if not journal.is_fresh(latest.get((tag, "openalex", "title", key)), search_days):
+        return OPENALEX_SEARCH
+    return None
+
+
+@dataclass
+class SearchPlan:
+    """
+    What a search for missing DOIs over a subset would do.
+
+    Attributes
+    ----------
+    subset : int
+        References in the subset.
+    has_doi : int
+        References that have a DOI already; not searched.
+    no_title : int
+        References with no DOI and no title; nothing to search with.
+    fresh : int
+        References searched within the search period; skipped.
+    references : dict
+        ``tag -> {tag, title, author, year, key}`` still to search.
+    stages : dict
+        ``tag -> stage`` each of them is at.
+    search_days : float
+        The search period the plan was made with.
+    """
+
+    subset: int = 0
+    has_doi: int = 0
+    no_title: int = 0
+    fresh: int = 0
+    references: dict[str, dict] = field(default_factory=dict)
+    stages: dict[str, str] = field(default_factory=dict)
+    search_days: float = 180.0
+
+    @property
+    def tags(self) -> int:
+        """The number of references to search for."""
+        return len(self.references)
+
+    def at(self, stage: str) -> list[str]:
+        """The tags at a stage."""
+        return [tag for tag, s in self.stages.items() if s == stage]
+
+    @property
+    def requests(self) -> int:
+        """The fewest requests: Crossref finds something for every reference it is asked about."""
+        return len(self.references)
+
+    @property
+    def requests_most(self) -> int:
+        """The most requests: every reference asked of Crossref goes on to OpenAlex."""
+        return len(self.references) + len(self.at(CROSSREF_SEARCH))
+
+    @property
+    def openalex_searches(self) -> tuple[int, int]:
+        """The fewest and the most OpenAlex searches, each ten credits of the day's budget."""
+        return len(self.at(OPENALEX_SEARCH)), len(self.references)
+
+    def seconds(self, mode: str, requests: int | None = None) -> float:
+        """Estimate the duration in a mode for a number of searches; the fewest by default."""
+        pace = egress.MODES[mode]
+        requests = self.requests if requests is None else requests
+        return max(requests * pace.search_interval, requests * ASSUMED_LATENCY_SECONDS / pace.concurrency)
+
+
+def plan_search(library_path: Path, rows: pd.DataFrame, search_days: float) -> SearchPlan:
+    """
+    Work out what a search for missing DOIs over ``rows`` would ask.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder, for the journal.
+    rows : pandas.DataFrame
+        The references of the subset.
+    search_days : float
+        A search newer than this is not repeated, whatever it found.
+
+    Returns
+    -------
+    SearchPlan
+    """
+    plan = SearchPlan(subset=len(rows), search_days=search_days)
+    latest = journal.latest_observations(library_path)
+    for row in rows.to_dict("records"):
+        doi = cell_value(row.get("doi"))
+        if doi and doi.strip():
+            plan.has_doi += 1
+            continue
+        title = cell_value(row.get("title"))
+        if not title or not fold(title):
+            plan.no_title += 1
+            continue
+        reference = {"tag": row["tag"], "title": title, "author": cell_value(row.get("author")),
+                     "year": cell_value(row.get("year")), "key": fold(title)}
+        stage = next_search_stage(reference, latest, search_days)
+        if stage is None:
+            plan.fresh += 1
+        else:
+            plan.references[row["tag"]] = reference
+            plan.stages[row["tag"]] = stage
+    return plan
+
+
+class SearchRun(Run):
+    """
+    A search for missing DOIs: each reference with no DOI is searched for by title.
+
+    The phases follow :func:`next_search_stage`: Crossref for every reference,
+    then OpenAlex for those Crossref found nothing for. What leaves the
+    machine for a reference is its title, its first author's surname and its
+    year.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder.
+    plan : SearchPlan
+        From :func:`plan_search`.
+    mode : str
+        ``egress.SPEEDY`` or ``egress.POLITE``.
+    client, on_progress
+        As for :class:`Run`.
+    """
+
+    action = "search"
+
+    def __init__(self, library_path: Path, plan: SearchPlan, mode: str, *,
+                 client: egress.Egress | None = None, on_progress=None):
+        self.plan = plan
+        self.latest = dict(journal.latest_observations(library_path))
+        self._latest_lock = threading.Lock()
+        super().__init__(library_path, mode, total=plan.tags, requests_planned=plan.requests,
+                         client=client, on_progress=on_progress)
+
+    def _stage(self, tag: str) -> str | None:
+        with self._latest_lock:
+            return next_search_stage(self.plan.references[tag], self.latest, self.plan.search_days)
+
+    def _search_jobs(self, source: str, tags: list[str], search) -> list[tuple]:
+        """Jobs searching ``source`` for one reference each; ``search(reference)`` returns the candidates."""
+        def record(tag, candidates, error=""):
+            reference = self.plan.references[tag]
+            base = {"run_id": self.run_id, "tag": tag, "source": source, "query_kind": "title", "query": reference["key"]}
+            if error:
+                journal.append_lines(self.library_path, journal.OBSERVATIONS,
+                                     [{**base, "status": journal.ERROR, "error": error}])
+                self.tally(requests=1, done=1, errors=1)
+                return
+            observation = {**base, "status": journal.OK if candidates else journal.NOT_FOUND, "candidates": candidates}
+            journal.append_lines(self.library_path, journal.OBSERVATIONS, [observation])
+            with self._latest_lock:
+                self.latest[(tag, source, "title", reference["key"])] = {"at": journal.now_utc(), **observation}
+            settled = self._stage(tag) is None
+            found = classify_candidates(reference, candidates)[0] != NOT_FOUND
+            self.tally(requests=1, done=1 if settled else 0, found=1 if found else 0,
+                       not_found=1 if settled and not found else 0)
+
+        return [(lambda tag=tag: record(tag, search(self.plan.references[tag])),
+                 lambda message, tag=tag: record(tag, [], error=message)) for tag in tags]
+
+    def phases(self):
+        yield "Crossref", self._search_jobs(
+            "crossref", self.plan.at(CROSSREF_SEARCH),
+            lambda r: sources.crossref_search(self.client, r["title"], first_surname(r["author"]), r["year"] or ""))
+        yield "OpenAlex", self._search_jobs(
+            "openalex", [tag for tag in self.plan.references if self._stage(tag) == OPENALEX_SEARCH],
+            lambda r: sources.openalex_search(self.client, r["title"]))
 
 
 def format_duration(seconds: float) -> str:

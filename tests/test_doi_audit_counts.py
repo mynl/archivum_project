@@ -418,6 +418,6 @@ def test_the_run_command_is_a_dry_run_without_x(cli, lib, fake_openalex):
 
 
 def test_the_run_command_needs_an_action_and_a_query_that_parses(cli, fake_openalex):
-    assert "Choose what to collect" in cli("doi_audit_run")[1]
+    assert "Choose one thing to collect" in cli("doi_audit_run")[1]
     assert "Query not understood" in cli("doi_audit_run", "year == 2020", "--counts")[1]
     assert "No run yet." in cli("doi_audit_status")[1]

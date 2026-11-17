@@ -5,6 +5,31 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a11 (2026-11-17)
+
+### Added
+
+- **Find missing DOIs** on the Audit page. Each reference with no DOI is
+  searched for at Crossref, then at OpenAlex only where Crossref has nothing
+  close. A reference's title, first author's surname and year are sent.
+- **Show DOI search results**: exact match, strong match, ambiguous, work
+  without a DOI, not found, each with its candidates. A proposed DOI is
+  committed by ticking it; an ambiguous row takes a DOI typed or picked with
+  **Use this DOI**.
+- A journal DOI is preferred to a preprint's, and an article to its reprint
+  by year.
+- **Accept ticked for counts**: an OpenAlex work that has no DOI can be
+  accepted for a reference, and Fetch citation counts then collects its
+  count. A reference with no DOI gets a count no other way.
+- A reference is searched for once in 180 days (`doi_audit_search_days`).
+- `archivum doi-audit-run --missing -x`, and a search line in
+  `doi-audit-status`.
+
+### Changed
+
+- A DOI typed or pasted on the Audit page is stored bare: an address or a
+  `doi:` prefix is removed at commit.
+
 ## 2.16.0a10 (2026-11-17)
 
 ### Added

@@ -37,6 +37,16 @@
     </div>
     <div class="btn-group shadow-sm">
         <button class="btn btn-primary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "search"}' hx-include="#audit-search" hx-target="#audit-body">
+            Find missing DOIs&hellip;
+        </button>
+        <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "search"}' hx-include="#audit-search" hx-target="#audit-body">
+            Show DOI search results
+        </button>
+    </div>
+    <div class="btn-group shadow-sm">
+        <button class="btn btn-primary btn-sm px-3 fw-bold"
                 hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
             Fetch citation counts&hellip;
         </button>
@@ -50,24 +60,41 @@
 {% if plan %}
 {% set p = plan.plan %}
 {% set checking = plan.action == 'check' %}
+{% set searching = plan.action == 'search' %}
 <form id="audit-plan-form" class="card shadow-sm border-0 mb-4">
     {{ state() }}
     <input type="hidden" name="action" value="{{ plan.action }}">
     <div class="card-header bg-white">
-        <h6 class="fw-bold small text-uppercase mb-0">{{ 'Check DOIs against OpenAlex, Crossref and doi.org' if checking else 'Fetch citation counts from OpenAlex' }}</h6>
+        <h6 class="fw-bold small text-uppercase mb-0">{{ 'Find missing DOIs at Crossref and OpenAlex' if searching else ('Check DOIs against OpenAlex, Crossref and doi.org' if checking else 'Fetch citation counts from OpenAlex') }}</h6>
     </div>
     <div class="card-body small">
         <p class="mb-2">
             Of {{ '{:,}'.format(p.subset) }} references in the subset,
-            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be {{ 'checked' if checking else 'asked about' }}, in
+            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be {{ 'searched for' if searching else ('checked' if checking else 'asked about') }}, in
             {% if plan.requests_most > p.requests %}
             <strong>{{ '{:,}'.format(p.requests) }} to {{ '{:,}'.format(plan.requests_most) }}</strong> requests.
             {% else %}
-            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }}{{ '' if checking else ' to <code>api.openalex.org</code>'|safe }}.
+            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }}{{ '' if checking or searching else ' to <code>api.openalex.org</code>'|safe }}.
             {% endif %}
+            {% if searching %}
+            Skipped: {{ '{:,}'.format(p.has_doi) }} that have a DOI, {{ '{:,}'.format(p.no_title) }} with no title,
+            {{ '{:,}'.format(p.fresh) }} searched for under {{ search_days }} days ago.
+            {% else %}
             Skipped: {{ '{:,}'.format(p.no_doi) }} with no DOI, {{ '{:,}'.format(p.unusable) }} whose DOI needs attention,
             {{ '{:,}'.format(p.fresh) }} {{ 'already checked' if checking else 'with a result' }} under {{ refresh_days }} days ago.
+            {% endif %}
         </p>
+        {% if searching %}
+        <p class="mb-2 text-muted">
+            Crossref is searched first, one reference a request, and is free. OpenAlex is then searched for each reference Crossref has nothing
+            close for; how many is not known until Crossref has answered, hence the range. For each reference its title, its first author's
+            surname and its year are sent, and nothing else. An OpenAlex search costs 10 of the 10,000 credits a free key allows each day:
+            {{ '{:,}'.format(p.openalex_searches[0] * 10) }} to {{ '{:,}'.format(p.openalex_searches[1] * 10) }} credits here. The run stops
+            by itself when the day's credits run low; start it again the next day and it carries on.
+            {% if not plan.has_key %}<span class="text-danger">No <code>OPENALEX_API_KEY</code> is set in this server's environment, so the daily allowance is a tenth of that.</span>{% endif %}
+            Results go to <code>doi-audit/</code> in the library folder; the references are not changed until you commit a proposal.
+        </p>
+        {% else %}
         {% if checking %}
         <p class="mb-2 text-muted">
             OpenAlex is asked first, 100 DOIs a request; that also collects the citation counts. Crossref is then asked, one DOI a request,
@@ -80,6 +107,7 @@
             {% if not plan.has_key %}<span class="text-danger">No <code>OPENALEX_API_KEY</code> is set in this server's environment, so the daily allowance is a tenth of that.</span>{% endif %}
             Results go to <code>doi-audit/</code> in the library folder; the references are not changed.
         </p>
+        {% endif %}
         {% if p.requests %}
         <div class="d-flex flex-wrap align-items-center gap-3">
             {% for mode, label, duration in plan.modes %}
@@ -150,7 +178,7 @@
     {{ state() }}
     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
-            <h6 class="fw-bold small text-uppercase mb-0">{{ 'DOI check, ' if review.kind == 'check' }}{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
+            <h6 class="fw-bold small text-uppercase mb-0">{{ {'check': 'DOI check, ', 'search': 'DOI search, '}.get(review.kind, '') }}{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
             {% if review.pills %}
             <div class="d-flex flex-wrap gap-1 mt-2" id="audit-check-classes">
                 {% for cls, label, count in review.pills %}
@@ -160,6 +188,14 @@
             </div>
             {% endif %}
         </div>
+        {% if review.rows and review.can_accept_work %}
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-success btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_accept_work') }}" hx-include="#audit-review-form" hx-target="#audit-body">Accept ticked for counts</button>
+            <button type="button" class="btn btn-outline-danger btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_reject') }}" hx-include="#audit-review-form" hx-target="#audit-body">Reject ticked</button>
+        </div>
+        {% endif %}
         {% if review.rows and review.can_commit %}
         <div class="d-flex gap-2">
             <button type="button" class="btn btn-success btn-sm fw-bold"
@@ -170,7 +206,59 @@
         </div>
         {% endif %}
     </div>
-    {% if review.rows and review.kind == 'check' %}
+    {% if review.rows and review.kind == 'search' %}
+    {% set ticks = review.can_commit or review.can_accept_work %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    {% if ticks %}<th class="ps-3" style="width: 2rem;"></th>{% endif %}
+                    <th class="{{ '' if ticks else 'ps-3' }}">Tag</th>
+                    <th>In the library</th>
+                    {% if review.can_commit %}<th style="min-width: 14rem;">DOI to commit</th>{% endif %}
+                    <th>Candidates at the sources</th>
+                    <th class="pe-3">Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.rows %}
+                {% set p = row.p %}
+                <tr>
+                    {% if ticks %}
+                    <td class="ps-3">
+                        <input class="form-check-input" type="checkbox" name="row" value="{{ p.key }}" aria-label="Tick {{ p.tag }}">
+                        <input type="hidden" name="old::{{ p.key }}" value="{{ row.old_json }}">
+                        <input type="hidden" name="proposed::{{ p.key }}" value="{{ p.work_id if p.work_id else (p.proposed or '') }}">
+                    </td>
+                    {% endif %}
+                    <td class="{{ '' if ticks else 'ps-3' }}"><a href="{{ url_for('main.editor_page', tag=p.tag) }}">{{ p.tag }}</a></td>
+                    <td>{{ p.library.title|replace('{', '')|replace('}', '') }}<div class="text-muted">{{ (p.library.author or '')|replace('{', '')|replace('}', '')|truncate(60) }}, {{ p.library.year }}</div></td>
+                    {% if review.can_commit %}
+                    <td><input type="text" class="form-control form-control-sm font-monospace" id="audit-new-{{ loop.index }}" name="new::{{ p.key }}" value="{{ p.proposed or '' }}"
+                               placeholder="pick a candidate" autocomplete="off" spellcheck="false" aria-label="DOI to commit for {{ p.tag }}"></td>
+                    {% endif %}
+                    <td>
+                        {% set row_index = loop.index %}
+                        {% for c in p.candidates %}
+                        <div class="{{ 'mb-1' if not loop.last }}">
+                            {{ c.title }}
+                            <span class="text-muted">{{ c.author }}, {{ c.year }}{% if c.container %}, <i>{{ c.container }}</i>{% endif %}
+                            ({{ c.source }}, {{ '%.2f'|format(c.score) }}{{ ', preprint' if c.preprint }})</span>
+                            {% if c.doi %}
+                            <a class="font-monospace" href="https://doi.org/{{ c.doi }}" target="_blank" rel="noopener">{{ c.doi }}</a>
+                            {% if review.can_commit %}<button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" style="font-size: 0.7rem;"
+                                    onclick="document.getElementById('audit-new-{{ row_index }}').value = this.dataset.doi" data-doi="{{ c.doi }}">Use this DOI</button>{% endif %}
+                            {% else %}<span class="text-muted">no DOI</span>{% endif %}
+                        </div>
+                        {% endfor %}
+                    </td>
+                    <td class="text-muted pe-3">{{ p.note }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif review.rows and review.kind == 'check' %}
     <div class="table-responsive">
         <table class="table table-hover table-sm align-middle mb-0 small">
             <thead class="table-light">
