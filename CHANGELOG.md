@@ -5,6 +5,13 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a7 (2026-11-17)
+
+### Changed
+
+- When a citation-count run ends, the Audit page shows the counts table by
+  itself. A review table that is open is left alone, so ticks are not lost.
+
 ## 2.16.0a6 (2026-11-17)
 
 ### Added

@@ -8,7 +8,7 @@ import logging
 import os
 
 import pandas as pd
-from flask import abort, render_template, request
+from flask import abort, make_response, render_template, request
 
 from ... import egress
 from ...cli import LibraryContext
@@ -345,8 +345,9 @@ def audit_run_status():
 
     The fragment asks to be polled only while the run is going, so the polling
     ends with the run. The response that reports the end also replaces the
-    summary strip, whose count cards the run has changed; the rest of the page
-    is left alone, since a review may be in progress.
+    summary strip, whose count cards the run has changed, and fires
+    ``audit-run-ended``, on which the page shows the counts table unless a
+    review is in progress.
     """
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
@@ -360,4 +361,7 @@ def audit_run_status():
         html += render_template(
             "components/audit_summary.html", oob=True, refresh_days=lib.config.doi_audit_refresh_days,
             summary={**summarize(rows), **_counts_summary(lib, rows)})
-    return html
+    response = make_response(html)
+    if not view["active"]:
+        response.headers["HX-Trigger"] = "audit-run-ended"
+    return response

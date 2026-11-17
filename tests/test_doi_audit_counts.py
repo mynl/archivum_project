@@ -341,7 +341,9 @@ def test_start_runs_in_the_background_and_the_counts_table_follows(client, lib, 
     assert "Run started: 5 references in 2 requests, polite." in html
     _wait_for_run(lib)
 
-    status = client.get("/audit/run-status").get_data(as_text=True)
+    response = client.get("/audit/run-status")
+    status = response.get_data(as_text=True)
+    assert response.headers["HX-Trigger"] == "audit-run-ended"
     assert "Last run finished" in status and "Found 4, not at OpenAlex 1" in status
     assert "every 5s" not in status and "credits left today: 9,000 of 10,000" in status
     assert 'id="audit-summary" hx-swap-oob="true"' in status
@@ -362,7 +364,9 @@ def test_the_status_line_polls_only_while_a_run_is_active(client, lib, monkeypat
     try:
         assert "every 5s" not in client.get("/audit/run-status").get_data(as_text=True)
         client.post("/audit/run", data={"q": "", "mode": "speedy"})
-        active = client.get("/audit/run-status").get_data(as_text=True)
+        response = client.get("/audit/run-status")
+        active = response.get_data(as_text=True)
+        assert "HX-Trigger" not in response.headers
         assert "every 5s" in active and "Stop run" in active and "audit-summary" not in active
         again = client.post("/audit/run", data={"q": "", "mode": "speedy"}).get_data(as_text=True)
         assert "Not started." in again and "is active" in again

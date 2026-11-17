@@ -630,3 +630,13 @@ if the OpenAlex counts prove sufficient.
   passed, 26 skipped (`uv run` again blocked by the running server holding `archivum.exe`).
 - **Left for the user:** run the 3,037 DOI holders on the real library and inspect the counts
   table.
+
+### 2.16.0a7 tweak: counts table shown when a run ends (2026-11-17)
+
+- From the user's trial of a6 on the real library (`q top 50 recent`: fetch worked as expected).
+  The poll that reports the end of a run fires `audit-run-ended`; the page then loads the counts
+  table for the subset, unless a review table is open.
+- The status line still polls every 5 s and only while a run is active. A `load delay:1s`
+  trigger was tried for a quicker first update and dropped: each swap of the line would have
+  re-armed it, making the rate one request a second.
+- Gate: `.venv\Scripts\python -m pytest -q`, 292 passed, 26 skipped. Browser check repeated.

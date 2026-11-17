@@ -27,4 +27,15 @@
         <div class="text-muted small">Loading&hellip;</div>
     </div>
 </div>
+
+<script>
+    // When a run ends, show its counts, unless a review table is open: ticks there must not be lost.
+    document.body.addEventListener('audit-run-ended', () => {
+        if (document.getElementById('audit-review-form')) return;
+        htmx.ajax('GET', "{{ url_for('main.audit_review') }}", {
+            target: '#audit-body',
+            values: {q: document.getElementById('audit-search').value, cls: 'counts'},
+        });
+    });
+</script>
 {% endblock %}
