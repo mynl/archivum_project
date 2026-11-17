@@ -1,0 +1,27 @@
+{# The run status line. It asks to be polled only while a run is active, so the polling ends with the run. #}
+{% set s = run.state %}
+<div id="audit-run" class="mb-3" style="min-height: 2.6rem;"
+     {% if run.active %}hx-get="{{ url_for('main.audit_run_status') }}" hx-trigger="every 5s" hx-include="#audit-search" hx-swap="outerHTML"{% endif %}>
+    {% if s %}
+    <div class="alert {{ 'alert-info' if run.active else ('alert-light border' if s.status == 'finished' else 'alert-warning') }} py-2 small mb-0 d-flex flex-wrap align-items-center gap-2">
+        <span>
+            {% if run.active %}
+            <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+            <strong>Fetching citation counts</strong>:
+            {% else %}
+            <strong>Last run {{ s.status }}</strong> {{ s.get('finished', s.updated).replace('T', ' ')[:16] }} UTC:
+            {% endif %}
+            {{ '{:,}'.format(s.done) }} of {{ '{:,}'.format(s.total) }} references,
+            {{ '{:,}'.format(s.requests) }} of {{ '{:,}'.format(s.requests_planned) }} requests, {{ s.mode }}, {{ run.elapsed }}.
+            Found {{ '{:,}'.format(s.found) }}, not at OpenAlex {{ '{:,}'.format(s.not_found) }}{% if s.errors %}, <span class="text-danger">errors {{ '{:,}'.format(s.errors) }}</span>{% endif %}.
+            {% if run.budget %}OpenAlex credits left today: {{ '{:,.0f}'.format(run.budget[0]) }} of {{ '{:,.0f}'.format(run.budget[1]) }}.{% endif %}
+            {% for host, reason in run.stopped_hosts.items() %}<span class="text-danger">{{ host }} stopped: {{ reason }}.</span>{% endfor %}
+            {% if s.message %}<span class="text-danger">{{ s.message }}</span>{% endif %}
+        </span>
+        {% if run.active %}
+        <button type="button" class="btn btn-outline-danger btn-sm py-0 ms-auto"
+                hx-post="{{ url_for('main.audit_stop') }}" hx-include="#audit-search" hx-target="#audit-body">Stop run</button>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>

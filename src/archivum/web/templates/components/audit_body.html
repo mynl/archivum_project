@@ -1,31 +1,18 @@
 {# Everything under the Audit query box: summary, actions, review table, changesets. #}
 {% macro state() %}
 <input type="hidden" name="q" value="{{ q }}">
-<input type="hidden" name="cls" value="{{ review.cls if review else '' }}">
-<input type="hidden" name="page" value="{{ review.page if review else 1 }}">
+{% set shown = review or counts %}
+<input type="hidden" name="cls" value="{{ shown.cls if shown else '' }}">
+<input type="hidden" name="page" value="{{ shown.page if shown else 1 }}">
 {% endmacro %}
 
 {% if message %}
 <div class="alert alert-{{ level }} py-2 small mb-3" id="audit-message">{{ message }}</div>
 {% endif %}
 
-<div class="row g-2 mb-3" id="audit-summary">
-    {% for label, value, warn in [
-        ('References', summary.references, false),
-        ('With a DOI', summary.with_doi, false),
-        ('Without a DOI', summary.without_doi, false),
-        ('Malformed', summary.malformed, summary.malformed),
-        ('Needs attention', summary.attention, summary.attention),
-        ('Sharing a DOI', summary.shared, summary.shared),
-    ] %}
-    <div class="col-6 col-md-2">
-        <div class="card shadow-sm border-0 text-center py-2 {{ 'bg-warning-subtle' if warn else 'bg-white' }}">
-            <div class="fw-bold fs-5">{{ '{:,}'.format(value) }}</div>
-            <div class="small fw-bold text-uppercase text-muted" style="font-size: 0.65rem;">{{ label }}</div>
-        </div>
-    </div>
-    {% endfor %}
-</div>
+{% include "components/audit_run.html" %}
+
+{% include "components/audit_summary.html" %}
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="audit-actions">
     <button class="btn btn-primary btn-sm px-3 fw-bold shadow-sm"
@@ -36,8 +23,102 @@
             hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "attention"}' hx-include="#audit-search" hx-target="#audit-body">
         Show DOIs needing attention
     </button>
-    <span class="text-muted small">Both are computed from the library; nothing is sent anywhere.</span>
+    <button class="btn btn-primary btn-sm px-3 fw-bold shadow-sm"
+            hx-get="{{ url_for('main.audit_counts_plan') }}" hx-include="#audit-search" hx-target="#audit-body">
+        Fetch citation counts&hellip;
+    </button>
+    <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
+        Show citation counts
+    </button>
 </div>
+
+{% if plan %}
+{% set p = plan.plan %}
+<form id="audit-plan-form" class="card shadow-sm border-0 mb-4">
+    {{ state() }}
+    <div class="card-header bg-white">
+        <h6 class="fw-bold small text-uppercase mb-0">Fetch citation counts from OpenAlex</h6>
+    </div>
+    <div class="card-body small">
+        <p class="mb-2">
+            Of {{ '{:,}'.format(p.subset) }} references in the subset,
+            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be asked about, in
+            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }} to <code>api.openalex.org</code>.
+            Skipped: {{ '{:,}'.format(p.no_doi) }} with no DOI, {{ '{:,}'.format(p.unusable) }} whose DOI needs attention,
+            {{ '{:,}'.format(p.fresh) }} with a result under {{ refresh_days }} days old.
+        </p>
+        <p class="mb-2 text-muted">
+            Only DOIs are sent. Cost: about {{ p.requests }} of the 10,000 credits a free OpenAlex key allows each day.
+            {% if not plan.has_key %}<span class="text-danger">No <code>OPENALEX_API_KEY</code> is set in this server's environment, so the daily allowance is a tenth of that.</span>{% endif %}
+            Results go to <code>doi-audit/</code> in the library folder; the references are not changed.
+        </p>
+        {% if p.requests %}
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            {% for mode, label, duration in plan.modes %}
+            <div class="form-check mb-0">
+                <input class="form-check-input" type="radio" name="mode" id="audit-mode-{{ mode }}" value="{{ mode }}" {{ 'checked' if mode == plan.default_mode }}>
+                <label class="form-check-label" for="audit-mode-{{ mode }}">{{ label }}, about {{ duration }}</label>
+            </div>
+            {% endfor %}
+            <button type="button" class="btn btn-success btn-sm fw-bold" {{ 'disabled' if plan.active }}
+                    hx-post="{{ url_for('main.audit_run') }}" hx-include="#audit-plan-form" hx-target="#audit-body">Start run</button>
+            {% if plan.active %}<span class="text-muted">A run is active.</span>{% endif %}
+        </div>
+        <div class="text-muted mt-2">Speedy sends up to 3 requests at once; polite sends one a second. Speedy is the default up to 500 requests.</div>
+        {% else %}
+        <div class="text-muted">Nothing to fetch.</div>
+        {% endif %}
+    </div>
+</form>
+{% endif %}
+
+{% if counts %}
+<div class="card shadow-sm border-0 mb-4" id="audit-counts">
+    <div class="card-header bg-white">
+        <h6 class="fw-bold small text-uppercase mb-0">Citation counts: {{ '{:,}'.format(counts.total) }} {{ 'reference' if counts.total == 1 else 'references' }}</h6>
+    </div>
+    {% if counts.rows %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Tag</th>
+                    <th>Title</th>
+                    <th class="text-end">Cites</th>
+                    <th class="text-center">As of</th>
+                    <th class="text-end pe-3">Growth, 1 year</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in counts.rows %}
+                <tr>
+                    <td class="ps-3"><a href="{{ url_for('main.editor_page', tag=row.tag) }}">{{ row.tag }}</a></td>
+                    <td>{{ row.title }}</td>
+                    <td class="text-end">{{ '{:,}'.format(row.cites) }}</td>
+                    <td class="text-center">{{ row.asof }}</td>
+                    <td class="text-end pe-3">{{ '{:,}'.format(row.growth) if row.growth is not none else '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if counts.pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center small">
+        <span class="text-muted">Page {{ counts.page }} of {{ counts.pages }}, most cited first.</span>
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-secondary btn-sm" {{ 'disabled' if counts.page <= 1 }}
+                    hx-get="{{ url_for('main.audit_review', q=q, cls=counts.cls, page=counts.page - 1) }}" hx-target="#audit-body">Previous page</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" {{ 'disabled' if counts.page >= counts.pages }}
+                    hx-get="{{ url_for('main.audit_review', q=q, cls=counts.cls, page=counts.page + 1) }}" hx-target="#audit-body">Next page</button>
+        </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="card-body text-muted small">No citation counts for this subset yet. Growth over a year appears once a count is a year old.</div>
+    {% endif %}
+</div>
+{% endif %}
 
 {% if review %}
 <form id="audit-review-form" class="card shadow-sm border-0 mb-4">

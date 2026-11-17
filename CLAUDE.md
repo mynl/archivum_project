@@ -67,6 +67,13 @@ uv run --extra test pytest -m "web and browser" --run-browser --run-slow-web
 uv run --extra test python -m playwright install chromium    # one-time, browser tests
 ```
 
+Idle check, required by the dev-tree rules before handing over a change that touches background
+work (the library watcher, the DOI audit runner, the Audit page's status poll, startup warmups):
+
+```powershell
+.\scripts\Measure-ArchivumIdle.ps1            # serve --prod on port 9199, a minute alone, CPU and processes
+```
+
 The runner defaults to `uv run --extra test pytest`; `-Python <path>` selects another
 interpreter, `-PytestArgs "..."` forwards arguments. Slow and browser tests are skipped unless
 explicitly enabled by the plugin in `tests/conftest.py`. Session-scoped `active_library` and
@@ -117,7 +124,7 @@ Three Feather DataFrames per library, plus one BibTeX file kept in sync:
 | `web/` | the Flask app — see below |
 | `configurations/` | packaged YAML for logging and querexfuzz DataFrame configs, shipped via `setuptools.package-data` |
 | `egress.py` | the one outbound HTTP point for public reference data: host allow-list, per-host pacing, backoff. `crossref.py` and the DOI audit go through it; `requests` is used nowhere else except Ingest's download of a typed URL. A test enforces both. |
-| `doi_audit/` | the Audit page's engine: DOI rules (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
+| `doi_audit/` | the Audit page's engine: DOI rules (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`), the sources (`sources.py`), and the runner (`runner.py`: one run per library by `run.lock`, started only by a person, writing only inside `doi-audit/`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
 | `quarto.py`, `rg_tools.py`, `definitive_loader.py`, `gui.py` | Quarto/QMD parsing, ripgrep wrappers, full-store loader, Tkinter metadata editor |
 
 ### The web app
@@ -196,7 +203,7 @@ committed tag can differ if the library moved in between. Do not reintroduce the
   `dev/done/` when execution starts and edited there. `dev/projects/` holds the numbered cold-start
   briefs for the SQLite migration (`00-dev-rig.md` … `11-mendeley-onramp.md`), written before
   that convention settled; leave them where they are.
-- `scripts/` — PowerShell, chiefly `Test-ArchivumWeb.ps1`.
+- `scripts/` — PowerShell, chiefly `Test-ArchivumWeb.ps1`, and `Measure-ArchivumIdle.ps1` for the idle check.
 - `temp` — the user's scratch link, to a backed-up folder outside the repo; gitignored as
   `/temp` (no trailing slash). Code never writes there: exports are built in memory, ingest
   staging lives in the app home (`~\.archivum\staging`), QMD extraction uses the system temp.

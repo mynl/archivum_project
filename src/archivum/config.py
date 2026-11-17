@@ -83,6 +83,8 @@ class Configurator(BaseModel):
         description="Optional mapping of longer names to abbreviations, eg to map Casualty Actuarial Society to CAS. (Used!)")
     read_half_life_days: float = Field(30.0, gt=0,
         description="Half-life in days of a read's weight in the Read blend: one doubling of reads is worth this many days of recency.")
+    doi_audit_refresh_days: int = Field(30, gt=0,
+        description="Days before a citation count collected by the DOI audit is stale and fetched again.")
     contact_email: str = Field("",
         description="Sent to Crossref and OpenAlex in the User-Agent and as mailto, which is how both identify a polite caller. Empty sends neither.")
     owner_author_pattern: str = Field("",

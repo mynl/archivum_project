@@ -730,6 +730,129 @@ def doi_audit_revert(changeset, execute):
 
 # ========================================================================================
 @entry.command()
+@click.argument("query", type=str, default="")
+@click.option("--counts", is_flag=True, help="Fetch citation counts from OpenAlex for references with a DOI.")
+@click.option(
+    "--mode",
+    type=click.Choice(["auto", "speedy", "polite"]),
+    default="auto",
+    show_default=True,
+    help="Pace: speedy sends up to 3 requests at once, polite one a second. auto is speedy up to 500 requests.",
+)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    show_default=True,
+    help="Actually send the requests; otherwise, show what the run would do.",
+)
+def doi_audit_run(query, counts, mode, execute):
+    """
+    Collect from the public sources for a subset of the library.
+
+    \b
+    QUERY selects the subset as on the Audit and Network pages, such as
+    "author ~ /Wang/" or "q year > 2015 rg risk". Empty is the whole library.
+
+    Results go to <library>/doi-audit/; the references are not changed. A
+    reference with a fresh result is skipped, so an interrupted run is resumed
+    by starting it again. Ctrl-C stops after the requests in flight. Nothing
+    is sent without -x --execute.
+    """
+    from . import egress
+    from .doi_audit import runner
+    from .doi_audit.proposals import subset_rows
+    from .search.universe import resolve_universe_tags
+
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+    if not counts:
+        click.secho("Choose what to collect: --counts.", fg="yellow")
+        return
+
+    try:
+        tags = resolve_universe_tags(lib, query) if query.strip() else None
+    except ValueError as e:
+        click.secho(f"Query not understood: {e}", fg="red")
+        return
+    plan = runner.plan_counts(lib.config_path, subset_rows(lib.ref_df, tags), lib.config.doi_audit_refresh_days)
+    if mode == "auto":
+        mode = egress.choose_mode(plan.requests)
+
+    click.echo(f"Subset:        {plan.subset:,} references")
+    click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org")
+    click.echo(f"Skipped:       {plan.no_doi:,} with no DOI, {plan.unusable:,} whose DOI needs attention, "
+               f"{plan.fresh:,} with a result under {lib.config.doi_audit_refresh_days} days old")
+    click.echo(f"Mode:          {mode}, about {runner.format_duration(plan.seconds(mode))}")
+    if not os.environ.get("OPENALEX_API_KEY"):
+        click.secho("OPENALEX_API_KEY is not set: the daily allowance is a tenth of a keyed one.", fg="yellow")
+    if not plan.requests:
+        click.secho("Nothing to fetch.", fg="green")
+        return
+    if not execute:
+        click.secho("\nDRY RUN. Use -x --execute to send the requests.", fg="yellow")
+        return
+
+    def show(state):
+        click.echo(f"\r{state['done']:,} of {state['total']:,} references, "
+                   f"{state['requests']:,} of {state['requests_planned']:,} requests", nl=False)
+
+    try:
+        run = runner.CountsRun(lib.config_path, plan, mode, on_progress=show)
+    except runner.RunActive as e:
+        click.secho(f"Not started. {e}", fg="red")
+        return
+    state = run.run()
+    click.echo()
+    _echo_run_state(state)
+
+
+def _echo_run_state(state: dict) -> None:
+    """Print the summary of a DOI audit run."""
+    from .doi_audit import runner
+
+    color = {"finished": "green", "running": "cyan"}.get(state["status"], "yellow")
+    click.secho(f"Run {state['run_id']} {state['status']}: {state['done']:,} of {state['total']:,} references, "
+                f"{state['requests']:,} of {state['requests_planned']:,} requests, {state['mode']}, "
+                f"{runner.format_duration(runner.elapsed_seconds(state))}.", fg=color)
+    click.echo(f"Found {state['found']:,}, not at OpenAlex {state['not_found']:,}, errors {state['errors']:,}.")
+    for host, info in (state.get("hosts") or {}).items():
+        line = f"{host}: {info['requests']:,} requests"
+        if info.get("budget_limit"):
+            line += f", credits left today {info['budget_remaining']:,.0f} of {info['budget_limit']:,.0f}"
+        if info.get("stopped"):
+            line += f", STOPPED: {info['stopped']}"
+        click.secho(line, fg="red" if info.get("stopped") else None)
+    if state.get("message"):
+        click.secho(state["message"], fg="red")
+
+
+@entry.command()
+def doi_audit_status():
+    """Show the newest DOI audit run and how many references have a citation count."""
+    from .doi_audit import journal, runner
+
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+    state = runner.read_state(lib.config_path)
+    if state:
+        _echo_run_state(state)
+    else:
+        click.echo("No run yet.")
+    cites = journal.read_cites(lib.config_path)
+    if len(cites):
+        click.echo(f"Citation counts: {len(cites):,} references, collected {cites['cites_asof'].min()} "
+                   f"to {cites['cites_asof'].max()}.")
+    else:
+        click.echo("Citation counts: none.")
+
+
+# ========================================================================================
+@entry.command()
 @click.argument("tag", type=str)
 @click.option(
     "-i",

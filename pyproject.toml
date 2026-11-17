@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "archivum"
-version = "2.16.0a5"
+version = "2.16.0a6"
 description = "PDF Reference Manager."
 authors = [{name = "Stephen J Mildenhall", email = "mynl@me.com"}]
 readme = "README.md"
@@ -26,6 +26,7 @@ dependencies = [
     "numpy",
     "pandas",
     "pendulum",
+    "psutil",
     "prompt_toolkit",
     "pybtex",
     "pyarrow",

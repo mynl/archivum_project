@@ -5,6 +5,27 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a6 (2026-11-17)
+
+### Added
+
+- **Fetch citation counts** on the Audit page. It asks OpenAlex about each
+  reference with a DOI, up to 100 DOIs a request, and sends only DOIs. A
+  confirmation shows the references, requests, duration and cost first, with
+  the speedy or polite choice; nothing is sent until **Start run**.
+- A run status line with a separate **Stop run** button, refreshed every 5
+  seconds only while a run is active. It shows the OpenAlex credits left.
+- **Show citation counts**: the subset's counts, most cited first, with the
+  date collected and growth over a year once a count is a year old.
+- `archivum doi-audit-run "<query>" --counts -x` runs the same from a
+  terminal, and `archivum doi-audit-status` reports the last run.
+- Every count is kept in `doi-audit/counts.jsonl`; the latest per reference
+  is in `doi-audit/cites.feather`. The references themselves are not changed.
+- A reference with a result under 30 days old (`doi_audit_refresh_days`) is
+  skipped, so an interrupted run is resumed by starting it again.
+- `scripts\Measure-ArchivumIdle.ps1`, the idle check. `psutil` is now a
+  direct dependency.
+
 ## 2.16.0a5 (2026-11-17)
 
 ### Added

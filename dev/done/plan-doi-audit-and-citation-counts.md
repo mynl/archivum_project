@@ -584,3 +584,49 @@ if the OpenAlex counts prove sufficient.
 - Tests: `tests/test_egress.py` (36), none sending a request. Gate:
   `uv run --extra test pytest -q`, 266 passed, 26 skipped. `archivum crossref -d
   10.1111/1467-9965.00068` returns the entry.
+
+### 2.16.0a6 [citation counts collection] (2026-11-17)
+
+- **Idle check, with numbers.**
+
+  | measurement | result |
+  |---|---|
+  | `serve --prod`, production library, Audit page visited once then closed, no run, 60 s (`scripts\Measure-ArchivumIdle.ps1`, twice) | 0.000 CPU s; no child processes; 0 writes |
+  | polite run of 60 requests (6,000 references, 0.3 s simulated latency) with the page polling every 5 s, 60 s, temp library, in-process harness | 0.09 CPU s, 0.2% of one core, about 2 ms CPU per request of 100 DOIs |
+  | one status poll after a run has ended, which also redraws the summary strip for 6,000 references | 36 ms CPU; it happens once per run |
+
+  The run-active figure is from a harness in one Python process with the real runner, real
+  pacing and a fake transport, not from a release `serve` with a real run, because a real run
+  on the production library is the user's trial. `Measure-ArchivumIdle.ps1` says how to take it
+  during that trial.
+- **Divergence: Stop works across processes** through a `run.stop` file the runner looks for
+  before each request, so the page can stop a run started in a terminal. A run in the same
+  process is also told directly, which ends a wait at once.
+- **Divergence: progress of a run in the same process comes from memory**, so the status line
+  is current at each 5 s poll; `run-state.json` is still written at most every 10 s, and is
+  what another process reads.
+- **Divergence: the poll that reports the end of a run also redraws the summary strip** (an
+  out-of-band swap), and leaves the rest of the page alone since a review may be in progress.
+- **Divergence: references sharing a DOI are asked about once** and each gets the count. A DOI
+  containing `,` or `|`, which are separators in an OpenAlex filter, is asked about singly.
+- **Divergence: freshness is keyed on tag and DOI**, so a reference whose DOI has changed
+  (normalized, corrected) is asked about again. A not-found is fresh for the same 30 days. An
+  error is not a result, and is asked about again.
+- **Divergence: `psutil` became a direct dependency** (already installed, through another
+  package) to test whether the process in `run.lock` is alive. `os.kill(pid, 0)` is not safe
+  on Windows, where signal 0 is Ctrl-C.
+- **Divergence: `doi_audit_refresh_days`** is a config field (default 30), as the draft's
+  `audit_refresh_days`.
+- `cites.feather` columns: `tag`, `cites` (int64), `cites_asof` (ISO date text), `cites_1y`
+  (nullable Int64), `openalex_id`.
+- The estimate shown is max(pacing, latency / concurrency) with 0.5 s assumed latency.
+- **Note for the real run:** the server must be started from a shell that has
+  `OPENALEX_API_KEY`; a variable set at User level after a shell opened is not in that shell.
+  The confirmation panel says so in red when the key is missing.
+- Browser check on a temp library with a fake OpenAlex (headless Chromium): plan, choose
+  polite, Start run, status line polling to the end, summary redrawn, counts table; no console
+  errors.
+- Tests: `tests/test_doi_audit_counts.py` (26). Gate: `.venv\Scripts\python -m pytest -q`, 292
+  passed, 26 skipped (`uv run` again blocked by the running server holding `archivum.exe`).
+- **Left for the user:** run the 3,037 DOI holders on the real library and inspect the counts
+  table.

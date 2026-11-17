@@ -1,0 +1,20 @@
+{# The summary strip for the subset. With oob set it replaces the strip already on the page. #}
+<div class="row g-2 mb-3" id="audit-summary"{% if oob %} hx-swap-oob="true"{% endif %}>
+    {% for label, value, warn in [
+        ('References', summary.references, false),
+        ('With a DOI', summary.with_doi, false),
+        ('Without a DOI', summary.without_doi, false),
+        ('Malformed', summary.malformed, summary.malformed),
+        ('Needs attention', summary.attention, summary.attention),
+        ('Sharing a DOI', summary.shared, summary.shared),
+        ('With a count', summary.with_counts, false),
+        ('Counts over %d days old' % refresh_days, summary.stale_counts, summary.stale_counts),
+    ] %}
+    <div class="col-6 col-md-3 col-xl">
+        <div class="card shadow-sm border-0 text-center py-2 {{ 'bg-warning-subtle' if warn else 'bg-white' }}">
+            <div class="fw-bold fs-5">{{ '{:,}'.format(value) }}</div>
+            <div class="small fw-bold text-uppercase text-muted" style="font-size: 0.65rem;">{{ label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>

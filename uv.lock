@@ -51,7 +51,7 @@ wheels = [
 
 [[package]]
 name = "archivum"
-version = "2.16.0a5"
+version = "2.16.0a6"
 source = { editable = "." }
 dependencies = [
     { name = "arxiv" },
@@ -70,6 +70,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pendulum" },
     { name = "prompt-toolkit" },
+    { name = "psutil" },
     { name = "pyarrow" },
     { name = "pybtex" },
     { name = "pymupdf" },
@@ -121,6 +122,7 @@ requires-dist = [
     { name = "pandas" },
     { name = "pendulum" },
     { name = "prompt-toolkit" },
+    { name = "psutil" },
     { name = "pyarrow" },
     { name = "pybtex" },
     { name = "pymupdf" },
