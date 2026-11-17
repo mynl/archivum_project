@@ -70,8 +70,7 @@
                         [('main.cloud_page', 'Cloud', 'bi-cloud-haze2', false),
                          ('main.insights_page', 'Insights', 'bi-graph-up-arrow', false)],
                         [('main.status', 'Status', 'bi-cpu', true),
-                         ('main.health_page', 'Health', 'bi-shield-check', true),
-                         ('main.audit_page', 'Audit', 'bi-clipboard-check', true)],
+                         ('main.health_page', 'Health', 'bi-shield-check', true)],
                         [('main.about_page', 'About', 'bi-info-circle', false)],
                     ] %}
                     {% set more = namespace(active=false, shown=0) %}
@@ -95,6 +94,10 @@
                         <li class="nav-item">
                             <a href="{{ url_for('main.editor_page') }}" 
                                class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.editor_page' else 'text-dark fw-medium' }}">Edit</a>
+                        </li>
+                        <li class="nav-item">
+                            <a href="{{ url_for('main.audit_page') }}"
+                               class="nav-link py-1 px-3 {{ 'active shadow-sm' if request.endpoint == 'main.audit_page' else 'text-dark fw-medium' }}">Audit</a>
                         </li>
                         {% endif %}
 

@@ -151,7 +151,10 @@ def test_a_visitor_from_the_bridge_is_refused(client, method, path):
 
 
 def test_the_menu_shows_audit_to_an_admin_only(client):
-    assert 'href="/audit"' in client.get("/audit").get_data(as_text=True)
+    page = client.get("/audit").get_data(as_text=True)
+    # in the top bar, after Edit and before More, and no longer inside More
+    assert page.index('href="/edit"') < page.index('href="/audit"') < page.index('id="moreDropdown"')
+    assert page.count('href="/audit"') == 1
     visitor = client.get("/help", environ_overrides={"REMOTE_ADDR": "10.8.0.1"}).get_data(as_text=True)
     assert 'href="/audit"' not in visitor and "screen-audit" not in visitor
     assert "screen-audit" in client.get("/help").get_data(as_text=True)
@@ -180,6 +183,13 @@ def test_the_review_table_lists_malformed_dois_with_nothing_ticked(client):
 def test_the_review_table_follows_the_subset(client):
     html = client.get("/audit/review?cls=malformed&q=author ~ /Doe/").get_data(as_text=True)
     assert "Nothing to review in this subset." in html
+
+
+def test_a_table_with_tick_boxes_has_tick_all_and_untick_all(client):
+    html = client.get("/audit/review?cls=malformed").get_data(as_text=True)
+    assert ">Tick all</button>" in html and ">Untick all</button>" in html
+    assert not re.search(r'type="checkbox"[^>]*\bchecked', html)
+    assert "Tick all" not in client.get("/audit/review?cls=attention").get_data(as_text=True)
 
 
 def test_attention_rows_have_no_tick_box(client):

@@ -5,6 +5,18 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a17 (2026-11-17)
+
+### Added
+
+- **Tick all** and **Untick all** on every Audit review table with tick boxes.
+  They act on the page shown, 50 rows at most.
+
+### Changed
+
+- **Audit** is in the top bar, after Edit and before More, for an admin. It is
+  no longer in the More menu.
+
 ## 2.16.0a16 (2026-11-17)
 
 ### Changed

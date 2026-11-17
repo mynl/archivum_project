@@ -6,6 +6,14 @@
 <input type="hidden" name="page" value="{{ shown.page if shown else 1 }}">
 {% endmacro %}
 
+{# two buttons, never one that changes meaning; they act on the rows of the page shown #}
+{% macro tick_buttons() %}
+            <button type="button" class="btn btn-outline-secondary btn-sm" title="Tick every row on this page"
+                    onclick="document.querySelectorAll('#audit-review-form input[name=row]').forEach(box => box.checked = true)">Tick all</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" title="Untick every row on this page"
+                    onclick="document.querySelectorAll('#audit-review-form input[name=row]').forEach(box => box.checked = false)">Untick all</button>
+{% endmacro %}
+
 {% macro cell(value) -%}
     {% if value is none %}<span class="text-muted fst-italic">missing</span>{% elif value == '' %}<span class="text-muted fst-italic">empty</span>{% else %}{{ value }}{% endif %}
 {%- endmacro %}
@@ -228,7 +236,7 @@
             {% endif %}
         </div>
         {% if review.rows and review.can_backfill %}
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">{{ tick_buttons() }}
             <button type="button" class="btn btn-success btn-sm fw-bold"
                     hx-post="{{ url_for('main.audit_published_commit') }}" hx-include="#audit-review-form" hx-target="#audit-body"
                     hx-confirm="Fill in the ticked references from their published versions?">Fill in ticked</button>
@@ -237,7 +245,7 @@
         </div>
         {% endif %}
         {% if review.rows and review.can_accept_work %}
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">{{ tick_buttons() }}
             <button type="button" class="btn btn-success btn-sm fw-bold"
                     hx-post="{{ url_for('main.audit_accept_work') }}" hx-include="#audit-review-form" hx-target="#audit-body">Accept ticked for counts</button>
             <button type="button" class="btn btn-outline-danger btn-sm fw-bold"
@@ -245,7 +253,7 @@
         </div>
         {% endif %}
         {% if review.rows and review.can_commit %}
-        <div class="d-flex gap-2">
+        <div class="d-flex flex-wrap gap-2">{{ tick_buttons() }}
             <button type="button" class="btn btn-success btn-sm fw-bold"
                     hx-post="{{ url_for('main.audit_commit') }}" hx-include="#audit-review-form" hx-target="#audit-body"
                     hx-confirm="Write the ticked rows to the library?">Commit ticked</button>

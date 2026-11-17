@@ -830,6 +830,13 @@ if the OpenAlex counts prove sufficient.
   the row off the Shared list while its DOI is unchanged. The list is ordered by group size,
   so a junk DOI on many references comes first.
 
+- **The 24,747s came back once, at 20:55.** A run started before the server was restarted
+  ended in the 2.16.0a14 code, which rewrote `cites.feather` without `cites_doi`; a file with
+  no such column reads as "fetched by work id" and every row is kept. Rebuilt by
+  `journal.derive_cites` after the restart. Any run in 2.16.0a15 or later writes the column.
+- **2.16.0a17: Tick all and Untick all** on the review tables, acting on the page shown, and
+  **Audit in the top bar** after Edit, out of the More menu.
+
 ### What is left for the user, on the real library
 
 1. **Check DOIs** over the whole library, then `archivum doi-audit-status`: the class counts

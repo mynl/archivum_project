@@ -261,6 +261,6 @@ Repo-root companions:
   right-side offcanvas panel."* Archivum is a single-user app whose help is a long reference
   page with its own table of contents and search, so Help is a full page reached from the
   **More** menu, beside About. Top level holds only the daily pages: Query, Ingest, Ripgrep,
-  Edit.
+  Edit, Audit.
 - **Version** is single-sourced in `pyproject.toml` as `project.version`; `archivum.__version__`
   reads it at runtime via `importlib.metadata`. Read the current value there, not from here.
