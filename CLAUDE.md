@@ -204,6 +204,11 @@ committed tag can differ if the library moved in between. Do not reintroduce the
   briefs for the SQLite migration (`00-dev-rig.md` … `11-mendeley-onramp.md`), written before
   that convention settled; leave them where they are.
 - `scripts/` — PowerShell, chiefly `Test-ArchivumWeb.ps1`, and `Measure-ArchivumIdle.ps1` for the idle check.
+- **Usage pages are outside this repository**, in `D:\Projects\Using\archivum\<feature>.qmd`, one
+  short page per feature, following `D:\Projects\Using\CLAUDE.md` and `write-like-steve.md`. Every
+  new feature a user operates gets one, written as the last step of the work that produces it and
+  checked against the running app (Steve, 2026-11-17). The first is `doi-citation.qmd`, for the
+  Audit page. An archivum page describes a web page and its commands, so it has no executed code.
 - `temp` — the user's scratch link, to a backed-up folder outside the repo; gitignored as
   `/temp` (no trailing slash). Code never writes there: exports are built in memory, ingest
   staging lives in the app home (`~\.archivum\staging`), QMD extraction uses the system temp.
