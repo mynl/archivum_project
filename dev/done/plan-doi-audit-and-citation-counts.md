@@ -1,8 +1,6 @@
 # DOI audit and citation counts: the Audit page, its journal, and its commit path
 
-Status: ruled 2026-11-17, executing. The first six steps run first, with a pause for the user's
-real-library trials after [audit page and DOI normalization] and after [citation counts
-collection]; the last four steps need a separate go-ahead. Written against 2.16.0a1. Versions are assigned
+Status: executed 2026-11-17 as 2.16.0a2 to 2.16.0a13; all ten steps landed, with the tweaks the user asked for on the way. What remains is the user's own runs on the real library, listed at the foot of the execution notes. Written against 2.16.0a1. Versions are assigned
 at execution: each step below is one commit and one pre-release bump, with its CHANGELOG entry,
 its `help.html` change where the step is web-visible, and its tests in the same commit. Steps
 land in the order written. The first six steps deliver DOI normalization and citation counts and
@@ -790,3 +788,33 @@ if the OpenAlex counts prove sufficient.
   Import as a new reference; no console errors.
 - Tests: `tests/test_doi_audit_published.py` (30), including the importer on a temp library.
 - **Left for the user:** Find published versions on the real library; review each proposal.
+
+### 2.16.0a13 [Semantic Scholar counts] (2026-11-17)
+
+- Done at the user's word ("carry on with four"), though the plan marks it optional.
+- **One real request** for three DOIs, with no key: the first attempt was answered 429 and the
+  retry, 30 s later, succeeded; one of the two real DOIs came back with its count, the other as
+  not held. So without a key expect waits, and expect gaps in coverage.
+- **Divergence: `egress` requests can have a JSON body**, which the Semantic Scholar batch
+  endpoint needs. It is passed to the transport only when there is one.
+- **Divergence: the second count is opt-in for each run**, a tick box and a flag, and has its
+  own freshness, so it can be added later to counts already held.
+- **Divergence: `cites.feather` gained `cites_s2`.** A row still needs an OpenAlex count; a
+  reference with only a Semantic Scholar count has no row. A file written before the column
+  existed reads with the column empty.
+- `cites_s2` is not a query field; the plan asks only for the column in the counts table.
+- Tests: 5 more in `tests/test_doi_audit_counts.py`, 1 in `tests/test_egress.py`. Gate:
+  `.venv\Scripts\python -m pytest -q`, 407 passed, 26 skipped.
+
+### What is left for the user, on the real library
+
+1. **Check DOIs** over the whole library, then `archivum doi-audit-status`: the class counts
+   and the title similarity in bands. The thresholds 0.9 and 0.6 are confirmed or moved from
+   that (they are `STRONG_TITLE` and `WEAK_TITLE` in `doi_audit/doi.py`).
+2. **Find missing DOIs** over the references with no DOI (4,403 on 2026-11-16): about 75
+   minutes polite at Crossref, then OpenAlex for the misses, which stops itself when the day's
+   credits run low and resumes on the next start.
+3. **Find published versions**: 345 preprints on 2026-11-17, a few minutes.
+4. The slow web tests (`.\scripts\Test-ArchivumWeb.ps1 -Mode Slow`) were not run in this
+   execution, since they can write to the production `semantic-embeddings.feather`.
+5. The usage document, `doi-citation.qmd`, is not written: the user said not yet.

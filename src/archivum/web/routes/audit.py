@@ -7,6 +7,7 @@ import json
 import logging
 import os
 
+import pandas as pd
 from flask import abort, make_response, render_template, request
 
 from ... import egress
@@ -98,8 +99,10 @@ def _counts_table(lib, rows, page: int) -> dict:
     shown = cites.iloc[(page - 1) * PAGE_ROWS: page * PAGE_ROWS]
     return {
         "cls": COUNTS_CLASS, "total": len(cites), "page": page, "pages": pages,
+        "has_second": bool(cites["cites_s2"].notna().any()),
         "rows": [
-            {"tag": r.tag, "title": clean_latex(str(r.title or "")), "cites": int(r.cites), "asof": r.cites_asof}
+            {"tag": r.tag, "title": clean_latex(str(r.title or "")), "cites": int(r.cites), "asof": r.cites_asof,
+             "second": None if pd.isna(r.cites_s2) else int(r.cites_s2)}
             for r in shown.itertuples()
         ],
     }
@@ -135,6 +138,10 @@ def _plan_view(lib, rows, action: str) -> dict:
         plan = runner.plan_counts(lib.config_path, rows, days)
         most = plan.requests
         durations = {mode: (plan.seconds(mode), plan.seconds(mode)) for mode in egress.MODES}
+        # what ticking the Semantic Scholar box would add
+        second = runner.plan_counts(lib.config_path, rows, days, second=True)
+        second_view = {"dois": len(second.second), "requests": len(second.second_batches),
+                       "has_key": bool(os.environ.get("SEMANTIC_SCHOLAR_API_KEY"))}
 
     def span(low, high):
         low, high = runner.format_duration(low), runner.format_duration(high)
@@ -143,6 +150,7 @@ def _plan_view(lib, rows, action: str) -> dict:
     return {
         "action": action,
         "plan": plan,
+        "second": second_view if action == COUNTS_ACTION else None,
         "requests_most": most,
         # the default follows the most the run could need, so a long check is polite
         "default_mode": egress.choose_mode(most),
@@ -478,7 +486,7 @@ def audit_run():
         plan = runner.plan_check(lib.config_path, rows, days)
         make, what = runner.CheckRun, "DOI check"
     else:
-        plan = runner.plan_counts(lib.config_path, rows, days)
+        plan = runner.plan_counts(lib.config_path, rows, days, second=request.form.get("second") == "1")
         make, what = runner.CountsRun, "Run"
     if not plan.requests:
         return _render_body(lib, raw_query, cls, page, "Nothing to ask: everything in the subset has a fresh result.", "info")

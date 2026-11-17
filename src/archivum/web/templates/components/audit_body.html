@@ -134,7 +134,18 @@
             Results go to <code>doi-audit/</code> in the library folder; the references are not changed.
         </p>
         {% endif %}
-        {% if p.requests %}
+        {% if plan.second %}
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="second" id="audit-second" value="1" {{ 'disabled' if not plan.second.dois }}>
+            <label class="form-check-label" for="audit-second">
+                Also ask Semantic Scholar for a second count: {{ '{:,}'.format(plan.second.dois) }} DOIs in {{ plan.second.requests }}
+                more {{ 'request' if plan.second.requests == 1 else 'requests' }} to <code>api.semanticscholar.org</code>.
+                It is shown beside the OpenAlex count; <code>cites</code> stays the OpenAlex figure.
+                {% if not plan.second.has_key %}<span class="text-muted">No <code>SEMANTIC_SCHOLAR_API_KEY</code> is set, so the shared public allowance applies and a request may have to wait.</span>{% endif %}
+            </label>
+        </div>
+        {% endif %}
+        {% if p.requests or (plan.second and plan.second.dois) %}
         <div class="d-flex flex-wrap align-items-center gap-3">
             {% for mode, label, duration in plan.modes %}
             <div class="form-check mb-0">
@@ -167,6 +178,7 @@
                     <th class="ps-3">Tag</th>
                     <th>Title</th>
                     <th class="text-end">Cites</th>
+                    {% if counts.has_second %}<th class="text-end text-nowrap">Semantic Scholar</th>{% endif %}
                     <th class="text-center text-nowrap pe-3">As of</th>
                 </tr>
             </thead>
@@ -176,6 +188,7 @@
                     <td class="ps-3"><a href="{{ url_for('main.editor_page', tag=row.tag) }}">{{ row.tag }}</a></td>
                     <td>{{ row.title }}</td>
                     <td class="text-end">{{ '{:,}'.format(row.cites) }}</td>
+                    {% if counts.has_second %}<td class="text-end">{{ '{:,}'.format(row.second) if row.second is not none else '' }}</td>{% endif %}
                     <td class="text-center text-nowrap pe-3">{{ row.asof }}</td>
                 </tr>
                 {% endfor %}

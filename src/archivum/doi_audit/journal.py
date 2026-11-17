@@ -28,7 +28,7 @@ WORK_ACCEPTED = "work accepted"
 # a published version in a different year, imported as a new reference beside the preprint
 PUBLISHED_IMPORTED = "published version imported"
 OK, NOT_FOUND, ERROR = "ok", "not_found", "error"
-CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id"]
+CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2"]
 
 # waitress serves requests on several threads
 _LOCK = threading.Lock()
@@ -124,7 +124,8 @@ def _when(record: dict) -> dt.datetime:
     return dt.datetime.fromisoformat(record["at"])
 
 
-def fresh_count_keys(library_path: Path, refresh_days: float, now: dt.datetime | None = None) -> set[tuple]:
+def fresh_count_keys(library_path: Path, refresh_days: float, now: dt.datetime | None = None,
+                     source: str = "openalex") -> set[tuple]:
     """
     The DOI lookups that need not be repeated yet.
 
@@ -136,11 +137,13 @@ def fresh_count_keys(library_path: Path, refresh_days: float, now: dt.datetime |
         A result older than this is stale.
     now : datetime, optional
         The current time, replaced in tests.
+    source : str, optional
+        The source whose answers count: ``openalex``, or ``semanticscholar``.
 
     Returns
     -------
     set of tuple
-        ``(tag, doi_key)`` for each OpenAlex answer newer than
+        ``(tag, doi_key)`` for each of the source's answers newer than
         ``refresh_days``, whether a count or a not-found. The DOI is part of
         the key, so a reference whose DOI has changed is asked again. A count
         taken through an accepted work with no DOI has ``work:<id>`` in its
@@ -149,9 +152,9 @@ def fresh_count_keys(library_path: Path, refresh_days: float, now: dt.datetime |
     now = now or dt.datetime.now(dt.timezone.utc)
     cutoff = now - dt.timedelta(days=refresh_days)
     fresh = {(r["tag"], r.get("doi") or f"work:{r.get('source_id')}") for r in read_lines(library_path, COUNTS)
-             if r.get("source") == "openalex" and _when(r) >= cutoff}
+             if r.get("source") == source and _when(r) >= cutoff}
     fresh |= {(r["tag"], r.get("query")) for r in read_lines(library_path, OBSERVATIONS)
-              if r.get("source") == "openalex" and r.get("query_kind") == "doi"
+              if r.get("source") == source and r.get("query_kind") == "doi"
               and r.get("status") == NOT_FOUND and _when(r) >= cutoff}
     return fresh
 
@@ -169,8 +172,9 @@ def derive_cites(library_path: Path):
     -------
     pandas.DataFrame
         One row per tag with an OpenAlex count: ``tag``, ``cites`` (the latest
-        count), ``cites_asof`` (its date, ISO), ``cites_1y`` and
-        ``openalex_id``. Also written to ``<library>/doi-audit/cites.feather``.
+        count), ``cites_asof`` (its date, ISO), ``cites_1y``, ``openalex_id``,
+        and ``cites_s2``, the latest Semantic Scholar count where one has been
+        collected. Also written to ``<library>/doi-audit/cites.feather``.
 
     Notes
     -----
@@ -182,9 +186,15 @@ def derive_cites(library_path: Path):
     import pandas as pd
 
     by_tag: dict[str, list[dict]] = {}
+    second: dict[str, dict] = {}
     for record in read_lines(library_path, COUNTS):
-        if record.get("source") == "openalex" and record.get("count") is not None:
+        if record.get("count") is None:
+            continue
+        if record.get("source") == "openalex":
             by_tag.setdefault(record["tag"], []).append(record)
+        elif record.get("source") == "semanticscholar":
+            if record["tag"] not in second or _when(record) >= _when(second[record["tag"]]):
+                second[record["tag"]] = record
 
     rows = []
     for tag, records in by_tag.items():
@@ -198,10 +208,12 @@ def derive_cites(library_path: Path):
             "cites_asof": _when(latest).date().isoformat(),
             "cites_1y": int(latest["count"]) - int(earlier[-1]["count"]) if earlier else None,
             "openalex_id": latest.get("source_id") or "",
+            "cites_s2": int(second[tag]["count"]) if tag in second else None,
         })
     frame = pd.DataFrame(rows, columns=CITES_COLUMNS)
     frame["cites"] = frame["cites"].astype("int64")
     frame["cites_1y"] = frame["cites_1y"].astype("Int64")
+    frame["cites_s2"] = frame["cites_s2"].astype("Int64")
     folder = audit_dir(library_path)
     folder.mkdir(parents=True, exist_ok=True)
     tmp = folder / (CITES + ".tmp")
@@ -217,7 +229,12 @@ def read_cites(library_path: Path):
     path = audit_dir(library_path) / CITES
     if not path.exists():
         return pd.DataFrame(columns=CITES_COLUMNS)
-    return pd.read_feather(path)
+    frame = pd.read_feather(path)
+    # a file written before a column was added lacks it
+    for column in CITES_COLUMNS:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    return frame
 
 
 def latest_observations(library_path: Path) -> dict[tuple, dict]:

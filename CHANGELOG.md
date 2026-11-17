@@ -5,6 +5,18 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a13 (2026-11-17)
+
+### Added
+
+- A second citation count from Semantic Scholar, optional: a tick box in the
+  Fetch citation counts confirmation, or `--semantic-scholar` with
+  `doi-audit-run --counts`. 500 DOIs a request; only DOIs are sent.
+- The counts table shows it in its own column when any has been collected.
+  `cites` in queries stays the OpenAlex count.
+- `api.semanticscholar.org` joins the allowed hosts. Its key is read from
+  `SEMANTIC_SCHOLAR_API_KEY`; without one the public allowance applies.
+
 ## 2.16.0a12 (2026-11-17)
 
 ### Added

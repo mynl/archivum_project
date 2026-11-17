@@ -123,8 +123,8 @@ Three Feather DataFrames per library, plus one BibTeX file kept in sync:
 | `analytics/` | `semantic.py` (sentence-transformers + UMAP + HDBSCAN), `networks.py` (NetworkX coauthor and semantic graphs, Matplotlib SVG for reports), `timing.py` verbose spans |
 | `web/` | the Flask app — see below |
 | `configurations/` | packaged YAML for logging and querexfuzz DataFrame configs, shipped via `setuptools.package-data` |
-| `egress.py` | the one outbound HTTP point for public reference data: host allow-list, per-host pacing, backoff. `crossref.py` and the DOI audit go through it; `requests` is used nowhere else except Ingest's download of a typed URL. A test enforces both. |
-| `doi_audit/` | the Audit page's engine: DOI rules (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`), the sources (`sources.py`), and the runner (`runner.py`: one run per library by `run.lock`, started only by a person, writing only inside `doi-audit/`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
+| `egress.py` | the one outbound HTTP point for public reference data: host allow-list (OpenAlex, Crossref, doi.org, arXiv, Semantic Scholar), per-host pacing, backoff. `crossref.py` and the DOI audit go through it; `requests` is used nowhere else except Ingest's download of a typed URL. A test enforces both. |
+| `doi_audit/` | the Audit page's engine: DOI rules and the match score (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`), the sources (`sources.py`), and the runner (`runner.py`: one run per library by `run.lock`, started only by a person, writing only inside `doi-audit/`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
 | `quarto.py`, `rg_tools.py`, `definitive_loader.py`, `gui.py` | Quarto/QMD parsing, ripgrep wrappers, full-store loader, Tkinter metadata editor |
 
 ### The web app

@@ -36,7 +36,8 @@ from . import __version__
 logger = logging.getLogger(__name__)
 
 OPENALEX, CROSSREF, DOI_ORG, ARXIV = "api.openalex.org", "api.crossref.org", "doi.org", "export.arxiv.org"
-ALLOWED_HOSTS = frozenset({OPENALEX, CROSSREF, DOI_ORG, ARXIV})
+SEMANTIC_SCHOLAR = "api.semanticscholar.org"
+ALLOWED_HOSTS = frozenset({OPENALEX, CROSSREF, DOI_ORG, ARXIV, SEMANTIC_SCHOLAR})
 
 SPEEDY, POLITE = "speedy", "polite"
 SINGLE, SEARCH = "single", "search"
@@ -108,7 +109,7 @@ def choose_mode(request_count: int) -> str:
     return SPEEDY if request_count <= SPEEDY_REQUEST_LIMIT else POLITE
 
 
-def _requests_transport(method: str, url: str, *, params, headers, timeout):
+def _requests_transport(method: str, url: str, *, params, headers, timeout, json=None):
     """
     Send one request with ``requests``; the only call to it in the package besides Ingest's download.
 
@@ -116,7 +117,8 @@ def _requests_transport(method: str, url: str, *, params, headers, timeout):
     to a host the allow-list has not seen. ``doi.org`` answers an existing DOI
     with a redirect to the publisher, and that answer is all that is wanted.
     """
-    return requests.request(method, url, params=params, headers=headers, timeout=timeout, allow_redirects=False)
+    return requests.request(method, url, params=params, headers=headers, timeout=timeout, json=json,
+                            allow_redirects=False)
 
 
 @dataclass
@@ -215,11 +217,15 @@ class Egress:
             raise EgressRefused(f"Outbound request refused: {parts.scheme}://{host} is not an allowed source.")
         return host
 
-    def _headers(self, headers: dict | None) -> dict:
+    def _headers(self, host: str, headers: dict | None) -> dict:
+        """The headers of a request: the ``User-Agent``, and the Semantic Scholar key from the environment for that host."""
         agent = f"archivum/{__version__}"
         if self.contact_email:
             agent += f" (mailto:{self.contact_email})"
-        return {"User-Agent": agent, **(headers or {})}
+        key = {}
+        if host == SEMANTIC_SCHOLAR and os.environ.get("SEMANTIC_SCHOLAR_API_KEY"):
+            key["x-api-key"] = os.environ["SEMANTIC_SCHOLAR_API_KEY"]
+        return {"User-Agent": agent, **key, **(headers or {})}
 
     def _params(self, host: str, params: dict | None) -> dict | None:
         """Add the caller's identity where the host asks for it: ``mailto``, and the OpenAlex key from the environment."""
@@ -233,7 +239,7 @@ class Egress:
         return {**(params or {}), **extra}
 
     def request(self, method: str, url: str, *, params: dict | None = None, headers: dict | None = None,
-                kind: str = SINGLE, retry: bool = True, timeout: float = DEFAULT_TIMEOUT) -> Any:
+                json: Any = None, kind: str = SINGLE, retry: bool = True, timeout: float = DEFAULT_TIMEOUT) -> Any:
         """
         Send one request to an allowed host, paced.
 
@@ -245,6 +251,8 @@ class Egress:
             An https URL on an allowed host.
         params, headers : dict, optional
             Query parameters and extra headers.
+        json : optional
+            A body to send as JSON, for a POST.
         kind : str, optional
             ``single`` for one record, ``search`` for a search; sets the pace.
         retry : bool, optional
@@ -273,7 +281,9 @@ class Egress:
         """
         host = self.check_url(url)
         state = self._host(host)
-        params, headers = self._params(host, params), self._headers(headers)
+        params, headers = self._params(host, params), self._headers(host, headers)
+        # passed on only when there is one, so a transport without bodies need not know of them
+        body = {} if json is None else {"json": json}
         while True:
             if state.stopped:
                 raise HostStopped(f"{host} is stopped for this run: {state.stopped}")
@@ -283,7 +293,7 @@ class Egress:
                 self._take_turn(state, kind)
                 state.requests += 1
                 try:
-                    response = self.transport(method, url, params=params, headers=headers, timeout=timeout)
+                    response = self.transport(method, url, params=params, headers=headers, timeout=timeout, **body)
                     error = None
                 except (requests.RequestException, OSError) as e:
                     response, error = None, e

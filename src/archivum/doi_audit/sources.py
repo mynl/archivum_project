@@ -18,6 +18,9 @@ ARXIV_QUERY = "https://export.arxiv.org/api/query"
 # identifiers in one arXiv request
 ARXIV_BATCH = 100
 _ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
+SEMANTIC_SCHOLAR_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
+# identifiers in one Semantic Scholar request
+SEMANTIC_SCHOLAR_BATCH = 500
 CROSSREF_WORKS = "https://api.crossref.org/works"
 DOI_ORG = "https://doi.org"
 OPENALEX_WORKS = "https://api.openalex.org/works"
@@ -372,3 +375,43 @@ def arxiv_records(client: egress.Egress, identifiers: list[str]) -> dict[str, di
             "first_author": text(entry, "atom:author/atom:name"),
         }
     return found
+
+
+def semantic_scholar_counts(client: egress.Egress, dois: list[str]) -> dict[str, dict]:
+    """
+    Ask Semantic Scholar for the citation counts of the given DOIs, in one request.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run.
+    dois : list of str
+        At most :data:`SEMANTIC_SCHOLAR_BATCH` DOIs in compared form.
+
+    Returns
+    -------
+    dict
+        ``doi_key -> {source, source_id, doi, cited_by_count}`` for the DOIs
+        Semantic Scholar has. The answer is a list in the order asked, with
+        ``null`` for a DOI it does not have.
+
+    Raises
+    ------
+    SourceError
+        If the status is not 200, or the answer is not a list as long as the
+        question.
+    """
+    if len(dois) > SEMANTIC_SCHOLAR_BATCH:
+        raise ValueError(f"At most {SEMANTIC_SCHOLAR_BATCH} DOIs in one request")
+    response = client.post(SEMANTIC_SCHOLAR_BATCH_URL, params={"fields": "citationCount"},
+                           json={"ids": [f"DOI:{doi}" for doi in dois]}, kind=egress.SEARCH)
+    if response.status_code != 200:
+        raise SourceError(f"Semantic Scholar answered HTTP {response.status_code}")
+    papers = response.json()
+    if not isinstance(papers, list) or len(papers) != len(dois):
+        raise SourceError("Semantic Scholar answered with something other than one entry for each DOI")
+    return {
+        doi: {"source": "semanticscholar", "source_id": paper.get("paperId"), "doi": doi,
+              "cited_by_count": paper.get("citationCount")}
+        for doi, paper in zip(dois, papers) if paper and paper.get("citationCount") is not None
+    }

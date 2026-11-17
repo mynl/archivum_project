@@ -78,8 +78,9 @@ def test_each_listed_host_is_allowed(host):
     assert len(transport.calls) == 1
 
 
-def test_the_allow_list_is_the_four_sources():
-    assert egress.ALLOWED_HOSTS == {"api.openalex.org", "api.crossref.org", "doi.org", "export.arxiv.org"}
+def test_the_allow_list_is_the_five_sources():
+    assert egress.ALLOWED_HOSTS == {"api.openalex.org", "api.crossref.org", "doi.org", "export.arxiv.org",
+                                    "api.semanticscholar.org"}
 
 
 def test_requests_is_used_only_in_egress_and_the_ingest_download():
@@ -101,6 +102,22 @@ def test_identity_goes_to_crossref_and_openalex_only(monkeypatch):
     assert doi["params"] is None
     assert all("mailto:me@example.org" in c["headers"]["User-Agent"] for c in transport.calls)
     assert all(c["timeout"] == egress.DEFAULT_TIMEOUT for c in transport.calls)
+
+
+def test_the_semantic_scholar_key_goes_to_that_host_only_and_a_body_is_passed_on(monkeypatch):
+    monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "s2-key")
+    seen = []
+
+    def transport(method, url, *, params, headers, timeout, json=None):
+        seen.append((url, headers, json))
+        return FakeResponse()
+
+    client = Egress(egress.SPEEDY, contact_email="", transport=transport, sleep=lambda s: None)
+    client.post("https://api.semanticscholar.org/graph/v1/paper/batch", json={"ids": ["DOI:10.1/x"]})
+    client.get("https://api.crossref.org/works")
+
+    assert seen[0][1]["x-api-key"] == "s2-key" and seen[0][2] == {"ids": ["DOI:10.1/x"]}
+    assert "x-api-key" not in seen[1][1] and seen[1][2] is None
 
 
 def test_no_email_sends_no_mailto(monkeypatch):

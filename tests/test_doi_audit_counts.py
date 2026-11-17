@@ -118,7 +118,7 @@ def test_a_run_appends_the_expected_lines_and_derives_cites(lib):
     assert hit["run_id"] == state["run_id"] and hit["at"].endswith("+00:00")
 
     cites = journal.read_cites(lib.config_path).set_index("tag")
-    assert list(cites.columns) == ["cites", "cites_asof", "cites_1y", "openalex_id"]
+    assert list(cites.columns) == ["cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2"]
     assert cites.loc["Wang2020", "cites"] == 120 and cites.loc["Odd2014", "openalex_id"] == "W7"
     assert cites["cites_1y"].isna().all() and "Doe2015" not in cites.index
     assert cites.loc["Wang2020", "cites_asof"] == dt.datetime.now(dt.timezone.utc).date().isoformat()
@@ -421,3 +421,84 @@ def test_the_run_command_needs_an_action_and_a_query_that_parses(cli, fake_opena
     assert "Choose one thing to collect" in cli("doi_audit_run")[1]
     assert "Query not understood" in cli("doi_audit_run", "year == 2020", "--counts")[1]
     assert "No run yet." in cli("doi_audit_status")[1]
+
+
+# ---- a second count from Semantic Scholar ----
+
+class TwoSources(OpenAlex):
+    """OpenAlex as above, and Semantic Scholar's batch endpoint with counts for two of the DOIs."""
+
+    SECOND = {"10.1/one": ("s2-one", 131), "10.1/two": ("s2-two", 9)}
+
+    def __call__(self, method, url, *, params, headers, timeout, json=None):
+        if "semanticscholar" in url:
+            self.calls.append((url, dict(params or {})))
+            self.second_ids = json["ids"]
+            return FakeResponse(payload=[
+                {"paperId": self.SECOND[i.removeprefix("DOI:")][0], "citationCount": self.SECOND[i.removeprefix("DOI:")][1]}
+                if i.removeprefix("DOI:") in self.SECOND else None for i in json["ids"]])
+        return super().__call__(method, url, params=params, headers=headers, timeout=timeout)
+
+
+def test_a_second_count_is_planned_only_when_asked_for(lib):
+    assert _plan(lib).second == {} and _plan(lib).requests == 2
+    plan = runner.plan_counts(lib.config_path, lib.ref_df, 30, second=True)
+    assert set(plan.second) == {"10.1/one", "10.1/two", "10.1/unknown", "10.1/a,b"}
+    assert plan.requests == 3 and plan.tags == 5
+
+
+def test_a_second_count_sits_beside_the_openalex_one(lib):
+    transport = TwoSources()
+    plan = runner.plan_counts(lib.config_path, lib.ref_df, 30, second=True)
+    state = runner.CountsRun(lib.config_path, plan, egress.SPEEDY, client=_client(transport)).run()
+
+    assert state["status"] == runner.FINISHED and state["requests"] == 3 and state["done"] == 5
+    assert sorted(transport.second_ids) == ["DOI:10.1/a,b", "DOI:10.1/one", "DOI:10.1/two", "DOI:10.1/unknown"]
+    cites = journal.read_cites(lib.config_path).set_index("tag")
+    assert (cites.loc["Wang2020", "cites"], cites.loc["Wang2020", "cites_s2"]) == (120, 131)
+    assert cites.loc["Roe2018", "cites_s2"] == 131 and cites.loc["Wang2019", "cites_s2"] == 9
+    assert pd.isna(cites.loc["Odd2014", "cites_s2"])
+    # the two sources are fresh separately
+    again = runner.plan_counts(lib.config_path, lib.ref_df, 30, second=True)
+    assert again.second == {} and again.work == {} and again.requests == 0
+
+
+def test_a_second_count_alone_can_be_added_later(lib):
+    runner.CountsRun(lib.config_path, _plan(lib), egress.SPEEDY, client=_client(OpenAlex())).run()
+    plan = runner.plan_counts(lib.config_path, lib.ref_df, 30, second=True)
+    assert plan.work == {} and len(plan.second) == 4 and plan.requests == 1 and plan.tags == 5
+
+    transport = TwoSources()
+    state = runner.CountsRun(lib.config_path, plan, egress.SPEEDY, client=_client(transport)).run()
+    assert state["done"] == 5 and [url for url, _ in transport.calls] == [
+        "https://api.semanticscholar.org/graph/v1/paper/batch"]
+    assert journal.read_cites(lib.config_path).set_index("tag").loc["Wang2019", "cites_s2"] == 9
+
+
+def test_a_cites_file_from_before_the_second_count_still_reads(lib):
+    runner.CountsRun(lib.config_path, _plan(lib), egress.SPEEDY, client=_client(OpenAlex())).run()
+    path = journal.audit_dir(lib.config_path) / journal.CITES
+    pd.read_feather(path).drop(columns=["cites_s2"]).to_feather(path)
+
+    cites = journal.read_cites(lib.config_path)
+    assert "cites_s2" in cites.columns and cites["cites_s2"].isna().all()
+    assert lib.database.set_index("tag").loc["Wang2020", "cites"] == 120
+
+
+def test_the_page_offers_the_second_count_and_shows_its_column(client, lib, monkeypatch):
+    transport = TwoSources()
+    real = egress.Egress
+    monkeypatch.setattr(egress, "Egress", lambda mode=egress.SPEEDY, **kw: real(
+        mode, contact_email="", transport=transport, sleep=lambda s: None, stop=kw.get("stop")))
+
+    plan = " ".join(client.get("/audit/plan").get_data(as_text=True).split())
+    assert 'name="second"' in plan and "4 DOIs in 1 more request" in plan
+    client.post("/audit/run", data={"q": "", "mode": "speedy"})
+    _wait_for_run(lib)
+    assert "Semantic Scholar" not in client.get("/audit/review?cls=counts").get_data(as_text=True)
+
+    html = client.post("/audit/run", data={"q": "", "mode": "speedy", "second": "1"}).get_data(as_text=True)
+    assert "Run started: 5 references in 1 requests" in html
+    _wait_for_run(lib)
+    table = client.get("/audit/review?cls=counts").get_data(as_text=True)
+    assert "Semantic Scholar</th>" in table and ">131<" in table

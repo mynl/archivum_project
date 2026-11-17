@@ -74,6 +74,9 @@ class CountsPlan:
     works : dict
         ``OpenAlex work id -> [tags]`` still to ask about: references with no
         DOI whose work was accepted in review.
+    second : dict
+        ``doi_key -> [tags]`` to ask Semantic Scholar about for a second
+        count; empty unless that was asked for.
     """
 
     subset: int = 0
@@ -82,11 +85,20 @@ class CountsPlan:
     fresh: int = 0
     work: dict[str, list[str]] = field(default_factory=dict)
     works: dict[str, list[str]] = field(default_factory=dict)
+    second: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def tags(self) -> int:
-        """The number of references to ask about."""
-        return sum(len(tags) for tags in self.work.values()) + sum(len(tags) for tags in self.works.values())
+        """The number of references to ask about, of any source."""
+        asked = {tag for group in (self.work, self.works, self.second) for tags in group.values() for tag in tags}
+        return len(asked)
+
+    @property
+    def second_batches(self) -> list[list[str]]:
+        """The DOIs for Semantic Scholar, in lists of at most 500."""
+        keys = list(self.second)
+        size = sources.SEMANTIC_SCHOLAR_BATCH
+        return [keys[i:i + size] for i in range(0, len(keys), size)]
 
     @property
     def batches(self) -> list[list[str]]:
@@ -102,7 +114,7 @@ class CountsPlan:
     @property
     def requests(self) -> int:
         """The number of requests the run will make."""
-        return len(self.batches) + len(self.singles) + len(self.works)
+        return len(self.batches) + len(self.singles) + len(self.works) + len(self.second_batches)
 
     def seconds(self, mode: str) -> float:
         """
@@ -117,11 +129,12 @@ class CountsPlan:
         whichever binds.
         """
         pace = egress.MODES[mode]
-        paced = len(self.batches) * pace.search_interval + (len(self.singles) + len(self.works)) * pace.single_interval
+        paced = ((len(self.batches) + len(self.second_batches)) * pace.search_interval
+                 + (len(self.singles) + len(self.works)) * pace.single_interval)
         return max(paced, self.requests * ASSUMED_LATENCY_SECONDS / pace.concurrency)
 
 
-def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> CountsPlan:
+def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float, second: bool = False) -> CountsPlan:
     """
     Work out what a citation-count run over ``rows`` would ask.
 
@@ -133,6 +146,9 @@ def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> 
         The references of the subset.
     refresh_days : float
         A result newer than this is fresh and its reference is skipped.
+    second : bool, optional
+        Whether to ask Semantic Scholar too, for a second count of each DOI.
+        Its results have their own freshness.
 
     Returns
     -------
@@ -140,6 +156,7 @@ def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> 
     """
     plan = CountsPlan(subset=len(rows))
     fresh = journal.fresh_count_keys(library_path, refresh_days)
+    fresh_second = journal.fresh_count_keys(library_path, refresh_days, source="semanticscholar") if second else set()
     accepted = journal.accepted_works(library_path)
     dois = rows["doi"] if "doi" in rows.columns else [None] * len(rows)
     for tag, doi in zip(rows["tag"], dois):
@@ -154,10 +171,14 @@ def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> 
                 plan.works.setdefault(accepted[tag], []).append(tag)
         elif classify_stored_doi(doi) == ATTENTION:
             plan.unusable += 1
-        elif (tag, doi_key(doi)) in fresh:
-            plan.fresh += 1
         else:
-            plan.work.setdefault(doi_key(doi), []).append(tag)
+            key = doi_key(doi)
+            if second and (tag, key) not in fresh_second:
+                plan.second.setdefault(key, []).append(tag)
+            if (tag, key) in fresh:
+                plan.fresh += 1
+            else:
+                plan.work.setdefault(key, []).append(tag)
     return plan
 
 
@@ -705,8 +726,36 @@ class CountsRun(Run):
         return [(lambda w=w: record(w, sources.openalex_work(self.client, w)),
                  lambda message, w=w: record(w, None, error=message)) for w in self.plan.works]
 
+    def _second_jobs(self) -> list[tuple]:
+        """Jobs asking Semantic Scholar for a second count, 500 DOIs a request."""
+        def record(batch, found, error=""):
+            observations, counts = [], []
+            for key in batch:
+                answer = found.get(key)
+                for tag in self.plan.second[key]:
+                    base = {"run_id": self.run_id, "tag": tag, "source": "semanticscholar", "query_kind": "doi", "query": key}
+                    if error:
+                        observations.append({**base, "status": journal.ERROR, "error": error})
+                    elif answer is None:
+                        observations.append({**base, "status": journal.NOT_FOUND})
+                    else:
+                        counts.append({"tag": tag, "source": "semanticscholar", "source_id": answer["source_id"],
+                                       "doi": key, "count": answer["cited_by_count"]})
+            journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
+            journal.append_lines(self.library_path, journal.COUNTS, counts)
+            tags = sum(len(self.plan.second[key]) for key in batch)
+            # done counts references once, in the OpenAlex phase; a reference asked only here is counted here
+            only_here = sum(1 for key in batch for tag in self.plan.second[key] if tag not in self._first_tags)
+            self.tally(requests=1, done=only_here, errors=tags if error else 0)
+
+        return [(lambda batch=batch: record(batch, sources.semantic_scholar_counts(self.client, batch)),
+                 lambda message, batch=batch: record(batch, {}, error=message)) for batch in self.plan.second_batches]
+
     def phases(self):
+        self._first_tags = {tag for group in (self.plan.work, self.plan.works) for tags in group.values() for tag in tags}
         yield "OpenAlex", self._openalex_jobs(self.plan.work) + self._work_jobs()
+        if self.plan.second:
+            yield "Semantic Scholar", self._second_jobs()
 
 
 class CheckRun(Run):

@@ -732,6 +732,8 @@ def doi_audit_revert(changeset, execute):
 @entry.command()
 @click.argument("query", type=str, default="")
 @click.option("--counts", is_flag=True, help="Fetch citation counts from OpenAlex for references with a DOI.")
+@click.option("--semantic-scholar", "second", is_flag=True,
+              help="With --counts: also ask Semantic Scholar for a second count of each DOI.")
 @click.option("--dois", is_flag=True, help="Check each DOI against OpenAlex, Crossref and doi.org; collects the counts too.")
 @click.option("--missing", is_flag=True, help="Search Crossref, then OpenAlex, for the DOI of each reference that has none.")
 @click.option("--published", is_flag=True, help="Ask arXiv, then Crossref, for the published version of each arXiv preprint.")
@@ -749,7 +751,7 @@ def doi_audit_revert(changeset, execute):
     show_default=True,
     help="Actually send the requests; otherwise, show what the run would do.",
 )
-def doi_audit_run(query, counts, dois, missing, published, mode, execute):
+def doi_audit_run(query, counts, second, dois, missing, published, mode, execute):
     """
     Collect from the public sources for a subset of the library.
 
@@ -792,7 +794,7 @@ def doi_audit_run(query, counts, dois, missing, published, mode, execute):
         plan, make = runner.plan_check(lib.config_path, rows, days), runner.CheckRun
         most = plan.requests_most
     else:
-        plan, make = runner.plan_counts(lib.config_path, rows, days), runner.CountsRun
+        plan, make = runner.plan_counts(lib.config_path, rows, days, second=second), runner.CountsRun
         most = plan.requests
     if mode == "auto":
         mode = egress.choose_mode(most)
@@ -817,7 +819,8 @@ def doi_audit_run(query, counts, dois, missing, published, mode, execute):
                    "(OpenAlex, then Crossref and doi.org for the DOIs not confirmed)")
         duration = f"{runner.format_duration(plan.seconds(mode))} to {runner.format_duration(plan.seconds(mode, most))}"
     else:
-        click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org")
+        click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org"
+                   + (f", {len(plan.second_batches):,} of them to api.semanticscholar.org" if second else ""))
         duration = runner.format_duration(plan.seconds(mode))
     if not missing and not published:
         click.echo(f"Skipped:       {plan.no_doi:,} with no DOI, {plan.unusable:,} whose DOI needs attention, "
