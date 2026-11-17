@@ -966,6 +966,152 @@ class Library(LibraryBase):
                 ignored.append(name)
         return values, ignored
 
+    def apply_field_changes(self, changes, name: str, *, reverts: str = "") -> Path:
+        """
+        Apply reviewed changes to single fields of existing references.
+
+        The only way the DOI audit writes ``ref.feather``. Each change is a
+        compare and swap on one cell, and the whole batch is recorded in a
+        changeset file whatever the result.
+
+        Parameters
+        ----------
+        changes : iterable
+            Each item is ``(tag, field, old, new)``, or a mapping with those
+            keys and an optional ``evidence``. A missing value is ``None``.
+        name : str
+            A short label for the changeset file name.
+        reverts : str, optional
+            The file name of the changeset this batch reverts. A revert may
+            restore the type of a book, which no other batch may change.
+
+        Returns
+        -------
+        Path
+            The changeset file, ``<library>/doi-audit/changesets/<stamp>_<name>.json``.
+            Its ``outcome`` is ``applied``, ``skipped`` when no row applied, or
+            ``failed``; each row has its own ``outcome``.
+
+        Raises
+        ------
+        ValueError
+            If any row is refused by ``doi_audit.changesets.validate_changes``;
+            nothing is written, not even a changeset.
+        RuntimeError
+            If the changed frame differs from the original in anything but the
+            applied cells, or the files on disk do not show the applied cells
+            after the save. The changeset is marked ``failed``.
+
+        Notes
+        -----
+        The steps, in order: validate; reload if another process has written;
+        write the changeset as ``pending``; skip each row whose cell no longer
+        holds ``old``; apply the rest to a copy and check that the copy has
+        the same rows, order, tags, columns and dtypes and differs only in the
+        applied cells; save once; re-read ``ref.feather`` and ``bibtex.bib``.
+
+        A tag, author or year cannot be changed here: the field list in
+        ``doi_audit.changesets.WRITABLE_FIELDS`` has none of them.
+        """
+        from .bibtex import BIBTEX_ALLOWED_TYPES
+        from .doi_audit import changesets as cs
+
+        rows = cs.normalize_changes(changes)
+        if self.needs_reload:
+            self.reset()
+        original = self.ref_df
+        cs.validate_changes(rows, original, BIBTEX_ALLOWED_TYPES, allow_book_change=bool(reverts))
+
+        path, changeset = cs.new_changeset(self.config_path, name, rows, reverts=reverts)
+
+        position = {tag: i for i, tag in enumerate(original["tag"])}
+        cells = []
+        for row in rows:
+            i = position[row["tag"]]
+            if cs.cell_value(original[row["field"]].iat[i]) == row["old"]:
+                cells.append((i, row["field"], row["new"]))
+                row["outcome"] = cs.APPLIED
+            else:
+                row["outcome"], row["note"] = cs.SKIPPED, cs.CHANGED_SINCE_REVIEW
+
+        if not cells:
+            changeset["outcome"] = cs.SKIPPED
+            cs.write_changeset(path, changeset)
+            return path
+
+        try:
+            changed = self._set_ref_cells(original.copy(), cells)
+            self._check_only_cells_changed(original, changed, cells)
+            self._ref_df = changed
+            self.save()
+            self._verify_cells_on_disk(cells, [row["tag"] for row in rows if row["outcome"] == cs.APPLIED])
+        except Exception as e:
+            # drop the changed frame: the next read comes from disk
+            self.reset()
+            for row in rows:
+                if row["outcome"] == cs.APPLIED:
+                    row["outcome"], row["note"] = cs.FAILED, "not confirmed; see the changeset error"
+            changeset["outcome"], changeset["error"] = cs.FAILED, f"{type(e).__name__}: {e}"
+            cs.write_changeset(path, changeset)
+            raise
+
+        changeset["outcome"] = cs.APPLIED
+        cs.write_changeset(path, changeset)
+        logger.info("Applied %s of %s field changes; changeset %s", len(cells), len(rows), path.name)
+        return path
+
+    @staticmethod
+    def _set_ref_cells(frame: pd.DataFrame, cells: list[tuple[int, str, str | None]]) -> pd.DataFrame:
+        """Set ``(row position, column, value)`` cells on ``frame`` and return it."""
+        for i, column, value in cells:
+            frame.iloc[i, frame.columns.get_loc(column)] = value
+        return frame
+
+    @staticmethod
+    def _check_only_cells_changed(original: pd.DataFrame, changed: pd.DataFrame, cells) -> None:
+        """
+        Raise unless ``changed`` is ``original`` with exactly ``cells`` altered.
+
+        Raises
+        ------
+        RuntimeError
+            If rows, order, tags, columns or dtypes differ, or the set of
+            differing cells is not the set applied.
+        """
+        if not original.index.equals(changed.index) or list(original.columns) != list(changed.columns):
+            raise RuntimeError("Field changes altered the rows or columns of the references.")
+        if not original["tag"].equals(changed["tag"]):
+            raise RuntimeError("Field changes altered a tag.")
+        if not original.dtypes.equals(changed.dtypes):
+            raise RuntimeError("Field changes altered a column dtype.")
+        same = (original == changed) | (original.isna() & changed.isna())
+        rows_at, cols_at = np.nonzero(~same.to_numpy(dtype=bool, na_value=False))
+        differing = {(int(i), original.columns[j]) for i, j in zip(rows_at, cols_at)}
+        expected = {(i, column) for i, column, _ in cells}
+        if differing != expected:
+            stray = sorted(differing ^ expected)[:5]
+            raise RuntimeError(f"Field changes touched cells outside the batch, or missed some: {stray}")
+
+    def _verify_cells_on_disk(self, cells, tags: list[str]) -> None:
+        """
+        Confirm a saved batch from the files, not from memory.
+
+        Raises
+        ------
+        RuntimeError
+            If ``ref.feather`` does not hold an applied value at its tag, or
+            ``bibtex.bib`` has a different number of entries from the references.
+        """
+        from .doi_audit.changesets import cell_value
+
+        disk = pd.read_feather(self.config_path / "ref.feather")
+        for (i, column, value), tag in zip(cells, tags):
+            if disk["tag"].iat[i] != tag or cell_value(disk[column].iat[i]) != value:
+                raise RuntimeError(f"After the save, ref.feather does not hold the change to {tag}.{column}.")
+        text = (self.config_path / "bibtex.bib").read_text(encoding="utf-8")
+        if count_bibtex_entries(text) != bibtex_entry_rows(disk):
+            raise RuntimeError("After the save, bibtex.bib and ref.feather disagree on the number of references.")
+
     def update_reference(self, old_tag: str, new_data: dict) -> list[str]:
         """
         Replace a reference's fields with ``new_data``, or add a new reference.

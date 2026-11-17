@@ -496,3 +496,27 @@ if the OpenAlex counts prove sufficient.
 - An existing `bibtex.bak` in a library folder is left in place; nothing writes or reads it now.
 - Tests: `tests/test_bibtex_write.py` (8). Gate: `uv run --extra test pytest -q`, 159 passed,
   26 skipped.
+
+### 2.16.0a3 [changeset commit] (2026-11-17)
+
+- **Measured on the live library** (read only): the six writable columns are all `str` dtype
+  and hold both missing values and empty strings (`doi`: 253 missing, 4,150 empty). So a
+  changeset records a missing value as `null` and an empty string as `""`, the compare and swap
+  tells them apart, and a revert restores whichever was there.
+- **Divergence: a new module**, `doi_audit/changesets.py`, holds the rules and the changeset
+  files; `Library.apply_field_changes` is the write. The plan's file list did not have it.
+- **Divergence: a refused batch writes no changeset.** Validation raises `ValueError` for the
+  whole batch before anything is written, so "a changeset file exists for every outcome" means
+  the outcomes `applied`, `skipped` (no row applied) and `failed`.
+- **Divergence: further refusals** beyond the plan's list: a field that is not a column of
+  `ref.feather`, a tag on more than one reference, the same cell twice, a row that changes
+  nothing, and an entry type BibTeX does not accept.
+- **Divergence: a revert may restore a book's type.** A change from `article` to `book` is
+  allowed, and its inverse would otherwise be refused. `reverts=` on `apply_field_changes`
+  lifts the book rule and nothing else.
+- `doi-audit-revert` with no argument lists the changesets.
+- The `qd` table printer fails on a column of empty strings (the open [import-bibtex-vv] item
+  in `TODO.md`), so the revert command shows `(missing)`, `(empty)` and `-`.
+- Tests: `tests/test_doi_audit_changesets.py` (24). Gate: `.venv\Scripts\python -m pytest -q`,
+  183 passed, 26 skipped. `uv run` could not be used: the running `archivum serve` holds
+  `archivum.exe`, and `uv` wants to rebuild it for the new version.

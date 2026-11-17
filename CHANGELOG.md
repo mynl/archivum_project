@@ -5,6 +5,20 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a3 (2026-11-17)
+
+### Added
+
+- `Library.apply_field_changes`, the commit path for the coming DOI audit. It
+  writes only `doi`, `type`, `journal`, `volume`, `number` and `pages`, one
+  cell at a time, and only where the cell still holds the reviewed value.
+  A tag, author or year cannot be changed through it, nor the type of a book.
+- Every commit leaves a changeset file in `<library>/doi-audit/changesets/`
+  with the old value, new value and outcome of each row.
+- `archivum doi-audit-revert <changeset> -x` puts a changeset's cells back,
+  leaving any cell edited since. Without `-x` it shows what would change;
+  with no changeset it lists them.
+
 ## 2.16.0a2 (2026-11-17)
 
 ### Changed

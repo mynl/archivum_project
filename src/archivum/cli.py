@@ -657,6 +657,79 @@ def clean_audit(days, execute):
 
 # ========================================================================================
 @entry.command()
+@click.argument("changeset", type=str, required=False)
+@click.option(
+    "-x",
+    "--execute",
+    is_flag=True,
+    show_default=True,
+    help="Actually revert; otherwise, show what would be reverted.",
+)
+def doi_audit_revert(changeset, execute):
+    """
+    Revert a changeset committed by the DOI audit.
+
+    \b
+    CHANGESET is a file name from <library>/doi-audit/changesets, with or
+    without .json. With no CHANGESET, list the changesets.
+
+    A revert is a changeset of its own: each applied cell is put back only if
+    it still holds the value the changeset wrote, so a later edit is kept.
+    Nothing is written without -x --execute.
+    """
+    from .doi_audit import changesets as cs
+
+    lib = LibraryContext.get()
+    if lib.is_empty:
+        click.echo("No library open. Returning")
+        return
+
+    if not changeset:
+        rows = []
+        for p in cs.list_changesets(lib.config_path):
+            content = cs.read_changeset(p)
+            rows.append({
+                "changeset": p.stem,
+                "outcome": content["outcome"],
+                "rows": len(content["rows"]),
+                "applied": sum(r["outcome"] == cs.APPLIED for r in content["rows"]),
+                "reverts": Path(content["reverts"]).stem if content["reverts"] else "-",
+            })
+        if rows:
+            qd(pd.DataFrame(rows))
+        else:
+            click.echo("No changesets.")
+        return
+
+    try:
+        path = cs.find_changeset(lib.config_path, changeset)
+    except FileNotFoundError as e:
+        click.secho(str(e), fg="red")
+        return
+    inverse = cs.inverse_changes(cs.read_changeset(path))
+    if not inverse:
+        click.secho(f"{path.stem} applied no changes; nothing to revert.", fg="yellow")
+        return
+
+    # a column of empty strings stops greater_tables 5.2.1, so empty and missing are named
+    report = pd.DataFrame(inverse)[["tag", "field", "old", "new"]]
+    for column in ("old", "new"):
+        report[column] = ["(missing)" if v is None else v or "(empty)" for v in report[column]]
+    qd(report.rename(columns={"old": "current", "new": "restored"}))
+    if not execute:
+        click.secho(f"\nDRY RUN: {len(inverse)} cells. Use -x --execute to revert.", fg="yellow")
+        return
+
+    result = cs.read_changeset(lib.apply_field_changes(inverse, f"revert-{path.stem}", reverts=path.name))
+    applied = sum(r["outcome"] == cs.APPLIED for r in result["rows"])
+    skipped = [r for r in result["rows"] if r["outcome"] == cs.SKIPPED]
+    click.secho(f"\nReverted {applied} cells.", fg="green")
+    for r in skipped:
+        click.secho(f"Left alone, {r['note']}: {r['tag']}.{r['field']}", fg="yellow")
+
+
+# ========================================================================================
+@entry.command()
 @click.argument("tag", type=str)
 @click.option(
     "-i",
