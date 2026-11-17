@@ -8,11 +8,16 @@ A record is a dict with the fields of an observation line: ``source``,
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ElementTree
 from urllib.parse import quote
 
 from .. import egress
 from .doi import doi_key, plain_title
 
+ARXIV_QUERY = "https://export.arxiv.org/api/query"
+# identifiers in one arXiv request
+ARXIV_BATCH = 100
+_ATOM = {"atom": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 CROSSREF_WORKS = "https://api.crossref.org/works"
 DOI_ORG = "https://doi.org"
 OPENALEX_WORKS = "https://api.openalex.org/works"
@@ -303,3 +308,67 @@ def openalex_search(client: egress.Egress, title: str) -> list[dict]:
     if response.status_code != 200:
         raise SourceError(f"OpenAlex answered HTTP {response.status_code}")
     return [_openalex_record(work) for work in response.json().get("results", [])]
+
+
+def arxiv_records(client: egress.Egress, identifiers: list[str]) -> dict[str, dict]:
+    """
+    Ask arXiv for the records of the given identifiers, in one request.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run; arXiv is asked once in three seconds
+        whatever the mode.
+    identifiers : list of str
+        At most :data:`ARXIV_BATCH` identifiers without versions.
+
+    Returns
+    -------
+    dict
+        ``identifier -> record`` for those arXiv has. Besides the usual
+        fields a record has ``doi``, the DOI of the published version when the
+        authors have given one (``None`` otherwise), and ``journal_ref``, their
+        free-text reference to it.
+
+    Raises
+    ------
+    SourceError
+        If the status is not 200 or the answer is not the Atom feed expected.
+    """
+    if len(identifiers) > ARXIV_BATCH:
+        raise ValueError(f"At most {ARXIV_BATCH} identifiers in one request")
+    response = client.get(ARXIV_QUERY, params={"id_list": ",".join(identifiers), "max_results": len(identifiers)},
+                          kind=egress.SEARCH)
+    if response.status_code != 200:
+        raise SourceError(f"arXiv answered HTTP {response.status_code}")
+    try:
+        feed = ElementTree.fromstring(response.text)
+    except ElementTree.ParseError as e:
+        raise SourceError(f"arXiv answered with something that is not XML: {e}") from e
+
+    def text(entry, path):
+        node = entry.find(path, _ATOM)
+        return " ".join(node.text.split()) if node is not None and node.text else None
+
+    wanted = {i.lower(): i for i in identifiers}
+    found: dict[str, dict] = {}
+    for entry in feed.findall("atom:entry", _ATOM):
+        # the id is an address ending in the identifier and a version: .../abs/1901.00001v2
+        address = text(entry, "atom:id") or ""
+        versioned = address.rsplit("/abs/", 1)[-1]
+        bare = versioned.rsplit("v", 1)[0] if "v" in versioned else versioned
+        identifier = wanted.get(bare.lower())
+        if identifier is None:
+            continue
+        doi = text(entry, "arxiv:doi")
+        published = text(entry, "atom:published") or ""
+        found[identifier] = {
+            "source": "arxiv",
+            "source_id": identifier,
+            "doi": doi_key(doi) if doi else None,
+            "journal_ref": text(entry, "arxiv:journal_ref"),
+            "title": text(entry, "atom:title"),
+            "year": int(published[:4]) if published[:4].isdigit() else None,
+            "first_author": text(entry, "atom:author/atom:name"),
+        }
+    return found

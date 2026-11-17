@@ -7,14 +7,14 @@
         <span>
             {% if run.active %}
             <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-            <strong>{{ {'check': 'Checking DOIs', 'search': 'Searching for missing DOIs'}.get(s.action, 'Fetching citation counts') }}</strong>{% if s.phase %}, asking {{ s.phase }}{% endif %}:
+            <strong>{{ {'check': 'Checking DOIs', 'search': 'Searching for missing DOIs', 'published': 'Looking for published versions'}.get(s.action, 'Fetching citation counts') }}</strong>{% if s.phase %}, asking {{ s.phase }}{% endif %}:
             {% else %}
-            <strong>Last {{ {'check': 'DOI check', 'search': 'DOI search'}.get(s.action, 'count run') }} {{ s.status }}</strong> {{ s.get('finished', s.updated).replace('T', ' ')[:16] }} UTC:
+            <strong>Last {{ {'check': 'DOI check', 'search': 'DOI search', 'published': 'search for published versions'}.get(s.action, 'count run') }} {{ s.status }}</strong> {{ s.get('finished', s.updated).replace('T', ' ')[:16] }} UTC:
             {% endif %}
             {{ '{:,}'.format(s.done) }} of {{ '{:,}'.format(s.total) }} references,
             {{ '{:,}'.format(s.requests) }} of {{ '{:,}'.format(s.requests_planned) }} requests, {{ s.mode }}, {{ run.elapsed }}.
             {% if s.action == 'search' %}Something found for {{ '{:,}'.format(s.found) }}, nothing for {{ '{:,}'.format(s.not_found) }}.
-            {% elif s.action != 'check' %}Found {{ '{:,}'.format(s.found) }}, not at OpenAlex {{ '{:,}'.format(s.not_found) }}.{% endif %}
+            {% elif s.action not in ('check', 'published') %}Found {{ '{:,}'.format(s.found) }}, not at OpenAlex {{ '{:,}'.format(s.not_found) }}.{% endif %}
             {% if s.errors %}<span class="text-danger">Errors: {{ '{:,}'.format(s.errors) }}.</span>{% endif %}
             {% if run.budget %}OpenAlex credits left today: {{ '{:,.0f}'.format(run.budget[0]) }} of {{ '{:,.0f}'.format(run.budget[1]) }}.{% endif %}
             {% for host, reason in run.stopped_hosts.items() %}<span class="text-danger">{{ host }} stopped: {{ reason }}.</span>{% endfor %}

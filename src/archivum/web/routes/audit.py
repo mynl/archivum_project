@@ -13,10 +13,13 @@ from ... import egress
 from ...cli import LibraryContext
 from ...doi_audit import changesets as cs
 from ...doi_audit import journal, runner
-from ...doi_audit.doi import MALFORMED, NOT_CHECKED, NOT_SEARCHED, WORK_NO_DOI, normalize_doi
+from ...doi_audit.doi import (
+    MALFORMED, NOT_CHECKED, NOT_SEARCHED, PUBLISHED_OTHER_YEAR, PUBLISHED_SAME_YEAR, WORK_NO_DOI, normalize_doi,
+)
 from ...doi_audit.proposals import (
-    CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, SEARCH_CLASSES, SEARCH_COMMIT_CLASSES, check_counts,
-    check_rows, checked_dois, local_proposals, search_counts, searched_references, subset_rows, summarize,
+    BACKFILL_FIELDS, CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, PUBLISHED_CLASSES, SEARCH_CLASSES,
+    SEARCH_COMMIT_CLASSES, check_counts, check_rows, checked_dois, local_proposals, published_counts,
+    published_versions, search_counts, searched_references, subset_rows, summarize,
 )
 from ...utilities import clean_latex
 from ...search.universe import resolve_universe_tags
@@ -31,9 +34,11 @@ CHANGESETS_SHOWN = 20
 COUNTS_CLASS = "counts"
 CHECK_CLASS = "check"
 SEARCH_CLASS = "search"
-COUNTS_ACTION, CHECK_ACTION, SEARCH_ACTION = "counts", "check", "search"
+PUBLISHED_CLASS = "published"
+COUNTS_ACTION, CHECK_ACTION, SEARCH_ACTION, PUBLISHED_ACTION = "counts", "check", "search", "published"
 # what the page shows when a run of each kind ends
-RESULT_CLASS = {COUNTS_ACTION: COUNTS_CLASS, CHECK_ACTION: CHECK_CLASS, SEARCH_ACTION: SEARCH_CLASS}
+RESULT_CLASS = {COUNTS_ACTION: COUNTS_CLASS, CHECK_ACTION: CHECK_CLASS, SEARCH_ACTION: SEARCH_CLASS,
+                PUBLISHED_ACTION: PUBLISHED_CLASS}
 
 
 def _subset(lib, raw_query: str):
@@ -111,10 +116,14 @@ def _plan_view(lib, rows, action: str) -> dict:
     rows : pandas.DataFrame
         The references of the subset.
     action : str
-        ``counts``, ``check`` or ``search``.
+        ``counts``, ``check``, ``search`` or ``published``.
     """
     days = lib.config.doi_audit_refresh_days
-    if action == SEARCH_ACTION:
+    if action == PUBLISHED_ACTION:
+        plan = runner.plan_published(lib.config_path, rows, days)
+        most = plan.requests_most
+        durations = {mode: (plan.seconds(mode), plan.seconds(mode, most)) for mode in egress.MODES}
+    elif action == SEARCH_ACTION:
         plan = runner.plan_search(lib.config_path, rows, lib.config.doi_audit_search_days)
         most = plan.requests_most
         durations = {mode: (plan.seconds(mode), plan.seconds(mode, most)) for mode in egress.MODES}
@@ -153,6 +162,12 @@ def _searched(lib, rows) -> list:
     """Every reference of the subset with no DOI, with its class from the searches in the journal."""
     return searched_references(rows, journal.latest_observations(lib.config_path),
                                journal.rejected_proposals(lib.config_path), journal.accepted_works(lib.config_path))
+
+
+def _published(lib, rows) -> list:
+    """Every preprint of the subset, with what is known of its published version."""
+    return published_versions(rows, journal.latest_observations(lib.config_path),
+                              journal.settled_published(lib.config_path))
 
 
 def _summary(lib, rows, checked=None, searched=None) -> dict:
@@ -248,6 +263,19 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
             "can_commit": cls in SEARCH_COMMIT_CLASSES,
             "can_accept_work": cls == WORK_NO_DOI,
             "pills": [(c, label, counts[c]) for c, label in SEARCH_CLASSES.items()],
+        }
+    elif cls == PUBLISHED_CLASS or cls in PUBLISHED_CLASSES:
+        published = _published(lib, rows)
+        counts = published_counts(published)
+        if cls == PUBLISHED_CLASS:
+            cls = next((c for c in PUBLISHED_CLASSES if counts[c]), next(iter(PUBLISHED_CLASSES)))
+        shown, page, pages = _page_of([p for p in published if p.cls == cls], page)
+        review = {
+            "kind": "published", "cls": cls, "label": PUBLISHED_CLASSES[cls], "total": counts[cls], "page": page,
+            "pages": pages,
+            "rows": [{"p": p, "old_json": "null", "unit_json": json.dumps(p.unit)} for p in shown],
+            "can_commit": False, "can_backfill": cls == PUBLISHED_SAME_YEAR, "can_import": cls == PUBLISHED_OTHER_YEAR,
+            "pills": [(c, label, counts[c]) for c, label in PUBLISHED_CLASSES.items()],
         }
     return render_template(
         "components/audit_body.html",
@@ -410,9 +438,9 @@ def audit_revert():
 
 
 def _action() -> str:
-    """The run a request is about: ``check``, ``search``, or ``counts`` by default."""
+    """The run a request is about: ``check``, ``search``, ``published``, or ``counts`` by default."""
     action = request.values.get("action")
-    return action if action in (CHECK_ACTION, SEARCH_ACTION) else COUNTS_ACTION
+    return action if action in (CHECK_ACTION, SEARCH_ACTION, PUBLISHED_ACTION) else COUNTS_ACTION
 
 
 @bp.route('/audit/plan')
@@ -440,7 +468,10 @@ def audit_run():
         rows = _subset(lib, raw_query)
     except ValueError as e:
         return _render_body(lib, raw_query, cls, page, f"Query not understood: {e}", "danger")
-    if action == SEARCH_ACTION:
+    if action == PUBLISHED_ACTION:
+        plan = runner.plan_published(lib.config_path, rows, days)
+        make, what = runner.PublishedRun, "Search for published versions"
+    elif action == SEARCH_ACTION:
         plan = runner.plan_search(lib.config_path, rows, lib.config.doi_audit_search_days)
         make, what = runner.SearchRun, "Search"
     elif action == CHECK_ACTION:
@@ -457,7 +488,7 @@ def audit_run():
         return _render_body(lib, raw_query, cls, page, f"Not started. {e}", "warning")
     return _render_body(lib, raw_query, cls, page,
                         f"{what} started: {plan.tags:,} references, {plan.requests:,} requests or more, {mode}."
-                        if action in (CHECK_ACTION, SEARCH_ACTION) else
+                        if action in (CHECK_ACTION, SEARCH_ACTION, PUBLISHED_ACTION) else
                         f"{what} started: {plan.tags:,} references in {plan.requests:,} requests, {mode}.")
 
 
@@ -539,3 +570,101 @@ def audit_accept_work():
     ])
     return _render_body(lib, raw_query, cls, page,
                         f"Accepted {len(ticked)} works. Fetch citation counts collects their counts.")
+
+
+@bp.route('/audit/published/commit', methods=['POST'])
+@admin_required
+def audit_published_commit():
+    """
+    Fill in the ticked preprints from their published versions of the same year.
+
+    Each ticked row is a unit of up to six cells (DOI, type, journal, volume,
+    number, pages), written whole or not at all: a unit with any cell that no
+    longer holds its reviewed value is left out and reported. The tag, author
+    and year are not among the cells.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    raw_query, cls, page = _form_state()
+    ticked = request.form.getlist("row")
+    if not ticked:
+        return _render_body(lib, raw_query, cls, page, "No rows ticked.", "warning")
+
+    current = lib.ref_df.set_index("tag")
+    changes, stale = [], []
+    for key in ticked:
+        tag = key.rpartition("|")[0]
+        unit = [cell for cell in json.loads(request.form.get(f"unit::{key}", "[]")) if cell[0] in BACKFILL_FIELDS]
+        if tag not in current.index or any(cs.cell_value(current.at[tag, name]) != old for name, old, _new in unit):
+            stale.append(tag)
+            continue
+        changes += [{"tag": tag, "field": name, "old": old, "new": new,
+                     "evidence": {"class": cls, "published_doi": request.form.get(f"proposed::{key}", "")}}
+                    for name, old, new in unit]
+    if not changes:
+        return _render_body(lib, raw_query, cls, page,
+                            f"Nothing committed: changed since review: {', '.join(stale)}.", "warning")
+    try:
+        path = lib.apply_field_changes(changes, "audit-published")
+    except ValueError as e:
+        return _render_body(lib, raw_query, cls, page, f"Nothing committed. {e}", "danger")
+    except Exception as e:
+        logger.error("Audit published commit failed: %s", e, exc_info=True)
+        return _render_body(lib, raw_query, cls, page, f"Commit failed, see the newest changeset. {e}", "danger")
+
+    result = cs.read_changeset(path)
+    applied = sum(r["outcome"] == cs.APPLIED for r in result["rows"])
+    done = len(ticked) - len(stale)
+    message = f"Filled in {done} {'reference' if done == 1 else 'references'}, {applied} cells, as {path.stem}."
+    if stale:
+        message += f" Left out, changed since review: {', '.join(stale)}."
+    return _render_body(lib, raw_query, cls, page, message, "warning" if stale else "success")
+
+
+@bp.route('/audit/published/preview', methods=['POST'])
+@admin_required
+def audit_published_preview():
+    """Show what the importer would add for a published version, without adding it."""
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    bibtex = request.form.get("bibtex", "").strip()
+    if not bibtex:
+        return render_template("components/alert.html", level="warning", classes="py-2 small mb-0", message="The entry is empty.")
+    try:
+        preview = lib.preview_staged_document_import(bibtex)
+    except Exception as e:
+        logger.error("Published version preview failed: %s", e, exc_info=True)
+        return render_template("components/alert.html", level="danger", classes="py-2 small mb-0", message=f"Preview failed: {e}")
+    return render_template("components/audit_published_preview.html", preview=preview)
+
+
+@bp.route('/audit/published/import', methods=['POST'])
+@admin_required
+def audit_published_import():
+    """
+    Add a published version as a new reference beside its preprint.
+
+    The preprint's reference is left as it is. The new reference is made by
+    the importer, which allocates its tag, and is linked to the preprint's
+    primary document. The pair is recorded in ``decisions.jsonl``, after
+    which the published version is not proposed for the preprint again.
+    """
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    raw_query, cls, page = _form_state()
+    tag, bibtex = request.form.get("tag", ""), request.form.get("bibtex", "").strip()
+    doi = request.form.get("doi", "")
+    if not bibtex:
+        return _render_body(lib, raw_query, cls, page, "Nothing imported: the entry is empty.", "warning")
+    try:
+        new_tag = lib.add_published_version(tag, bibtex)
+    except ValueError as e:
+        return _render_body(lib, raw_query, cls, page, f"Nothing imported. {e}", "danger")
+    except Exception as e:
+        logger.error("Published version import failed: %s", e, exc_info=True)
+        return _render_body(lib, raw_query, cls, page, f"Import failed: {e}", "danger")
+    journal.append_lines(lib.config_path, journal.DECISIONS, [
+        {"decision": journal.PUBLISHED_IMPORTED, "class": cls, "tag": tag, "new_tag": new_tag, "doi": doi}])
+    LibraryContext.refresh()
+    return _render_body(lib, raw_query, cls, page,
+                        f"Added {new_tag} for the published version of {tag}, which is unchanged. Both open the same document.")

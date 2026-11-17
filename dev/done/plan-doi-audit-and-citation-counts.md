@@ -747,3 +747,46 @@ if the OpenAlex counts prove sufficient.
 - **Left for the user:** the search over the real library (4,403 references: about 75 minutes
   polite at Crossref, then OpenAlex for the misses over as many days as the credits take), and
   the run summary.
+
+### 2.16.0a12 [published versions] (2026-11-17)
+
+- **Measured on the real library** (read only, counts only): 773 references have an arXiv
+  identifier (765 in `eprint`, 711 in `arxivId`, 8 only in an arXiv `url`); 428 of them have a
+  journal already. A preprint is taken to be one with an identifier and no journal: 345
+  references, of which 81 have a DOI. So the run is 4 arXiv requests and at most 345 Crossref
+  lookups. 48 `eprint` values are a bare seven digits, the old identifier with its archive
+  lost; `arxivId` is tried first, which has the archive for most of them.
+- **One real request to arXiv** for three public preprints confirmed the Atom parsing: the
+  authors' DOI and journal reference came back for the one that has them.
+- **Divergence: Crossref's `is-preprint-of` is not used.** arXiv's own DOIs are registered
+  with DataCite, so Crossref has no record of an arXiv preprint to hold that relation. The
+  journal DOI comes from the arXiv record, or from the reference itself when it already has a
+  DOI that is not arXiv's.
+- **Divergence: no title search here.** A preprint whose arXiv record gives a journal
+  reference and no DOI is `possibly published`, and its note points to Find missing DOIs, which
+  searches Crossref by title and prefers a journal DOI to a preprint's. Once that DOI is
+  committed, the next Find published versions takes the reference's own DOI to Crossref and
+  proposes the backfill or the new reference.
+- **Divergence: "same year" is the same year exactly**, as P1 says; a year apart is a
+  different year, and gives a new reference.
+- **Divergence: a backfill is whole or nothing by a check in the route.** Before
+  `apply_field_changes` is called, every cell of a ticked unit must still hold its reviewed
+  value, else the unit is left out and named. The compare and swap inside the commit path
+  still applies cell by cell after that.
+- **Divergence: a new method, `Library.add_published_version`**, holds the import and the link
+  so that the route stays thin and the acceptance is tested on the library.
+- **Divergence: the different-year proposal is one row with its own buttons** (Preview, Import
+  as a new reference, Reject), not a tick box, since each has an entry to read and edit.
+- **Divergence: an imported published version is not a changeset.** It is an import, undone by
+  deleting the new reference in Edit. The pair is in `decisions.jsonl` (`published version
+  imported`, with both tags and the DOI).
+- **Seen in the browser check:** the importer drops protective braces inside a title
+  (`{L}ater` became `Later` in the new reference). That is the importer's behavior for every
+  Ingest, not something added here; the preprint's own title is untouched.
+- The XML from arXiv is parsed with the standard library's `ElementTree`.
+- `PublishedRun` reuses the Crossref answers a DOI check has already collected, and the other
+  way round: both file them as `(tag, crossref, doi, key)`.
+- Browser check on a temp library with fake sources: plan, run, Fill in ticked, Preview,
+  Import as a new reference; no console errors.
+- Tests: `tests/test_doi_audit_published.py` (30), including the importer on a temp library.
+- **Left for the user:** Find published versions on the real library; review each proposal.

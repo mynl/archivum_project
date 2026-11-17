@@ -1170,6 +1170,58 @@ class Library(LibraryBase):
         if count_bibtex_entries(text) != bibtex_entry_rows(disk):
             raise RuntimeError("After the save, bibtex.bib and ref.feather disagree on the number of references.")
 
+    def add_published_version(self, preprint_tag: str, bibtex_text: str) -> str:
+        """
+        Add the published version of a preprint as a new reference to the same document.
+
+        The preprint's reference is not touched: every citation of its tag
+        still resolves. The new reference goes through the same importer as
+        Ingest's reference-only import, so its tag is allocated there, from
+        the published author and year.
+
+        Parameters
+        ----------
+        preprint_tag : str
+            The existing reference, a preprint.
+        bibtex_text : str
+            One BibTeX entry for the published version. Its cite key is not
+            used.
+
+        Returns
+        -------
+        str
+            The tag of the new reference.
+
+        Raises
+        ------
+        ValueError
+            If ``preprint_tag`` is not in the library, or the importer adds no
+            reference.
+
+        Notes
+        -----
+        The title duplicates the preprint's by design, so the importer is told
+        to keep a duplicate. The preprint's primary document, when it has one,
+        becomes the new reference's primary document too; the document then
+        has two references, which the store already allows.
+        """
+        if preprint_tag not in self.ref_df["tag"].values:
+            raise ValueError(f"Tag '{preprint_tag}' not found in references.")
+        document = self.primary_doc(preprint_tag)
+        before = set(self.ref_df["tag"])
+
+        importer = self.import_staged_document(
+            bibtex_text, None, source_label="doi-audit-published", allow_duplicate=True)
+        added = [str(tag) for tag in importer.ref_df["tag"] if str(tag) not in before] if not importer.ref_df.empty else []
+        if len(added) != 1:
+            raise ValueError(f"The importer added {len(added)} references for the published version of {preprint_tag}.")
+        new_tag = added[0]
+        if document is not None:
+            # link_document reads the frames directly, and the import has just reset them
+            self.doc_df, self.ref_doc_df
+            self.link_document(new_tag, str(document["hash"]), int(document["version"]), primary=True)
+        return new_tag
+
     def update_reference(self, old_tag: str, new_data: dict) -> list[str]:
         """
         Replace a reference's fields with ``new_data``, or add a new reference.

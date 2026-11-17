@@ -32,8 +32,8 @@ from .. import egress
 from . import journal, sources
 from .changesets import cell_value
 from .doi import (
-    ATTENTION, NOT_FOUND, VERIFIED, YEAR_DIFFERS, classify_candidates, classify_stored_doi, doi_key, first_surname,
-    fold, match,
+    ATTENTION, NOT_FOUND, VERIFIED, YEAR_DIFFERS, arxiv_id, classify_candidates, classify_stored_doi, doi_key,
+    first_surname, fold, is_arxiv_doi, match,
 )
 
 logger = logging.getLogger(__name__)
@@ -631,6 +631,32 @@ class Run:
     def _answered(self, observation: dict) -> None:
         """Hook: an answer has arrived. A run that plans later phases from earlier answers keeps it."""
 
+    def _stage(self, tag: str) -> str | None:
+        """Hook: the stage a reference is at, ``None`` when it is settled. A run with one phase settles everything."""
+        return None
+
+    def _single_jobs(self, source: str, work: dict[str, list[str]], ask_source) -> list[tuple]:
+        """Jobs asking ``source`` about one DOI each; ``ask_source(key)`` returns a record, or ``None`` for not found."""
+        def record(key, answer, error=""):
+            observations = []
+            for tag in work[key]:
+                base = {"run_id": self.run_id, "tag": tag, "source": source, "query_kind": "doi", "query": key}
+                if error:
+                    observations.append({**base, "status": journal.ERROR, "error": error})
+                    continue
+                observations.append({**base, "status": journal.OK, **answer} if answer is not None
+                                    else {**base, "status": journal.NOT_FOUND})
+                self._answered(observations[-1])
+            journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
+            tags = work[key]
+            settled = len(tags) if error else sum(self._stage(tag) is None for tag in tags)
+            self.tally(requests=1, done=settled, errors=len(tags) if error else 0,
+                       found=0 if error or answer is None else len(tags),
+                       not_found=len(tags) if not error and answer is None else 0)
+
+        return [(lambda key=key: record(key, ask_source(key)), lambda message, key=key: record(key, None, error=message))
+                for key in work]
+
 
 class CountsRun(Run):
     """
@@ -731,28 +757,6 @@ class CheckRun(Run):
             if self._stage(tag) == stage:
                 work.setdefault(reference["key"], []).append(tag)
         return work
-
-    def _single_jobs(self, source: str, work: dict[str, list[str]], ask_source) -> list[tuple]:
-        """Jobs asking ``source`` about one DOI each; ``ask_source(key)`` returns a record, or ``None`` for not found."""
-        def record(key, answer, error=""):
-            observations = []
-            for tag in work[key]:
-                base = {"run_id": self.run_id, "tag": tag, "source": source, "query_kind": "doi", "query": key}
-                if error:
-                    observations.append({**base, "status": journal.ERROR, "error": error})
-                    continue
-                observations.append({**base, "status": journal.OK, **answer} if answer is not None
-                                    else {**base, "status": journal.NOT_FOUND})
-                self._answered(observations[-1])
-            journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
-            tags = work[key]
-            settled = len(tags) if error else sum(self._stage(tag) is None for tag in tags)
-            self.tally(requests=1, done=settled, errors=len(tags) if error else 0,
-                       found=0 if error or answer is None else len(tags),
-                       not_found=len(tags) if not error and answer is None else 0)
-
-        return [(lambda key=key: record(key, ask_source(key)), lambda message, key=key: record(key, None, error=message))
-                for key in work]
 
     def phases(self):
         yield "OpenAlex", self._openalex_jobs(
@@ -964,6 +968,257 @@ class SearchRun(Run):
         yield "OpenAlex", self._search_jobs(
             "openalex", [tag for tag in self.plan.references if self._stage(tag) == OPENALEX_SEARCH],
             lambda r: sources.openalex_search(self.client, r["title"]))
+
+
+ARXIV_STAGE = "arxiv"
+
+
+def reference_arxiv_id(row: dict) -> str | None:
+    """
+    The arXiv identifier of a reference, from ``arxivId``, ``eprint`` or an arXiv ``url``.
+
+    A ``url`` is read only when it is an arXiv address, since other addresses
+    hold numbers of the same shape.
+    """
+    url = cell_value(row.get("url")) or ""
+    return arxiv_id(cell_value(row.get("arxivId")), cell_value(row.get("eprint")),
+                    url if "arxiv.org" in url.lower() else None)
+
+
+def published_doi(reference: dict, latest: dict) -> str | None:
+    """
+    The DOI of a preprint's published version, as far as is known.
+
+    The DOI the authors gave arXiv, else the reference's own DOI when that is
+    not an arXiv one. In compared form; ``None`` when neither exists.
+    """
+    arxiv = latest.get((reference["tag"], "arxiv", "arxiv_id", reference["arxiv"]))
+    given = arxiv.get("doi") if arxiv and arxiv.get("status") == journal.OK else None
+    if given and not is_arxiv_doi(given):
+        return given
+    return reference["own_doi"]
+
+
+def next_published_stage(reference: dict, latest: dict, refresh_days: float) -> str | None:
+    """
+    The next source to ask about a preprint's published version, or ``None`` when it is settled.
+
+    ``arxiv`` first, for the DOI the authors gave. Then ``crossref``, for the
+    record of that DOI, or of the reference's own DOI, which is where the
+    journal, volume, issue and pages come from.
+    """
+    arxiv = latest.get((reference["tag"], "arxiv", "arxiv_id", reference["arxiv"]))
+    if not journal.is_fresh(arxiv, refresh_days):
+        return ARXIV_STAGE
+    doi = published_doi(reference, latest)
+    if doi and not journal.is_fresh(latest.get((reference["tag"], "crossref", "doi", doi)), refresh_days):
+        return CROSSREF_STAGE
+    return None
+
+
+@dataclass
+class PublishedPlan:
+    """
+    What a search for published versions over a subset would do.
+
+    Attributes
+    ----------
+    subset : int
+        References in the subset.
+    not_arxiv : int
+        References with no arXiv identifier.
+    has_journal : int
+        arXiv references that already have a journal; taken as published.
+    fresh : int
+        Preprints asked about within the refresh period; skipped.
+    references : dict
+        ``tag -> {tag, title, author, year, arxiv, own_doi}`` still to ask about.
+    stages : dict
+        ``tag -> stage`` each of them is at.
+    refresh_days : float
+        The refresh period the plan was made with.
+    """
+
+    subset: int = 0
+    not_arxiv: int = 0
+    has_journal: int = 0
+    fresh: int = 0
+    references: dict[str, dict] = field(default_factory=dict)
+    stages: dict[str, str] = field(default_factory=dict)
+    refresh_days: float = 30.0
+
+    @property
+    def tags(self) -> int:
+        """The number of preprints to ask about."""
+        return len(self.references)
+
+    def at(self, stage: str) -> list[str]:
+        """The tags at a stage."""
+        return [tag for tag, s in self.stages.items() if s == stage]
+
+    @property
+    def arxiv_requests(self) -> int:
+        """Requests to arXiv, 100 identifiers each."""
+        return -(-len({self.references[tag]["arxiv"] for tag in self.at(ARXIV_STAGE)}) // sources.ARXIV_BATCH)
+
+    @property
+    def requests(self) -> int:
+        """The fewest requests: no preprint asked of arXiv has a published version."""
+        return self.arxiv_requests + len(self.at(CROSSREF_STAGE))
+
+    @property
+    def requests_most(self) -> int:
+        """The most requests: every preprint asked of arXiv has a DOI to look up at Crossref."""
+        return self.requests + len(self.at(ARXIV_STAGE))
+
+    def seconds(self, mode: str, requests: int | None = None) -> float:
+        """Estimate the duration in a mode: three seconds an arXiv request, the mode's pace for the rest."""
+        pace = egress.MODES[mode]
+        singles = (self.requests if requests is None else requests) - self.arxiv_requests
+        paced = self.arxiv_requests * egress.HOST_PACE[egress.ARXIV].search_interval + singles * pace.single_interval
+        return max(paced, singles * ASSUMED_LATENCY_SECONDS / pace.concurrency)
+
+
+def plan_published(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> PublishedPlan:
+    """
+    Work out what a search for published versions over ``rows`` would ask.
+
+    A reference is a preprint here when it has an arXiv identifier and no
+    journal.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder, for the journal.
+    rows : pandas.DataFrame
+        The references of the subset.
+    refresh_days : float
+        An answer newer than this is fresh and is not asked for again.
+
+    Returns
+    -------
+    PublishedPlan
+    """
+    plan = PublishedPlan(subset=len(rows), refresh_days=refresh_days)
+    latest = journal.latest_observations(library_path)
+    for row in rows.to_dict("records"):
+        reference = preprint_reference(row)
+        if reference is None:
+            if reference_arxiv_id(row):
+                plan.has_journal += 1
+            else:
+                plan.not_arxiv += 1
+            continue
+        stage = next_published_stage(reference, latest, refresh_days)
+        if stage is None:
+            plan.fresh += 1
+        else:
+            plan.references[row["tag"]] = reference
+            plan.stages[row["tag"]] = stage
+    return plan
+
+
+def preprint_reference(row: dict) -> dict | None:
+    """
+    Describe a reference as a preprint, or return ``None`` if it is not one.
+
+    Returns
+    -------
+    dict or None
+        ``tag``, ``title``, ``author``, ``year``, ``type``, ``arxiv`` (the
+        identifier) and ``own_doi`` (the reference's DOI in compared form when
+        it is a usable DOI that is not arXiv's own, else ``None``), for a
+        reference with an arXiv identifier and no journal.
+    """
+    identifier = reference_arxiv_id(row)
+    journal_name = cell_value(row.get("journal"))
+    if not identifier or (journal_name and journal_name.strip()):
+        return None
+    doi = cell_value(row.get("doi"))
+    usable = bool(doi and doi.strip()) and classify_stored_doi(doi) != ATTENTION and not is_arxiv_doi(doi)
+    return {"tag": row["tag"], "title": cell_value(row.get("title")), "author": cell_value(row.get("author")),
+            "year": cell_value(row.get("year")), "type": cell_value(row.get("type")),
+            "arxiv": identifier, "own_doi": doi_key(doi) if usable else None}
+
+
+class PublishedRun(Run):
+    """
+    A search for the published versions of preprints.
+
+    arXiv is asked first, 100 identifiers a request, for the DOI the authors
+    gave. Crossref is then asked for the record of each such DOI, one a
+    request. Only arXiv identifiers and DOIs are sent.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder.
+    plan : PublishedPlan
+        From :func:`plan_published`.
+    mode : str
+        ``egress.SPEEDY`` or ``egress.POLITE``; arXiv is paced the same in both.
+    client, on_progress
+        As for :class:`Run`.
+    """
+
+    action = "published"
+
+    def __init__(self, library_path: Path, plan: PublishedPlan, mode: str, *,
+                 client: egress.Egress | None = None, on_progress=None):
+        self.plan = plan
+        self.latest = dict(journal.latest_observations(library_path))
+        self._latest_lock = threading.Lock()
+        super().__init__(library_path, mode, total=plan.tags, requests_planned=plan.requests,
+                         client=client, on_progress=on_progress)
+
+    def _answered(self, observation: dict) -> None:
+        stamped = {"at": journal.now_utc(), **observation}
+        with self._latest_lock:
+            self.latest[(stamped["tag"], stamped["source"], stamped["query_kind"], stamped["query"])] = stamped
+
+    def _stage(self, tag: str) -> str | None:
+        with self._latest_lock:
+            return next_published_stage(self.plan.references[tag], self.latest, self.plan.refresh_days)
+
+    def _arxiv_jobs(self) -> list[tuple]:
+        """Jobs asking arXiv about the identifiers at the arXiv stage, 100 a request."""
+        work: dict[str, list[str]] = {}
+        for tag in self.plan.at(ARXIV_STAGE):
+            work.setdefault(self.plan.references[tag]["arxiv"], []).append(tag)
+        identifiers = list(work)
+        batches = [identifiers[i:i + sources.ARXIV_BATCH] for i in range(0, len(identifiers), sources.ARXIV_BATCH)]
+
+        def record(batch, found, error=""):
+            observations, tally = [], {"found": 0, "not_found": 0, "errors": 0, "done": 0}
+            for identifier in batch:
+                for tag in work[identifier]:
+                    base = {"run_id": self.run_id, "tag": tag, "source": "arxiv", "query_kind": "arxiv_id", "query": identifier}
+                    if error:
+                        observations.append({**base, "status": journal.ERROR, "error": error})
+                        tally["errors"] += 1
+                        tally["done"] += 1
+                        continue
+                    answer = found.get(identifier)
+                    observations.append({**base, "status": journal.OK, **answer} if answer
+                                        else {**base, "status": journal.NOT_FOUND})
+                    self._answered(observations[-1])
+                    tally["found" if answer else "not_found"] += 1
+                    tally["done"] += 1 if self._stage(tag) is None else 0
+            journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
+            self.tally(requests=1, **tally)
+
+        return [(lambda batch=batch: record(batch, sources.arxiv_records(self.client, batch)),
+                 lambda message, batch=batch: record(batch, {}, error=message)) for batch in batches]
+
+    def phases(self):
+        yield "arXiv", self._arxiv_jobs()
+        work: dict[str, list[str]] = {}
+        for tag, reference in self.plan.references.items():
+            if self._stage(tag) == CROSSREF_STAGE:
+                with self._latest_lock:
+                    doi = published_doi(reference, self.latest)
+                work.setdefault(doi, []).append(tag)
+        yield "Crossref", self._single_jobs("crossref", work, lambda key: sources.crossref_work(self.client, key))
 
 
 def format_duration(seconds: float) -> str:

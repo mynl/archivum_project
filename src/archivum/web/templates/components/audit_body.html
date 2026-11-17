@@ -6,6 +6,10 @@
 <input type="hidden" name="page" value="{{ shown.page if shown else 1 }}">
 {% endmacro %}
 
+{% macro cell(value) -%}
+    {% if value is none %}<span class="text-muted fst-italic">missing</span>{% elif value == '' %}<span class="text-muted fst-italic">empty</span>{% else %}{{ value }}{% endif %}
+{%- endmacro %}
+
 {% if message %}
 <div class="alert alert-{{ level }} py-2 small mb-3" id="audit-message">{{ message }}</div>
 {% endif %}
@@ -47,6 +51,16 @@
     </div>
     <div class="btn-group shadow-sm">
         <button class="btn btn-primary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "published"}' hx-include="#audit-search" hx-target="#audit-body">
+            Find published versions&hellip;
+        </button>
+        <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "published"}' hx-include="#audit-search" hx-target="#audit-body">
+            Show published versions
+        </button>
+    </div>
+    <div class="btn-group shadow-sm">
+        <button class="btn btn-primary btn-sm px-3 fw-bold"
                 hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
             Fetch citation counts&hellip;
         </button>
@@ -61,22 +75,26 @@
 {% set p = plan.plan %}
 {% set checking = plan.action == 'check' %}
 {% set searching = plan.action == 'search' %}
+{% set publishing = plan.action == 'published' %}
 <form id="audit-plan-form" class="card shadow-sm border-0 mb-4">
     {{ state() }}
     <input type="hidden" name="action" value="{{ plan.action }}">
     <div class="card-header bg-white">
-        <h6 class="fw-bold small text-uppercase mb-0">{{ 'Find missing DOIs at Crossref and OpenAlex' if searching else ('Check DOIs against OpenAlex, Crossref and doi.org' if checking else 'Fetch citation counts from OpenAlex') }}</h6>
+        <h6 class="fw-bold small text-uppercase mb-0">{{ 'Find the published versions of arXiv preprints' if publishing else 'Find missing DOIs at Crossref and OpenAlex' if searching else ('Check DOIs against OpenAlex, Crossref and doi.org' if checking else 'Fetch citation counts from OpenAlex') }}</h6>
     </div>
     <div class="card-body small">
         <p class="mb-2">
             Of {{ '{:,}'.format(p.subset) }} references in the subset,
-            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be {{ 'searched for' if searching else ('checked' if checking else 'asked about') }}, in
+            <strong>{{ '{:,}'.format(p.tags) }}</strong>{{ ' preprints' if publishing }} would be {{ 'searched for' if searching else ('checked' if checking else 'asked about') }}, in
             {% if plan.requests_most > p.requests %}
             <strong>{{ '{:,}'.format(p.requests) }} to {{ '{:,}'.format(plan.requests_most) }}</strong> requests.
             {% else %}
-            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }}{{ '' if checking or searching else ' to <code>api.openalex.org</code>'|safe }}.
+            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }}{{ '' if checking or searching or publishing else ' to <code>api.openalex.org</code>'|safe }}.
             {% endif %}
-            {% if searching %}
+            {% if publishing %}
+            Skipped: {{ '{:,}'.format(p.not_arxiv) }} with no arXiv identifier, {{ '{:,}'.format(p.has_journal) }} that already have a journal,
+            {{ '{:,}'.format(p.fresh) }} asked about under {{ refresh_days }} days ago.
+            {% elif searching %}
             Skipped: {{ '{:,}'.format(p.has_doi) }} that have a DOI, {{ '{:,}'.format(p.no_title) }} with no title,
             {{ '{:,}'.format(p.fresh) }} searched for under {{ search_days }} days ago.
             {% else %}
@@ -84,7 +102,15 @@
             {{ '{:,}'.format(p.fresh) }} {{ 'already checked' if checking else 'with a result' }} under {{ refresh_days }} days ago.
             {% endif %}
         </p>
-        {% if searching %}
+        {% if publishing %}
+        <p class="mb-2 text-muted">
+            A preprint here is a reference with an arXiv identifier and no journal. arXiv is asked first, 100 identifiers a request and one
+            request in three seconds whatever the pace chosen, for the DOI its authors gave for the published version. Crossref is then asked
+            for the record of each such DOI, or of the reference's own DOI, which is where the journal, volume, number and pages come from;
+            how many is not known until arXiv has answered, hence the range. Only arXiv identifiers and DOIs are sent, and both sources are
+            free. Results go to <code>doi-audit/</code> in the library folder; the references are not changed until you accept a proposal.
+        </p>
+        {% elif searching %}
         <p class="mb-2 text-muted">
             Crossref is searched first, one reference a request, and is free. OpenAlex is then searched for each reference Crossref has nothing
             close for; how many is not known until Crossref has answered, hence the range. For each reference its title, its first author's
@@ -178,7 +204,7 @@
     {{ state() }}
     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
         <div>
-            <h6 class="fw-bold small text-uppercase mb-0">{{ {'check': 'DOI check, ', 'search': 'DOI search, '}.get(review.kind, '') }}{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
+            <h6 class="fw-bold small text-uppercase mb-0">{{ {'check': 'DOI check, ', 'search': 'DOI search, ', 'published': 'Published versions, '}.get(review.kind, '') }}{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
             {% if review.pills %}
             <div class="d-flex flex-wrap gap-1 mt-2" id="audit-check-classes">
                 {% for cls, label, count in review.pills %}
@@ -188,6 +214,15 @@
             </div>
             {% endif %}
         </div>
+        {% if review.rows and review.can_backfill %}
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-success btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_published_commit') }}" hx-include="#audit-review-form" hx-target="#audit-body"
+                    hx-confirm="Fill in the ticked references from their published versions?">Fill in ticked</button>
+            <button type="button" class="btn btn-outline-danger btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_reject') }}" hx-include="#audit-review-form" hx-target="#audit-body">Reject ticked</button>
+        </div>
+        {% endif %}
         {% if review.rows and review.can_accept_work %}
         <div class="d-flex gap-2">
             <button type="button" class="btn btn-success btn-sm fw-bold"
@@ -206,7 +241,72 @@
         </div>
         {% endif %}
     </div>
-    {% if review.rows and review.kind == 'search' %}
+    {% if review.rows and review.kind == 'published' %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    {% if review.can_backfill %}<th class="ps-3" style="width: 2rem;"></th>{% endif %}
+                    <th class="{{ '' if review.can_backfill else 'ps-3' }}">Tag</th>
+                    <th>In the library</th>
+                    <th>Published version</th>
+                    {% if review.can_backfill %}<th>Cells to fill in</th>{% endif %}
+                    {% if review.can_import %}<th style="min-width: 28rem;">New reference</th>{% endif %}
+                    <th class="pe-3">Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.rows %}
+                {% set p = row.p %}
+                <tr>
+                    {% if review.can_backfill %}
+                    <td class="ps-3">
+                        <input class="form-check-input" type="checkbox" name="row" value="{{ p.key }}" aria-label="Tick {{ p.tag }}">
+                        <input type="hidden" name="old::{{ p.key }}" value="null">
+                        <input type="hidden" name="proposed::{{ p.key }}" value="{{ p.published_doi }}">
+                        <input type="hidden" name="unit::{{ p.key }}" value="{{ row.unit_json }}">
+                    </td>
+                    {% endif %}
+                    <td class="{{ '' if review.can_backfill else 'ps-3' }}"><a href="{{ url_for('main.editor_page', tag=p.tag) }}">{{ p.tag }}</a></td>
+                    <td>{{ (p.library.title or '')|replace('{', '')|replace('}', '') }}<div class="text-muted">{{ (p.library.author or '')|replace('{', '')|replace('}', '')|truncate(60) }}, {{ p.library.year }}</div></td>
+                    <td>
+                        {% if p.record %}{{ p.record.title }}<div class="text-muted">{{ p.record.author }}, {{ p.record.year }}{% if p.record.container %}, <i>{{ p.record.container }}</i>{% endif %}
+                        ({{ p.source }}, {{ '%.2f'|format(p.score) }})</div>{% endif %}
+                        {% if p.published_doi %}<a class="font-monospace" href="https://doi.org/{{ p.published_doi }}" target="_blank" rel="noopener">{{ p.published_doi }}</a>{% endif %}
+                    </td>
+                    {% if review.can_backfill %}
+                    <td>
+                        {% for name, old, new in p.unit %}
+                        <div><span class="text-muted">{{ name }}:</span> <span class="font-monospace">{{ cell(old) }}</span> &rarr; <span class="font-monospace">{{ new }}</span></div>
+                        {% endfor %}
+                    </td>
+                    {% endif %}
+                    {% if review.can_import %}
+                    <td>
+                        <textarea class="form-control form-control-sm font-monospace" id="audit-bibtex-{{ loop.index }}" rows="9" spellcheck="false"
+                                  aria-label="New reference for the published version of {{ p.tag }}">{{ p.bibtex }}</textarea>
+                        <div class="d-flex gap-2 mt-1">
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0"
+                                    hx-post="{{ url_for('main.audit_published_preview') }}" hx-target="#audit-preview-{{ loop.index }}"
+                                    hx-vals='js:{bibtex: document.getElementById("audit-bibtex-{{ loop.index }}").value}'>Preview</button>
+                            <button type="button" class="btn btn-success btn-sm py-0 fw-bold"
+                                    hx-post="{{ url_for('main.audit_published_import') }}" hx-target="#audit-body"
+                                    hx-vals='js:{bibtex: document.getElementById("audit-bibtex-{{ loop.index }}").value, tag: {{ p.tag|tojson }}, doi: {{ p.published_doi|tojson }}, q: {{ q|tojson }}, cls: {{ review.cls|tojson }}, page: {{ review.page }}}'
+                                    hx-confirm="Add a new reference for the published version of {{ p.tag }}? {{ p.tag }} itself is not changed.">Import as a new reference</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0"
+                                    hx-post="{{ url_for('main.audit_reject') }}" hx-target="#audit-body"
+                                    hx-vals='{{ {"row": p.key, "old::" ~ p.key: "null", "proposed::" ~ p.key: p.published_doi, "q": q, "cls": review.cls, "page": review.page}|tojson }}'>Reject</button>
+                        </div>
+                        <div id="audit-preview-{{ loop.index }}" class="mt-1"></div>
+                    </td>
+                    {% endif %}
+                    <td class="text-muted pe-3">{{ p.note }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif review.rows and review.kind == 'search' %}
     {% set ticks = review.can_commit or review.can_accept_work %}
     <div class="table-responsive">
         <table class="table table-hover table-sm align-middle mb-0 small">
@@ -355,9 +455,6 @@
 </form>
 {% endif %}
 
-{% macro cell(value) -%}
-    {% if value is none %}<span class="text-muted fst-italic">missing</span>{% elif value == '' %}<span class="text-muted fst-italic">empty</span>{% else %}{{ value }}{% endif %}
-{%- endmacro %}
 {% if changeset_view %}
 {% set v = changeset_view %}
 <div class="card shadow-sm border-0 mb-4" id="audit-changeset-view">

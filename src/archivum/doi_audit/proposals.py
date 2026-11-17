@@ -13,10 +13,12 @@ import pandas as pd
 
 from . import journal
 from .changesets import cell_value
+from ..bibtex import dict_to_bibtex
 from .doi import (
-    AMBIGUOUS, ATTENTION, MALFORMED, MISMATCH, NOT_CHECKED, NOT_COMPARED, NOT_FOUND, NOT_SEARCHED, PROPOSED_EXACT,
-    PROPOSED_STRONG, SHARED, UNRESOLVED, VERIFIED, WEAK_MATCH, WORK_NO_DOI, YEAR_DIFFERS, classify_candidates,
-    classify_stored_doi, doi_key, fold, is_preprint, match, normalize_doi,
+    AMBIGUOUS, ATTENTION, CROSSREF_TYPES, MALFORMED, MISMATCH, NOT_ASKED, NOT_CHECKED, NOT_COMPARED, NOT_FOUND,
+    NOT_PUBLISHED, NOT_SEARCHED, PROPOSED_EXACT, PROPOSED_STRONG, PUBLISHED_OTHER_YEAR, PUBLISHED_POSSIBLE,
+    PUBLISHED_SAME_YEAR, SHARED, STRONG_TITLE, UNRESOLVED, VERIFIED, WEAK_MATCH, WORK_NO_DOI, YEAR_DIFFERS,
+    classify_candidates, classify_stored_doi, doi_key, fold, is_preprint, match, normalize_doi,
 )
 
 # class -> label, in the order the page offers them
@@ -41,6 +43,12 @@ SEARCH_NOTES = {
     NOT_FOUND: "nothing close at Crossref or OpenAlex",
     NOT_SEARCHED: "run Find missing DOIs",
 }
+PUBLISHED_CLASSES = {
+    PUBLISHED_SAME_YEAR: "Published, same year", PUBLISHED_OTHER_YEAR: "Published, different year",
+    PUBLISHED_POSSIBLE: "Possibly published", NOT_PUBLISHED: "No published version", NOT_ASKED: "Not asked",
+}
+# the fields a published version fills in on the preprint's own reference, as one unit
+BACKFILL_FIELDS = ("doi", "type", "journal", "volume", "number", "pages")
 CHECK_NOTES = {
     UNRESOLVED: "doi.org has no such DOI; replace it or clear it",
     MISMATCH: "the DOI is another work's, by title or first author",
@@ -88,6 +96,14 @@ class Proposal:
         For a ``work without a DOI`` row, the OpenAlex work id.
     work_accepted : bool
         Whether that work has been accepted for the reference.
+    unit : tuple of tuple
+        For a published version in the preprint's year, the cells to fill in
+        as ``(field, old, new)``, accepted or rejected together.
+    bibtex : str
+        For a published version in a different year, the entry proposed as a
+        new reference.
+    published_doi : str
+        The DOI of the published version.
     """
 
     tag: str
@@ -104,6 +120,9 @@ class Proposal:
     candidates: tuple = ()
     work_id: str = ""
     work_accepted: bool = False
+    unit: tuple = ()
+    bibtex: str = ""
+    published_doi: str = ""
 
     @property
     def key(self) -> str:
@@ -353,3 +372,131 @@ def search_counts(searched: list[Proposal]) -> dict[str, int]:
     """Count the rows of each search class."""
     counts = Counter(p.cls for p in searched)
     return {cls: counts[cls] for cls in SEARCH_CLASSES}
+
+
+def _published_values(record: dict, current_type: str | None) -> dict:
+    """
+    The values a Crossref record of a published version gives for the backfill fields.
+
+    The entry type follows the record (:data:`doi.CROSSREF_TYPES`), except
+    that a ``book`` is never given another type.
+    """
+    values = {
+        "doi": record.get("source_id") or record.get("doi"),
+        "journal": record.get("container"),
+        "volume": record.get("volume"),
+        "number": record.get("issue"),
+        "pages": record.get("pages"),
+    }
+    mapped = CROSSREF_TYPES.get(record.get("type") or "")
+    if mapped and (current_type or "").lower() != "book":
+        values["type"] = mapped
+    return {field: str(value) for field, value in values.items() if value not in (None, "")}
+
+
+def published_versions(rows: pd.DataFrame, latest: dict, settled: set[tuple] = frozenset()) -> list[Proposal]:
+    """
+    Class every preprint of a subset by what is known of its published version.
+
+    A preprint is a reference with an arXiv identifier and no journal.
+
+    Parameters
+    ----------
+    rows : pandas.DataFrame
+        The references of the subset.
+    latest : dict
+        From :func:`journal.latest_observations`.
+    settled : set of tuple, optional
+        ``(tag, doi_key)`` of published versions already imported or
+        rejected, from :func:`journal.settled_published`; left out.
+
+    Returns
+    -------
+    list of Proposal
+        In library order. The published version is certain when a DOI is
+        known for it (the one the authors gave arXiv, or the reference's own)
+        and Crossref's record of that DOI matches the reference by title and
+        first author. Then, if the record's year is the reference's, the class
+        is ``published, same year`` and ``unit`` has the cells to fill in on
+        the reference itself; otherwise ``published, different year`` and
+        ``bibtex`` is a new reference for the published version, built from
+        the library's author and title and the record's year, venue and DOI.
+        Anything weaker (a journal reference with no DOI, a DOI Crossref does
+        not have, a record that does not match) is ``possibly published`` and
+        proposes nothing.
+
+    Notes
+    -----
+    Neither case writes the tag, author or year of the preprint's reference:
+    the first because they already agree, the second because the reference is
+    left as it is and a new one is added.
+    """
+    from .runner import preprint_reference, published_doi
+
+    found = []
+    for row in rows.to_dict("records"):
+        reference = preprint_reference(row)
+        if reference is None:
+            continue
+        tag = reference["tag"]
+        library = {"title": reference["title"], "author": reference["author"], "year": reference["year"]}
+        base = {"tag": tag, "field": "published", "current": None, "proposed": None, "library": library}
+        arxiv = latest.get((tag, "arxiv", "arxiv_id", reference["arxiv"]))
+        if arxiv is None:
+            found.append(Proposal(cls=NOT_ASKED, note="run Find published versions", **base))
+            continue
+        doi = published_doi(reference, latest)
+        journal_ref = arxiv.get("journal_ref") if arxiv.get("status") == journal.OK else None
+        if not doi:
+            if journal_ref:
+                found.append(Proposal(cls=PUBLISHED_POSSIBLE, source="arxiv", **base,
+                                      note=f"arXiv gives a journal reference and no DOI: {journal_ref}. Find missing DOIs may find it."))
+            else:
+                found.append(Proposal(cls=NOT_PUBLISHED, source="arxiv", note="arXiv knows of no published version", **base))
+            continue
+        if (tag, doi) in settled:
+            continue
+        crossref = latest.get((tag, "crossref", "doi", doi))
+        if crossref is None:
+            found.append(Proposal(cls=NOT_ASKED, note="run Find published versions", published_doi=doi, **base))
+            continue
+        if crossref.get("status") != journal.OK:
+            found.append(Proposal(cls=PUBLISHED_POSSIBLE, source="arxiv", published_doi=doi, **base,
+                                  note=f"the DOI {doi} is given, but Crossref has no record of it to take the journal from"))
+            continue
+        scored = match(library, crossref)
+        record = _shown(crossref)
+        if scored.title < STRONG_TITLE or scored.surname is False:
+            found.append(Proposal(cls=PUBLISHED_POSSIBLE, source="crossref", score=scored.title, record=record,
+                                  published_doi=doi, note="the record of the DOI does not match the reference", **base))
+            continue
+
+        values = _published_values(crossref, reference["type"])
+        if str(crossref.get("year")) == str(reference["year"] or "").strip():
+            unit = tuple(
+                (name, cell_value(row.get(name)), values[name]) for name in BACKFILL_FIELDS
+                if name in values and name in row
+                and (doi_key(cell_value(row.get(name)) or "") != doi_key(values[name]) if name == "doi"
+                     else cell_value(row.get(name)) != values[name])
+            )
+            if unit:
+                found.append(Proposal(cls=PUBLISHED_SAME_YEAR, source="crossref", score=scored.title, record=record,
+                                      unit=unit, published_doi=doi, note="fills in the reference; tag, author and year stay",
+                                      **{**base, "proposed": values.get("doi", doi)}))
+            continue
+        entry = {"type": values.get("type", "article"), "tag": "PublishedVersion", "author": reference["author"],
+                 "title": reference["title"], "year": str(crossref.get("year")),
+                 **{name: values[name] for name in ("journal", "volume", "number", "pages", "doi") if name in values}}
+        found.append(Proposal(
+            cls=PUBLISHED_OTHER_YEAR, source="crossref", score=scored.title, record=record, published_doi=doi,
+            bibtex=dict_to_bibtex(entry, allowed_fields=["author", "title", "year", "journal", "volume", "number", "pages", "doi"]),
+            note=f"published in {crossref.get('year')}; the preprint's reference stays, and a new one is added for the published version",
+            **{**base, "proposed": values.get("doi", doi)},
+        ))
+    return found
+
+
+def published_counts(published: list[Proposal]) -> dict[str, int]:
+    """Count the rows of each published-version class."""
+    counts = Counter(p.cls for p in published)
+    return {cls: counts[cls] for cls in PUBLISHED_CLASSES}

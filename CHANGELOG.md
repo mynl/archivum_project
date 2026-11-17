@@ -5,6 +5,24 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a12 (2026-11-17)
+
+### Added
+
+- **Find published versions** on the Audit page, for arXiv preprints: a
+  reference with an arXiv identifier and no journal. arXiv is asked for the
+  DOI its authors gave, then Crossref for that DOI's record.
+- **Published, same year**: **Fill in ticked** writes DOI, type, journal,
+  volume, number and pages onto the preprint's reference as one unit, all or
+  none. Tag, author and year are not touched; a book keeps its type.
+- **Published, different year**: **Import as a new reference** adds a
+  reference for the published version beside the preprint, opening the same
+  document. The preprint's reference is not changed, so its tag still
+  resolves. The entry is editable and can be previewed first.
+- Weaker evidence is listed as possibly published and proposes nothing.
+- `archivum doi-audit-run --published -x`, and a published-versions line in
+  `doi-audit-status`.
+
 ## 2.16.0a11 (2026-11-17)
 
 ### Added

@@ -1,0 +1,8 @@
+{# What the importer would add for a published version. The tag is advisory, as in Ingest. #}
+<div class="alert {{ 'alert-warning' if preview.blocked else 'alert-light border' }} py-2 small mb-0">
+    <div>The importer would add <strong>{{ preview.tag }}</strong>. The tag is settled at import and can differ if the library has changed.</div>
+    {% if preview.blocked %}
+    <div class="text-muted">{{ preview.blocked_message }} That is expected here: the published version has the preprint's title, and it is added all the same.</div>
+    {% endif %}
+    <pre class="mb-0 mt-2 small">{{ preview.bibtex }}</pre>
+</div>

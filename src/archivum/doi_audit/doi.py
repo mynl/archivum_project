@@ -33,6 +33,20 @@ AMBIGUOUS = "ambiguous"
 WORK_NO_DOI = "work without a DOI"
 NOT_FOUND = "not found"
 NOT_SEARCHED = "not searched"
+# classes of an arXiv reference with no journal, from what arXiv and Crossref say of a published version
+PUBLISHED_SAME_YEAR = "published, same year"
+PUBLISHED_OTHER_YEAR = "published, different year"
+PUBLISHED_POSSIBLE = "possibly published"
+NOT_PUBLISHED = "no published version"
+NOT_ASKED = "not asked"
+
+_ARXIV_NEW = re.compile(r"(?<![0-9.])(\d{4}\.\d{4,5})(?:v\d+)?(?![0-9])")
+_ARXIV_OLD = re.compile(r"([a-z][a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?")
+# Crossref work type -> BibTeX entry type, for a published version
+CROSSREF_TYPES = {
+    "journal-article": "article", "proceedings-article": "inproceedings", "book-chapter": "incollection",
+    "book": "book", "monograph": "book",
+}
 
 # Provisional: to be set from the score distribution of the first full run.
 STRONG_TITLE = 0.9
@@ -335,3 +349,36 @@ def classify_candidates(reference: dict, candidates: list[dict]) -> tuple[str, d
     if qualifying:
         return WORK_NO_DOI, qualifying[0][0], scored
     return AMBIGUOUS, None, scored
+
+
+def arxiv_id(*values) -> str | None:
+    """
+    Find an arXiv identifier in the fields of a reference.
+
+    Parameters
+    ----------
+    *values
+        Field values in order of preference, such as ``arxivId``, ``eprint``
+        and ``url``.
+
+    Returns
+    -------
+    str or None
+        The identifier without its version: ``1901.00001`` for the form used
+        since 2007, ``math/0501001`` or ``math.PR/0501001`` for the older one.
+        A bare ``0501001``, the old form with its archive lost, identifies
+        nothing and gives ``None``.
+    """
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        found = _ARXIV_OLD.search(text) or _ARXIV_NEW.search(text)
+        if found:
+            return found.group(1)
+    return None
+
+
+def is_arxiv_doi(doi) -> bool:
+    """Whether a DOI is one arXiv issues for a preprint (``10.48550/arXiv...``)."""
+    return doi_key(doi).startswith("10.48550/") if doi else False

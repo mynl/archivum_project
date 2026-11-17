@@ -25,6 +25,8 @@ CITES = "cites.feather"
 ACCEPTED, REJECTED = "accepted", "rejected"
 # an OpenAlex work with no DOI, accepted in review as the reference's work, so that its count can be attached
 WORK_ACCEPTED = "work accepted"
+# a published version in a different year, imported as a new reference beside the preprint
+PUBLISHED_IMPORTED = "published version imported"
 OK, NOT_FOUND, ERROR = "ok", "not_found", "error"
 CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id"]
 
@@ -261,3 +263,23 @@ def accepted_works(library_path: Path) -> dict[str, str]:
         elif r.get("decision") == REJECTED and r.get("openalex_id") and works.get(r.get("tag")) == r["openalex_id"]:
             del works[r["tag"]]
     return works
+
+
+def settled_published(library_path: Path) -> set[tuple]:
+    """
+    The published versions already dealt with.
+
+    Returns
+    -------
+    set of tuple
+        ``(tag, doi_key)`` for each published version imported as a new
+        reference or rejected, so that it is not proposed for the preprint
+        again.
+    """
+    from .doi import doi_key
+
+    return {
+        (r.get("tag"), doi_key(r.get("doi") or r.get("proposed") or "")) for r in read_lines(library_path, DECISIONS)
+        if r.get("decision") == PUBLISHED_IMPORTED
+        or (r.get("decision") == REJECTED and r.get("field") == "published")
+    }
