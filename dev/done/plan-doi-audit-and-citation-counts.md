@@ -806,6 +806,30 @@ if the OpenAlex counts prove sufficient.
 - Tests: 5 more in `tests/test_doi_audit_counts.py`, 1 in `tests/test_egress.py`. Gate:
   `.venv\Scripts\python -m pytest -q`, 407 passed, 26 skipped.
 
+### 2.16.0a14 to 2.16.0a16, from the user's first full count run (2026-11-17)
+
+- **The finding.** After a count run over the whole library, 20 unrelated references showed
+  24,747 citations. All held the DOI `10.1017/CBO9781107415324.004`, the IPCC "Summary for
+  Policymakers" (2014): a junk DOI that Mendeley's metadata extraction gave to documents it
+  could not identify. `10.1007/s13398-014-0173-7.2` is a second of the kind, on 5 references.
+  In all, 45 DOIs were on more than one tag, 119 references.
+- **The two junk DOIs were cleared** on 26 references by `Library.apply_field_changes`, as
+  changeset `20261117_202848_blank-junk-dois`. `McKinney2018` still has a Cambridge URL of the
+  same book; it was left.
+- **2.16.0a14: Cited** quick action on the Query page.
+- **2.16.0a15: a count belongs to its DOI.** Clearing the DOIs did not remove the counts: a
+  count is stored by tag, and `derive_cites` took the latest for the tag whatever DOI it was
+  fetched for. `cites.feather` now has `cites_doi`, and `journal.current_cites` leaves out a
+  row whose `cites_doi` is not the reference's DOI now. The library join, the counts table and
+  summary, and `doi-audit-status` all use it. A count by work id has an empty `cites_doi` and
+  is always kept. The filter is at read time because `derive_cites` runs in the runner, which
+  has no references; the journal is never pruned.
+- **2.16.0a16: Shared rows can be edited.** Divergence from the table above ("no commit
+  here"): the Shared list takes a replacement DOI or clears one, like Mismatch, and
+  **Reject ticked** records that a shared DOI is right (two chapters of one book), which takes
+  the row off the Shared list while its DOI is unchanged. The list is ordered by group size,
+  so a junk DOI on many references comes first.
+
 ### What is left for the user, on the real library
 
 1. **Check DOIs** over the whole library, then `archivum doi-audit-status`: the class counts

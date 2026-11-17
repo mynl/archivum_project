@@ -5,6 +5,17 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a15 (2026-11-17)
+
+### Fixed
+
+- A citation count now belongs to the DOI it was fetched for. Clearing or
+  replacing a reference's DOI drops its old count from queries, the Cited
+  lists and the counts table until counts are fetched again. Before, a
+  reference kept the count of a wrong DOI after the DOI was corrected.
+- `cites_1y` and the Semantic Scholar count use only counts for that DOI.
+- `cites.feather` gained `cites_doi`. Nothing is deleted from `counts.jsonl`.
+
 ## 2.16.0a14 (2026-11-17)
 
 ### Added

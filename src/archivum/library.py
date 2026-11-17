@@ -744,10 +744,11 @@ class Library(LibraryBase):
         The join is made here and never in ``ref_df``: counts are derived data
         and must not reach ``ref.feather`` or ``bibtex.bib``.
         """
-        from .doi_audit.journal import read_cites
+        from .doi_audit.journal import current_cites
 
         self._cites_mtime = self._cites_file_mtime()
-        cites = read_cites(self.config_path)[["tag", "cites", "cites_asof", "cites_1y"]].drop_duplicates("tag")
+        # a count fetched for a DOI the reference no longer has is left out
+        cites = current_cites(self.config_path, merged)[["tag", "cites", "cites_asof", "cites_1y"]].drop_duplicates("tag")
         merged = merged.merge(cites, on="tag", how="left")
         for column in ("cites", "cites_1y"):
             merged[column] = merged[column].astype("Int64")

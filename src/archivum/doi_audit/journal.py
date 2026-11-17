@@ -28,7 +28,7 @@ WORK_ACCEPTED = "work accepted"
 # a published version in a different year, imported as a new reference beside the preprint
 PUBLISHED_IMPORTED = "published version imported"
 OK, NOT_FOUND, ERROR = "ok", "not_found", "error"
-CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2"]
+CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2", "cites_doi"]
 
 # waitress serves requests on several threads
 _LOCK = threading.Lock()
@@ -173,8 +173,10 @@ def derive_cites(library_path: Path):
     pandas.DataFrame
         One row per tag with an OpenAlex count: ``tag``, ``cites`` (the latest
         count), ``cites_asof`` (its date, ISO), ``cites_1y``, ``openalex_id``,
-        and ``cites_s2``, the latest Semantic Scholar count where one has been
-        collected. Also written to ``<library>/doi-audit/cites.feather``.
+        ``cites_s2``, the latest Semantic Scholar count where one has been
+        collected, and ``cites_doi``, the DOI the count was fetched for in
+        compared form, empty for a count fetched by work id. Also written to
+        ``<library>/doi-audit/cites.feather``.
 
     Notes
     -----
@@ -182,6 +184,9 @@ def derive_cites(library_path: Path):
     is :math:`c_1 - c_0`, where :math:`c_0` is the most recent count taken at
     or before :math:`t_1 - 365` days. It is missing until such a count exists,
     so it is never a growth over a shorter span passed off as a year's.
+    Only counts fetched for the same DOI as the latest are used, for
+    ``cites_1y`` and for ``cites_s2``: a count for a DOI the reference no
+    longer has is another work's.
     """
     import pandas as pd
 
@@ -201,14 +206,16 @@ def derive_cites(library_path: Path):
         records.sort(key=_when)
         latest = records[-1]
         year_ago = _when(latest) - dt.timedelta(days=365)
-        earlier = [r for r in records if _when(r) <= year_ago]
+        earlier = [r for r in records if _when(r) <= year_ago and r.get("doi") == latest.get("doi")]
+        same_second = tag in second and second[tag].get("doi") == latest.get("doi")
         rows.append({
             "tag": tag,
             "cites": int(latest["count"]),
             "cites_asof": _when(latest).date().isoformat(),
             "cites_1y": int(latest["count"]) - int(earlier[-1]["count"]) if earlier else None,
             "openalex_id": latest.get("source_id") or "",
-            "cites_s2": int(second[tag]["count"]) if tag in second else None,
+            "cites_s2": int(second[tag]["count"]) if same_second else None,
+            "cites_doi": latest.get("doi") or "",
         })
     frame = pd.DataFrame(rows, columns=CITES_COLUMNS)
     frame["cites"] = frame["cites"].astype("int64")
@@ -235,6 +242,41 @@ def read_cites(library_path: Path):
         if column not in frame.columns:
             frame[column] = pd.NA
     return frame
+
+
+def current_cites(library_path: Path, ref_df):
+    """
+    The counts that belong to the DOIs the references have now.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder.
+    ref_df : pandas.DataFrame
+        References, with ``tag`` and ``doi``.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The rows of ``cites.feather`` whose ``cites_doi`` is the reference's
+        DOI, compared without case, or is empty (a count fetched by work id).
+
+    Notes
+    -----
+    A count is fetched for a DOI and stored by tag. When the DOI is cleared or
+    replaced the stored count is another work's until counts are fetched
+    again, so it is left out here and never deleted from the journal.
+    """
+    from .doi import doi_key
+
+    cites = read_cites(library_path)
+    if cites.empty or "doi" not in ref_df.columns:
+        return cites
+    now = {tag: doi_key(doi) if isinstance(doi, str) and doi.strip() else ""
+           for tag, doi in zip(ref_df["tag"], ref_df["doi"])}
+    keep = [not isinstance(counted, str) or not counted or now.get(tag) == counted
+            for tag, counted in zip(cites["tag"], cites["cites_doi"])]
+    return cites[keep]
 
 
 def latest_observations(library_path: Path) -> dict[tuple, dict]:

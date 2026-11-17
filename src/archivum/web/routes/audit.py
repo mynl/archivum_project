@@ -84,7 +84,7 @@ def _run_view(lib) -> dict:
 
 def _counts_summary(lib, rows) -> dict:
     """Count the subset's references with a citation count, and those whose count is older than the refresh period."""
-    cites = journal.read_cites(lib.config_path)
+    cites = journal.current_cites(lib.config_path, rows)
     cites = cites[cites["tag"].isin(set(rows["tag"]))]
     cutoff = (dt.date.today() - dt.timedelta(days=lib.config.doi_audit_refresh_days)).isoformat()
     return {"with_counts": len(cites), "stale_counts": int((cites["cites_asof"] < cutoff).sum())}
@@ -92,7 +92,7 @@ def _counts_summary(lib, rows) -> dict:
 
 def _counts_table(lib, rows, page: int) -> dict:
     """The subset's citation counts, most cited first, one page of them."""
-    cites = journal.read_cites(lib.config_path).merge(rows[["tag", "title"]], on="tag")
+    cites = journal.current_cites(lib.config_path, rows).merge(rows[["tag", "title"]], on="tag")
     cites = cites.sort_values(["cites", "tag"], ascending=[False, True])
     pages = max(1, -(-len(cites) // PAGE_ROWS))
     page = min(max(page, 1), pages)

@@ -118,7 +118,8 @@ def test_a_run_appends_the_expected_lines_and_derives_cites(lib):
     assert hit["run_id"] == state["run_id"] and hit["at"].endswith("+00:00")
 
     cites = journal.read_cites(lib.config_path).set_index("tag")
-    assert list(cites.columns) == ["cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2"]
+    assert list(cites.columns) == ["cites", "cites_asof", "cites_1y", "openalex_id", "cites_s2", "cites_doi"]
+    assert cites.loc["Wang2020", "cites_doi"] == "10.1/one"
     assert cites.loc["Wang2020", "cites"] == 120 and cites.loc["Odd2014", "openalex_id"] == "W7"
     assert cites["cites_1y"].isna().all() and "Doe2015" not in cites.index
     assert cites.loc["Wang2020", "cites_asof"] == dt.datetime.now(dt.timezone.utc).date().isoformat()

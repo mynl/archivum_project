@@ -903,7 +903,7 @@ def doi_audit_status():
         _echo_run_state(state)
     else:
         click.echo("No run yet.")
-    cites = journal.read_cites(lib.config_path)
+    cites = journal.current_cites(lib.config_path, lib.ref_df)
     if len(cites):
         click.echo(f"Citation counts: {len(cites):,} references, collected {cites['cites_asof'].min()} "
                    f"to {cites['cites_asof'].max()}.")

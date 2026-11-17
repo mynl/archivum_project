@@ -18,9 +18,13 @@ REFS = [
 ]
 
 
-def _count(lib, tag, count, doi="10.1/x"):
+DOIS = {r["tag"]: r["doi"] for r in REFS}
+
+
+def _count(lib, tag, count, doi=""):
+    """Record a count for the reference's own DOI, or for ``doi``; with no DOI at all it is a count by work id."""
     journal.append_lines(lib.config_path, journal.COUNTS, [
-        {"tag": tag, "source": "openalex", "source_id": "W1", "doi": doi, "count": count}])
+        {"tag": tag, "source": "openalex", "source_id": "W1", "doi": doi or DOIS[tag], "count": count}])
     journal.derive_cites(lib.config_path)
 
 
@@ -59,6 +63,20 @@ def test_a_reference_with_no_count_is_excluded_without_error(counted):
     assert "Doe2016" not in _tags(counted, "where cites > 0")
     assert "Doe2016" not in _tags(counted, "where cites < 1000")
     assert _tags(counted, "where cites_1y > 0") == []
+
+
+def test_a_count_for_a_doi_the_reference_no_longer_has_is_left_out(counted):
+    _count(counted, "Wang2019", 24747, doi="10.1/another-work")
+    assert _tags(counted, "where cites > 0") == ["Wang2020"]
+    # the journal keeps the line; only the join leaves it out
+    assert len(journal.read_cites(counted.config_path)) == 2
+    assert list(journal.current_cites(counted.config_path, counted.ref_df)["tag"]) == ["Wang2020"]
+
+
+def test_a_count_is_matched_to_the_doi_without_case(lib):
+    _count(lib, "Wang2020", 5, doi="10.1/one")
+    lib.ref_df.loc[lib.ref_df["tag"] == "Wang2020", "doi"] = "https://doi.org/10.1/ONE"
+    assert list(journal.current_cites(lib.config_path, lib.ref_df)["tag"]) == ["Wang2020"]
 
 
 def test_a_library_with_no_counts_still_has_the_columns(lib):
