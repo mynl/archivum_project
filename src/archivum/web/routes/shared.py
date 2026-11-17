@@ -60,12 +60,12 @@ AUTHOR_VIEW_MODES = [
 
 
 def _activity_frame():
-    """Per-tag date added, read count, and document count for the result line."""
+    """Per-tag date added, read count, document count, and citation count for the result line."""
     lib = LibraryContext.get()
     if lib.is_empty:
         return None
     database = lib.database
-    columns = [c for c in ("tag", "added", "read_count", "docs") if c in database.columns]
+    columns = [c for c in ("tag", "added", "read_count", "docs", "cites", "cites_asof") if c in database.columns]
     return database[columns] if "tag" in columns else None
 
 

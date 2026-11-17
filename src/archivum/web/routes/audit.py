@@ -7,7 +7,6 @@ import json
 import logging
 import os
 
-import pandas as pd
 from flask import abort, make_response, render_template, request
 
 from ... import egress
@@ -87,8 +86,7 @@ def _counts_table(lib, rows, page: int) -> dict:
     return {
         "cls": COUNTS_CLASS, "total": len(cites), "page": page, "pages": pages,
         "rows": [
-            {"tag": r.tag, "title": clean_latex(str(r.title or "")), "cites": int(r.cites), "asof": r.cites_asof,
-             "growth": None if pd.isna(r.cites_1y) else int(r.cites_1y)}
+            {"tag": r.tag, "title": clean_latex(str(r.title or "")), "cites": int(r.cites), "asof": r.cites_asof}
             for r in shown.itertuples()
         ],
     }
@@ -110,8 +108,25 @@ def _plan_view(lib, rows) -> dict:
     }
 
 
+def _changeset_view(lib, name: str) -> dict | None:
+    """The content of one changeset for display; ``None`` when there is no such changeset."""
+    try:
+        path = cs.find_changeset(lib.config_path, name)
+    except FileNotFoundError:
+        return None
+    content = cs.read_changeset(path)
+    return {
+        "stem": path.stem,
+        "created": content["created"].replace("T", " ")[:19],
+        "outcome": content["outcome"],
+        "error": content.get("error", ""),
+        "reverts": content["reverts"].removesuffix(".json"),
+        "rows": content["rows"],
+    }
+
+
 def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str = "", level: str = "success",
-                 show_plan: bool = False):
+                 show_plan: bool = False, view_changeset: str = ""):
     """
     Render everything under the query box.
 
@@ -150,7 +165,8 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
         counts=_counts_table(lib, rows, page) if cls == COUNTS_CLASS else None,
         plan=_plan_view(lib, rows) if show_plan else None, run=_run_view(lib),
         refresh_days=lib.config.doi_audit_refresh_days,
-        changesets=_changeset_rows(lib), message=message, level=level,
+        changesets=_changeset_rows(lib), changeset_view=_changeset_view(lib, view_changeset) if view_changeset else None,
+        message=message, level=level,
     )
 
 
@@ -365,3 +381,16 @@ def audit_run_status():
     if not view["active"]:
         response.headers["HX-Trigger"] = "audit-run-ended"
     return response
+
+
+@bp.route('/audit/changeset')
+@admin_required
+def audit_changeset():
+    """Show the rows of one changeset: each cell's old value, new value and outcome."""
+    lib = LibraryContext.get()
+    if lib.is_empty: abort(404)
+    raw_query, cls, page = _form_state()
+    name = request.args.get("changeset", "")
+    if _changeset_view(lib, name) is None:
+        return _render_body(lib, raw_query, cls, page, f"No changeset {name!r}.", "warning")
+    return _render_body(lib, raw_query, cls, page, view_changeset=name)

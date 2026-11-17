@@ -86,8 +86,7 @@
                     <th class="ps-3">Tag</th>
                     <th>Title</th>
                     <th class="text-end">Cites</th>
-                    <th class="text-center">As of</th>
-                    <th class="text-end pe-3">Growth, 1 year</th>
+                    <th class="text-center text-nowrap pe-3">As of</th>
                 </tr>
             </thead>
             <tbody>
@@ -96,8 +95,7 @@
                     <td class="ps-3"><a href="{{ url_for('main.editor_page', tag=row.tag) }}">{{ row.tag }}</a></td>
                     <td>{{ row.title }}</td>
                     <td class="text-end">{{ '{:,}'.format(row.cites) }}</td>
-                    <td class="text-center">{{ row.asof }}</td>
-                    <td class="text-end pe-3">{{ '{:,}'.format(row.growth) if row.growth is not none else '' }}</td>
+                    <td class="text-center text-nowrap pe-3">{{ row.asof }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -115,7 +113,7 @@
     </div>
     {% endif %}
     {% else %}
-    <div class="card-body text-muted small">No citation counts for this subset yet. Growth over a year appears once a count is a year old.</div>
+    <div class="card-body text-muted small">No citation counts for this subset yet.</div>
     {% endif %}
 </div>
 {% endif %}
@@ -191,6 +189,49 @@
 </form>
 {% endif %}
 
+{% macro cell(value) -%}
+    {% if value is none %}<span class="text-muted fst-italic">missing</span>{% elif value == '' %}<span class="text-muted fst-italic">empty</span>{% else %}{{ value }}{% endif %}
+{%- endmacro %}
+{% if changeset_view %}
+{% set v = changeset_view %}
+<div class="card shadow-sm border-0 mb-4" id="audit-changeset-view">
+    <div class="card-header bg-white">
+        <h6 class="fw-bold small text-uppercase mb-1">Changeset <span class="font-monospace text-lowercase">{{ v.stem }}</span></h6>
+        <div class="small text-muted">
+            Created {{ v.created }} UTC. Outcome: {{ v.outcome }}.
+            {% if v.reverts %}Reverts <span class="font-monospace">{{ v.reverts }}</span>.{% endif %}
+            {% if v.error %}<span class="text-danger">{{ v.error }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Tag</th>
+                    <th>Field</th>
+                    <th>Old value</th>
+                    <th>New value</th>
+                    <th>Outcome</th>
+                    <th class="pe-3">Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for r in v.rows %}
+                <tr>
+                    <td class="ps-3"><a href="{{ url_for('main.editor_page', tag=r.tag) }}">{{ r.tag }}</a></td>
+                    <td>{{ r.field }}</td>
+                    <td class="font-monospace text-break">{{ cell(r.old) }}</td>
+                    <td class="font-monospace text-break">{{ cell(r.new) }}</td>
+                    <td class="{{ '' if r.outcome == 'applied' else 'text-danger' }}">{{ r.outcome }}</td>
+                    <td class="text-muted pe-3">{{ r.note }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
 <div class="card shadow-sm border-0" id="audit-changesets">
     <div class="card-header bg-white">
         <h6 class="fw-bold small text-uppercase mb-0">Changesets</h6>
@@ -218,7 +259,9 @@
                     <td class="text-end">{{ '{:,}'.format(c.rows) }}</td>
                     <td class="text-end">{{ '{:,}'.format(c.applied) }}</td>
                     <td class="font-monospace">{{ c.reverts }}</td>
-                    <td class="text-end pe-3">
+                    <td class="text-end pe-3 text-nowrap">
+                        <button type="button" class="btn btn-outline-secondary btn-sm py-0"
+                                hx-get="{{ url_for('main.audit_changeset', changeset=c.stem) }}" hx-include="#audit-search" hx-target="#audit-body">View</button>
                         {% if c.can_revert %}
                         <form class="d-inline">
                             {{ state() }}

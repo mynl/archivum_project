@@ -5,6 +5,17 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a9 (2026-11-17)
+
+### Changed
+
+- A Query result line shows the citation count, as `1,234 cites`, after the
+  author and source and before the hash. Hover gives the date collected.
+- The Audit page's changeset list has a **View** button, which lists a
+  changeset's rows: tag, field, old value, new value and outcome.
+- The citation counts table no longer wraps the date, and the growth column
+  is gone; growth is for a separate report. `cites_1y` remains a query field.
+
 ## 2.16.0a8 (2026-11-17)
 
 ### Added

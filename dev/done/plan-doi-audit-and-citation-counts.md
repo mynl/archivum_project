@@ -659,3 +659,14 @@ if the OpenAlex counts prove sufficient.
 - **Checked:** every BibTeX path that takes database rows passes the `ref_columns` whitelist,
   and the paths without a whitelist take `ref_df` rows, so `cites` cannot reach a `.bib`.
 - Tests: `tests/test_doi_audit_query.py` (9).
+
+### 2.16.0a9 tweaks from the user's trial (2026-11-17)
+
+- The Query result line shows the count between the source and the hash; the count comes from
+  the per-tag activity frame, so it shows whatever the query selected.
+- Changeset View on the Audit page. The counts table lost its growth column and the date no
+  longer wraps.
+- Two items noted in `TODO.md` for their own plans: [tables-gt-csv-grid] and
+  [back-restores-page].
+- The user's go-ahead for the last four steps was given with these tweaks (2026-11-17).
+- Gate: `.venv\Scripts\python -m pytest -q`, 303 passed, 26 skipped.

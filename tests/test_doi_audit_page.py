@@ -254,3 +254,18 @@ def test_the_review_table_is_paged(client, lib, monkeypatch):
 
     assert "Page 1 of 2" in first and "Wang2020|doi" in first and "Wang2019|doi" not in first
     assert "Page 2 of 2" in second and "Wang2019|doi" in second
+
+
+def test_a_changeset_can_be_viewed(client, lib):
+    client.post("/audit/commit", data=_form(
+        ("Wang2020", "https://doi.org/10.1/One", "10.1/One", "10.1/One"),
+        ("Wang2019", "doi:10.1/stale", "10.1/two", "10.1/two")))
+    [changeset] = cs.list_changesets(lib.config_path)
+    html = client.get(f"/audit/changeset?changeset={changeset.stem}").get_data(as_text=True)
+    view = html[html.index('id="audit-changeset-view"'):html.index('id="audit-changesets"')]
+
+    assert changeset.stem in view and "Outcome: applied." in view
+    assert "https://doi.org/10.1/One" in view and ">10.1/One<" in view
+    assert "skipped" in view and "changed since review" in view
+    assert "No changeset" in client.get("/audit/changeset?changeset=nothing").get_data(as_text=True)
+    assert client.get("/audit/changeset", environ_overrides={"REMOTE_ADDR": "10.8.0.1"}).status_code == 403

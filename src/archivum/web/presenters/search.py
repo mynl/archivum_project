@@ -22,12 +22,14 @@ def _date_display(values: pd.Series) -> pd.Series:
 
 def _activity_display(display_results: pd.DataFrame, tag_col, activity) -> None:
     """
-    Add ``added_display``, ``reads_display`` and ``has_doc`` from ``activity``.
+    Add ``added_display``, ``reads_display``, ``has_doc``, ``cites_display`` and
+    ``cites_asof_display`` from ``activity``.
 
     ``activity`` is library-wide per-tag data (``tag`` plus any of ``added``,
-    ``read_count``, ``docs``), joined by tag so the fields appear whatever the
+    ``read_count``, ``docs``, ``cites``, ``cites_asof``), joined by tag so the fields appear whatever the
     query selected. Without it the result frame's own columns are used.
-    Zero reads show blank, not ``×0``. ``has_doc`` is True, False, or None
+    Zero reads show blank, not ``×0``; a reference with no citation count shows
+    blank, and one cited zero times shows ``0 cites``. ``has_doc`` is True, False, or None
     when unknown (no ``docs`` column), so the template can tell "no document"
     from "hash not selected".
     """
@@ -50,6 +52,9 @@ def _activity_display(display_results: pd.DataFrame, tag_col, activity) -> None:
     display_results["reads_display"] = reads.map(lambda n: f"×{n}" if n > 0 else "")
     docs = pd.to_numeric(lookup("docs"), errors="coerce")
     display_results["has_doc"] = docs.map(lambda n: None if pd.isna(n) else bool(n > 0))
+    cites = pd.to_numeric(lookup("cites"), errors="coerce")
+    display_results["cites_display"] = cites.map(lambda n: "" if pd.isna(n) else f"{int(n):,d} cites")
+    display_results["cites_asof_display"] = lookup("cites_asof").map(lambda d: "" if d is None or pd.isna(d) else str(d))
 
 
 def prepare_search_results(df, activity=None):

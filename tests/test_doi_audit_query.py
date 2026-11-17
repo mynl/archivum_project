@@ -123,5 +123,25 @@ def test_the_query_page_sees_new_counts_on_the_next_request(lib, monkeypatch):
     assert "Wang2020" in html and "Wang2019" not in html
 
 
+def test_the_query_result_line_shows_the_count_between_author_and_hash(counted, monkeypatch):
+    from archivum.cli import LibraryContext
+    from archivum.web.app import create_app
+
+    monkeypatch.setattr(LibraryContext, "get", classmethod(lambda cls: counted))
+    monkeypatch.setattr("archivum.analytics.semantic.warm_transformer_model", lambda background=True: None)
+    monkeypatch.setattr("archivum.analytics.semantic.warm_semantic_projection", lambda background=True: None)
+    _count(counted, "Wang2020", 12345)
+    _later(counted)
+    application = create_app()
+    application.config.update(TESTING=True)
+    html = application.test_client().get("/search?q=q tag ~ /20/").get_data(as_text=True)
+
+    lines = {tag: html[html.index(f">{tag}<"):].split('class="list-item', 1)[0] for tag in ("Wang2020", "Wang2019", "Doe2016")}
+    assert "12,345 cites" in lines["Wang2020"] and "7 cites" in lines["Wang2019"]
+    assert "cites" not in lines["Doe2016"]
+    assert lines["Wang2020"].index('class="author') < lines["Wang2020"].index("12,345 cites")
+    assert 'title="Citations at OpenAlex, as of 20' in lines["Wang2020"]
+
+
 def test_counts_format_with_commas_and_a_dash_for_none():
     assert [format_count(x) for x in (0, 7, 12345, pd.NA, float("nan"))] == ["0", "7", "12,345", "-", "-"]

@@ -15,6 +15,19 @@ Larger multi-session work belongs in `dev/projects/`; shipped changes go in
   against the 8.x API) or, smaller, by printing `-` for an empty match tag. Hit 2026-11-05
   through the `add-missing-references` skill, whose preview prints the analysis with pandas.
 
+- [tables-gt-csv-grid] Move the site's tables to the switchable `greater_tables` / `csv_grid`
+  protocol, as fiscus-Ledger and aggregate-api do it. Covers the Audit page tables (review,
+  counts, changesets), Status, and the Query page's Table view. The Query result list is not a
+  table and does not change. Needs its own plan under `dev/`, to be written once the DOI audit
+  plan is complete (Steve, 2026-11-17). Likely folds in [import-bibtex-vv], since both turn on
+  the greater_tables version.
+- [back-restores-page] Browser Back should return to a page as it was left: the search text, the
+  results, the view mode, an open Audit table. Today the pages fill themselves by HTMX swaps
+  that leave the address unchanged, so Back reloads an empty page. Feasible for a single-user
+  site: put each page's state in its address (`hx-push-url`, or a query string the page reads
+  on load) and redraw from it. Query, Ripgrep, Network, Edit and Audit each need it. Needs its
+  own plan (Steve, 2026-11-17).
+
 ## Done
 
 <!-- Move items here with the version they shipped in, or delete them. -->

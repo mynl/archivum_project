@@ -351,6 +351,7 @@ def test_start_runs_in_the_background_and_the_counts_table_follows(client, lib, 
     table = client.get("/audit/review?cls=counts").get_data(as_text=True)
     assert "Citation counts: 4 references" in table
     assert table.index("Wang2020") < table.index("Wang2019") < table.index("Odd2014")
+    assert "Growth" not in table and 'text-nowrap pe-3">As of' in table
     summary = client.get("/audit/subset?q=author ~ /Wang/").get_data(as_text=True)
     assert "With a count" in summary and "Last run finished" in summary
 
