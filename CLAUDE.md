@@ -209,6 +209,9 @@ committed tag can differ if the library moved in between. Do not reintroduce the
   new feature a user operates gets one, written as the last step of the work that produces it and
   checked against the running app (Steve, 2026-11-17). The first is `doi-citation.qmd`, for the
   Audit page. An archivum page describes a web page and its commands, so it has no executed code.
+  **Always render a page after writing or changing it, to HTML and PDF**, and look at the PDF:
+  `quarto render <feature>.qmd` in that folder, with `html` and `pdf` (`pdf-engine: tectonic`) in
+  the page's front matter. The rendered files are ignored by that repository.
 - `temp` — the user's scratch link, to a backed-up folder outside the repo; gitignored as
   `/temp` (no trailing slash). Code never writes there: exports are built in memory, ingest
   staging lives in the app home (`~\.archivum\staging`), QMD extraction uses the system temp.
