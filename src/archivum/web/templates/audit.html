@@ -29,12 +29,12 @@
 </div>
 
 <script>
-    // When a run ends, show its counts, unless a review table is open: ticks there must not be lost.
-    document.body.addEventListener('audit-run-ended', () => {
-        if (document.getElementById('audit-review-form')) return;
+    // When a run ends, show what it produced (counts or check results), unless a review table with tick boxes is open: ticks there must not be lost.
+    document.body.addEventListener('audit-run-ended', (event) => {
+        if (document.querySelector('#audit-review-form input[name="row"]')) return;
         htmx.ajax('GET', "{{ url_for('main.audit_review') }}", {
             target: '#audit-body',
-            values: {q: document.getElementById('audit-search').value, cls: 'counts'},
+            values: {q: document.getElementById('audit-search').value, cls: event.detail.cls || 'counts'},
         });
     });
 </script>

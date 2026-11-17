@@ -28,6 +28,8 @@ CITES_COLUMNS = ["tag", "cites", "cites_asof", "cites_1y", "openalex_id"]
 
 # waitress serves requests on several threads
 _LOCK = threading.Lock()
+# parsed journal files by path, valid while the file's time and size are unchanged
+_PARSED: dict[Path, tuple[tuple[int, int], list[dict]]] = {}
 
 
 def audit_dir(library_path: Path) -> Path:
@@ -68,11 +70,20 @@ def read_lines(library_path: Path, file_name: str) -> list[dict]:
     Return the records of a journal file, oldest first.
 
     A missing file is an empty journal. A line that does not parse, such as
-    one cut short by a crash, is skipped and logged.
+    one cut short by a crash, is skipped and logged. The parsed file is kept
+    until the file changes, since one page draw asks for it several times; the
+    records are shared, so a caller must not change them.
     """
     path = audit_dir(library_path) / file_name
-    if not path.exists():
+    try:
+        stat = path.stat()
+    except OSError:
         return []
+    signature = (stat.st_mtime_ns, stat.st_size)
+    with _LOCK:
+        cached = _PARSED.get(path)
+    if cached and cached[0] == signature:
+        return list(cached[1])
     records = []
     with open(path, encoding="utf-8") as f:
         for number, line in enumerate(f, start=1):
@@ -82,7 +93,9 @@ def read_lines(library_path: Path, file_name: str) -> list[dict]:
                 records.append(json.loads(line))
             except json.JSONDecodeError:
                 logger.warning("Skipped line %s of %s: not JSON", number, path)
-    return records
+    with _LOCK:
+        _PARSED[path] = (signature, records)
+    return list(records)
 
 
 def rejected_proposals(library_path: Path) -> set[tuple]:
@@ -199,3 +212,29 @@ def read_cites(library_path: Path):
     if not path.exists():
         return pd.DataFrame(columns=CITES_COLUMNS)
     return pd.read_feather(path)
+
+
+def latest_observations(library_path: Path) -> dict[tuple, dict]:
+    """
+    The newest answer of each source to each question.
+
+    Returns
+    -------
+    dict
+        ``(tag, source, query_kind, query) -> observation`` for the newest
+        observation whose status is ``ok`` or ``not_found``. An ``error`` is
+        not an answer and is left out, so the question is asked again.
+    """
+    latest: dict[tuple, dict] = {}
+    for record in read_lines(library_path, OBSERVATIONS):
+        if record.get("status") in (OK, NOT_FOUND):
+            latest[(record.get("tag"), record.get("source"), record.get("query_kind"), record.get("query"))] = record
+    return latest
+
+
+def is_fresh(record: dict | None, days: float, now: dt.datetime | None = None) -> bool:
+    """Whether a journal record exists and is newer than ``days``."""
+    if record is None:
+        return False
+    now = now or dt.datetime.now(dt.timezone.utc)
+    return _when(record) >= now - dt.timedelta(days=days)

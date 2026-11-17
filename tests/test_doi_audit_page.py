@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pandas as pd
 import pytest
@@ -172,7 +173,7 @@ def test_the_review_table_lists_malformed_dois_with_nothing_ticked(client):
     assert "Malformed: 2 rows" in html
     assert 'name="new::Wang2020|doi" value="10.1/One"' in html
     assert 'name="new::Wang2019|doi" value="10.1/two"' in html
-    assert "checked" not in html and "Poe2017" not in html
+    assert not re.search(r'type="checkbox"[^>]*\bchecked', html) and "Poe2017" not in html
     assert 'href="/edit?tag=Wang2020"' in html
 
 

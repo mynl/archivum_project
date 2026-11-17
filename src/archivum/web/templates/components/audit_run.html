@@ -7,13 +7,14 @@
         <span>
             {% if run.active %}
             <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
-            <strong>Fetching citation counts</strong>:
+            <strong>{{ 'Checking DOIs' if s.action == 'check' else 'Fetching citation counts' }}</strong>{% if s.phase %}, asking {{ s.phase }}{% endif %}:
             {% else %}
-            <strong>Last run {{ s.status }}</strong> {{ s.get('finished', s.updated).replace('T', ' ')[:16] }} UTC:
+            <strong>Last {{ 'DOI check' if s.action == 'check' else 'count run' }} {{ s.status }}</strong> {{ s.get('finished', s.updated).replace('T', ' ')[:16] }} UTC:
             {% endif %}
             {{ '{:,}'.format(s.done) }} of {{ '{:,}'.format(s.total) }} references,
             {{ '{:,}'.format(s.requests) }} of {{ '{:,}'.format(s.requests_planned) }} requests, {{ s.mode }}, {{ run.elapsed }}.
-            Found {{ '{:,}'.format(s.found) }}, not at OpenAlex {{ '{:,}'.format(s.not_found) }}{% if s.errors %}, <span class="text-danger">errors {{ '{:,}'.format(s.errors) }}</span>{% endif %}.
+            {% if s.action != 'check' %}Found {{ '{:,}'.format(s.found) }}, not at OpenAlex {{ '{:,}'.format(s.not_found) }}.{% endif %}
+            {% if s.errors %}<span class="text-danger">Errors: {{ '{:,}'.format(s.errors) }}.</span>{% endif %}
             {% if run.budget %}OpenAlex credits left today: {{ '{:,.0f}'.format(run.budget[0]) }} of {{ '{:,.0f}'.format(run.budget[1]) }}.{% endif %}
             {% for host, reason in run.stopped_hosts.items() %}<span class="text-danger">{{ host }} stopped: {{ reason }}.</span>{% endfor %}
             {% if s.message %}<span class="text-danger">{{ s.message }}</span>{% endif %}

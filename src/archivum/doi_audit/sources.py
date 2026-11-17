@@ -8,9 +8,13 @@ A record is a dict with the fields of an observation line: ``source``,
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from .. import egress
 from .doi import doi_key
 
+CROSSREF_WORKS = "https://api.crossref.org/works"
+DOI_ORG = "https://doi.org"
 OPENALEX_WORKS = "https://api.openalex.org/works"
 # OpenAlex allows 100 values in one filter
 OPENALEX_BATCH = 100
@@ -119,3 +123,97 @@ def openalex_work(client: egress.Egress, identifier: str) -> dict | None:
     if response.status_code != 200:
         raise SourceError(f"OpenAlex answered HTTP {response.status_code}")
     return _openalex_record(response.json())
+
+
+def _doi_path(doi: str) -> str:
+    """A DOI as a URL path segment: ``/`` and the common DOI punctuation kept, the rest encoded."""
+    return quote(doi, safe="/:;()")
+
+
+def _crossref_record(work: dict) -> dict:
+    """Reduce a Crossref work to a record."""
+    def first(key):
+        values = work.get(key) or []
+        return values[0] if values else None
+
+    authors = work.get("author") or []
+    author = authors[0] if authors else {}
+    name = " ".join(part for part in (author.get("given"), author.get("family")) if part) or author.get("name")
+    parts = (((work.get("issued") or {}).get("date-parts") or [[None]])[0]) or [None]
+    relation = work.get("relation") or {}
+    return {
+        "source": "crossref",
+        "source_id": work.get("DOI"),
+        "doi": doi_key(work["DOI"]) if work.get("DOI") else None,
+        "title": first("title"),
+        "year": parts[0],
+        "first_author": name,
+        "container": first("container-title"),
+        "volume": work.get("volume"),
+        "issue": work.get("issue"),
+        "pages": (work.get("page") or "").replace("-", "--") or None,
+        "type": work.get("type"),
+        "cited_by_count": work.get("is-referenced-by-count"),
+        "is_preprint_of": [doi_key(r["id"]) for r in relation.get("is-preprint-of", []) if r.get("id-type") == "doi"],
+    }
+
+
+def crossref_work(client: egress.Egress, doi: str) -> dict | None:
+    """
+    Ask Crossref for the work with a DOI.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run.
+    doi : str
+        The DOI in compared form.
+
+    Returns
+    -------
+    dict or None
+        The record, or ``None`` when Crossref has no such DOI. That is not
+        proof the DOI does not exist: Crossref has only the DOIs registered
+        with it, and not, for instance, DataCite's.
+
+    Raises
+    ------
+    SourceError
+        If the status is neither 200 nor 404.
+    """
+    response = client.get(f"{CROSSREF_WORKS}/{_doi_path(doi)}", kind=egress.SINGLE)
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200:
+        raise SourceError(f"Crossref answered HTTP {response.status_code}")
+    return _crossref_record(response.json()["message"])
+
+
+def doi_exists(client: egress.Egress, doi: str) -> bool:
+    """
+    Ask ``doi.org`` whether a DOI is registered anywhere.
+
+    Parameters
+    ----------
+    client : egress.Egress
+        The paced client of the run.
+    doi : str
+        The DOI in compared form.
+
+    Returns
+    -------
+    bool
+        True for a redirect, which is how ``doi.org`` answers a DOI it knows
+        (the redirect is not followed); False for a 404.
+
+    Raises
+    ------
+    SourceError
+        For any other status.
+    """
+    response = client.request("HEAD", f"{DOI_ORG}/{_doi_path(doi)}", kind=egress.SINGLE)
+    if response.status_code in (301, 302, 303, 307, 308):
+        return True
+    if response.status_code == 404:
+        return False
+    raise SourceError(f"doi.org answered HTTP {response.status_code}")

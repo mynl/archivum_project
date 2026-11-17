@@ -5,6 +5,31 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a10 (2026-11-17)
+
+### Added
+
+- **Check DOIs** on the Audit page. OpenAlex is asked first, 100 DOIs a
+  request; Crossref is asked only about the DOIs OpenAlex does not confirm,
+  and `doi.org` only about those neither has. A check collects the citation
+  counts as well.
+- **Show DOI check results**: each DOI classed as verified, year differs,
+  weak match, mismatch, unresolved, exists but not compared, or shared, with
+  the library's title, author and year beside the source's and the title
+  similarity.
+- Unresolved, mismatch and weak-match rows take a replacement DOI typed by
+  hand, or are cleared, through Commit ticked. Reject ticked marks a DOI as
+  right as it stands. The other classes are information only.
+- `archivum doi-audit-run --dois -x` runs the check from a terminal, and
+  `doi-audit-status` reports the classes and how the title similarity is
+  spread.
+- The summary strip counts the DOIs checked.
+
+### Changed
+
+- The confirmation before a run gives the requests as a range when the number
+  depends on what the first source answers.
+
 ## 2.16.0a9 (2026-11-17)
 
 ### Changed

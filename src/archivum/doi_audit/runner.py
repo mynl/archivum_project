@@ -31,7 +31,7 @@ import psutil
 from .. import egress
 from . import journal, sources
 from .changesets import cell_value
-from .doi import ATTENTION, classify_stored_doi, doi_key
+from .doi import ATTENTION, VERIFIED, YEAR_DIFFERS, classify_stored_doi, doi_key, match
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ RUNNING, FINISHED, STOPPED, FAILED = "running", "finished", "stopped", "failed"
 ASSUMED_LATENCY_SECONDS = 0.5
 
 # runs started in this process, by library folder
-_ACTIVE: dict[Path, "CountsRun"] = {}
+_ACTIVE: dict[Path, "Run"] = {}
 _ACTIVE_LOCK = threading.Lock()
 
 
@@ -147,6 +147,155 @@ def plan_counts(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> 
     return plan
 
 
+OPENALEX_STAGE, CROSSREF_STAGE, DOI_ORG_STAGE = "openalex", "crossref", "doi.org"
+
+
+def next_stage(reference: dict, key: str, latest: dict, refresh_days: float) -> str | None:
+    """
+    The next source to ask about a reference's DOI, or ``None`` when it is settled.
+
+    Parameters
+    ----------
+    reference : dict
+        The library's ``tag``, ``title``, ``author`` and ``year``.
+    key : str
+        The DOI in compared form.
+    latest : dict
+        From :func:`journal.latest_observations`.
+    refresh_days : float
+        An answer older than this does not count.
+
+    Returns
+    -------
+    str or None
+        ``openalex`` first. Then ``crossref``, unless the OpenAlex record
+        already verifies the DOI. Then ``doi.org``, only when neither has the
+        DOI: a record from either source shows that it exists, and ``doi.org``
+        is the one place that knows a DOI registered elsewhere.
+
+    Notes
+    -----
+    The order keeps requests few: OpenAlex answers 100 DOIs in a request, the
+    other two one each, and most DOIs are settled by the first.
+    """
+    tag = reference["tag"]
+    openalex = latest.get((tag, "openalex", "doi", key))
+    if not journal.is_fresh(openalex, refresh_days):
+        return OPENALEX_STAGE
+    if openalex["status"] == journal.OK and match(reference, openalex).cls in (VERIFIED, YEAR_DIFFERS):
+        return None
+    crossref = latest.get((tag, "crossref", "doi", key))
+    if not journal.is_fresh(crossref, refresh_days):
+        return CROSSREF_STAGE
+    if openalex["status"] == journal.OK or crossref["status"] == journal.OK:
+        return None
+    if not journal.is_fresh(latest.get((tag, "doi.org", "doi", key)), refresh_days):
+        return DOI_ORG_STAGE
+    return None
+
+
+@dataclass
+class CheckPlan:
+    """
+    What a DOI check over a subset would do.
+
+    Attributes
+    ----------
+    subset, no_doi, unusable, fresh : int
+        As in :class:`CountsPlan`; ``fresh`` counts references already settled.
+    references : dict
+        ``tag -> {tag, title, author, year, key}`` for the references still to
+        settle.
+    stages : dict
+        ``tag -> stage`` each of them is at.
+    refresh_days : float
+        The refresh period the plan was made with.
+    """
+
+    subset: int = 0
+    no_doi: int = 0
+    unusable: int = 0
+    fresh: int = 0
+    references: dict[str, dict] = field(default_factory=dict)
+    stages: dict[str, str] = field(default_factory=dict)
+    refresh_days: float = 30.0
+
+    @property
+    def tags(self) -> int:
+        """The number of references to settle."""
+        return len(self.references)
+
+    def keys_at(self, stage: str) -> dict[str, list[str]]:
+        """``doi_key -> [tags]`` for the references at a stage; a shared DOI is asked about once."""
+        work: dict[str, list[str]] = {}
+        for tag, at in self.stages.items():
+            if at == stage:
+                work.setdefault(self.references[tag]["key"], []).append(tag)
+        return work
+
+    @property
+    def openalex_requests(self) -> int:
+        """Requests to OpenAlex: batches of 100, and one each for DOIs that cannot be batched."""
+        keys = list(self.keys_at(OPENALEX_STAGE))
+        batched = sum(1 for k in keys if sources.can_batch(k))
+        return -(-batched // sources.OPENALEX_BATCH) + (len(keys) - batched)
+
+    @property
+    def requests(self) -> int:
+        """The fewest requests the run can make: every DOI not yet asked about is verified by OpenAlex."""
+        return self.openalex_requests + len(self.keys_at(CROSSREF_STAGE)) + len(self.keys_at(DOI_ORG_STAGE))
+
+    @property
+    def requests_most(self) -> int:
+        """The most requests the run can make: every DOI goes on to Crossref and to ``doi.org``."""
+        return (self.openalex_requests + 2 * len(self.keys_at(OPENALEX_STAGE))
+                + 2 * len(self.keys_at(CROSSREF_STAGE)) + len(self.keys_at(DOI_ORG_STAGE)))
+
+    def seconds(self, mode: str, requests: int | None = None) -> float:
+        """Estimate the duration in a mode for a number of single requests; the fewest by default."""
+        pace = egress.MODES[mode]
+        requests = self.requests if requests is None else requests
+        return max(requests * pace.single_interval, requests * ASSUMED_LATENCY_SECONDS / pace.concurrency)
+
+
+def plan_check(library_path: Path, rows: pd.DataFrame, refresh_days: float) -> CheckPlan:
+    """
+    Work out what a DOI check over ``rows`` would ask.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder, for the journal.
+    rows : pandas.DataFrame
+        The references of the subset.
+    refresh_days : float
+        An answer newer than this is fresh and is not asked for again.
+
+    Returns
+    -------
+    CheckPlan
+    """
+    plan = CheckPlan(subset=len(rows), refresh_days=refresh_days)
+    latest = journal.latest_observations(library_path)
+    for row in rows.to_dict("records"):
+        doi = cell_value(row.get("doi"))
+        if not doi or not doi.strip():
+            plan.no_doi += 1
+            continue
+        if classify_stored_doi(doi) == ATTENTION:
+            plan.unusable += 1
+            continue
+        reference = {"tag": row["tag"], "title": cell_value(row.get("title")), "author": cell_value(row.get("author")),
+                     "year": cell_value(row.get("year")), "key": doi_key(doi)}
+        stage = next_stage(reference, reference["key"], latest, refresh_days)
+        if stage is None:
+            plan.fresh += 1
+        else:
+            plan.references[row["tag"]] = reference
+            plan.stages[row["tag"]] = stage
+    return plan
+
+
 def _path(library_path: Path, name: str) -> Path:
     return journal.audit_dir(library_path) / name
 
@@ -228,21 +377,24 @@ def request_stop(library_path: Path) -> bool:
     return True
 
 
-class CountsRun:
+class Run:
     """
-    One citation-count run for one library.
+    One run of the runner for one library: the lock, the progress, the pool.
 
     Creating the object takes the lock, so a second run is refused at once,
-    in the caller's own thread.
+    in the caller's own thread. A subclass says what to ask by overriding
+    :meth:`phases`.
 
     Parameters
     ----------
     library_path : Path
         The library folder.
-    plan : CountsPlan
-        From :func:`plan_counts`.
     mode : str
         ``egress.SPEEDY`` or ``egress.POLITE``.
+    total : int
+        The references the run is to settle.
+    requests_planned : int
+        The requests expected, as far as is known at the start.
     client : egress.Egress, optional
         Replaced in tests. The default is a new client in ``mode``, whose
         waits end when the run is stopped.
@@ -255,10 +407,11 @@ class CountsRun:
         If a live run holds the lock.
     """
 
-    def __init__(self, library_path: Path, plan: CountsPlan, mode: str, *,
+    action = ""
+
+    def __init__(self, library_path: Path, mode: str, *, total: int, requests_planned: int,
                  client: egress.Egress | None = None, on_progress=None):
         self.library_path = Path(library_path)
-        self.plan = plan
         self.mode = mode
         self.stop = client.stop if client is not None else threading.Event()
         self.client = client or egress.Egress(mode, stop=self.stop)
@@ -267,10 +420,10 @@ class CountsRun:
         self._lock = threading.Lock()
         self._last_write = 0.0
         self.state = {
-            "run_id": self.run_id, "action": "counts", "mode": mode, "pid": os.getpid(),
-            "status": RUNNING, "message": "", "started": journal.now_utc(), "updated": journal.now_utc(),
-            "total": plan.tags, "done": 0, "found": 0, "not_found": 0, "errors": 0,
-            "requests_planned": plan.requests, "requests": 0, "hosts": {},
+            "run_id": self.run_id, "action": self.action, "mode": mode, "pid": os.getpid(),
+            "status": RUNNING, "message": "", "phase": "", "started": journal.now_utc(), "updated": journal.now_utc(),
+            "total": total, "done": 0, "found": 0, "not_found": 0, "errors": 0,
+            "requests_planned": requests_planned, "requests": 0, "hosts": {},
         }
         self._acquire()
 
@@ -297,6 +450,12 @@ class CountsRun:
         with self._lock:
             return dict(self.state)
 
+    def tally(self, **counts: int) -> None:
+        """Add to the run's counters (``done``, ``found``, ``not_found``, ``errors``, ``requests``)."""
+        with self._lock:
+            for name, n in counts.items():
+                self.state[name] += n
+
     def _write_state(self, force: bool = False) -> None:
         now = time.monotonic()
         with self._lock:
@@ -313,44 +472,24 @@ class CountsRun:
             self.stop.set()
         return self.stop.is_set()
 
-    def _record(self, keys: list[str], found: dict[str, dict], error: str = "") -> None:
-        """Append the journal lines for the DOIs of one request, and count them."""
-        observations, counts = [], []
-        tally = {"found": 0, "not_found": 0, "errors": 0}
-        for key in keys:
-            record = found.get(key)
-            for tag in self.plan.work[key]:
-                base = {"run_id": self.run_id, "tag": tag, "source": "openalex", "query_kind": "doi", "query": key}
-                if error:
-                    observations.append({**base, "status": journal.ERROR, "error": error})
-                    tally["errors"] += 1
-                elif record is None:
-                    observations.append({**base, "status": journal.NOT_FOUND})
-                    tally["not_found"] += 1
-                else:
-                    observations.append({**base, "status": journal.OK, **record})
-                    counts.append({"tag": tag, "source": "openalex", "source_id": record["source_id"],
-                                   "doi": key, "count": record["cited_by_count"]})
-                    tally["found"] += 1
-        journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
-        journal.append_lines(self.library_path, journal.COUNTS, counts)
-        with self._lock:
-            self.state["requests"] += 1
-            self.state["done"] += sum(tally.values())
-            for name, n in tally.items():
-                self.state[name] += n
+    def phases(self):
+        """
+        Yield ``(name, jobs)`` for each phase of the run, in order.
 
-    def _ask(self, keys: list[str], batch: bool) -> None:
-        """Make one request and record its answer. A stopped run makes no request."""
+        A job is ``(ask, on_error)``: ``ask()`` makes one request and records
+        its answer; ``on_error(message)`` records a failure of that request.
+        The jobs of a phase run on the pool. The code between two yields runs
+        after the earlier phase has finished, so a later phase can depend on
+        what an earlier one found.
+        """
+        raise NotImplementedError
+
+    def _do(self, ask, on_error) -> None:
+        """Run one job. A stopped run makes no request."""
         if self._stop_requested():
             return
         try:
-            if batch:
-                found = sources.openalex_works_by_doi(self.client, keys)
-            else:
-                record = sources.openalex_work(self.client, f"doi:{keys[0]}")
-                found = {keys[0]: record} if record else {}
-            self._record(keys, found)
+            ask()
         except egress.Stopped:
             return
         except egress.HostStopped as e:
@@ -360,7 +499,7 @@ class CountsRun:
             self.stop.set()
         except (sources.SourceError, ValueError, KeyError) as e:
             logger.error("DOI audit request failed: %s", e)
-            self._record(keys, {}, error=str(e))
+            on_error(str(e))
         self._write_state()
         if self.on_progress:
             self.on_progress(self.snapshot())
@@ -377,13 +516,18 @@ class CountsRun:
         """
         status = FAILED
         try:
-            jobs = [(keys, True) for keys in self.plan.batches] + [([key], False) for key in self.plan.singles]
             with ThreadPoolExecutor(max_workers=egress.MODES[self.mode].concurrency,
                                     thread_name_prefix="doi-audit") as pool:
-                futures = [pool.submit(self._ask, keys, batch) for keys, batch in jobs]
                 try:
-                    for future in as_completed(futures):
-                        future.result()
+                    for name, jobs in self.phases():
+                        with self._lock:
+                            self.state["phase"] = name
+                            self.state["requests_planned"] = max(
+                                self.state["requests_planned"], self.state["requests"] + len(jobs))
+                        for future in as_completed([pool.submit(self._do, ask, on_error) for ask, on_error in jobs]):
+                            future.result()
+                        if self._stop_requested():
+                            break
                 except KeyboardInterrupt:
                     self.stop.set()
             status = STOPPED if self.stop.is_set() else FINISHED
@@ -414,6 +558,173 @@ class CountsRun:
         thread = threading.Thread(target=self.run, name=f"doi-audit-run-{self.run_id}", daemon=True)
         thread.start()
         return thread
+
+    # ---- OpenAlex by DOI, shared by the count run and the DOI check ----
+
+    def _openalex_jobs(self, work: dict[str, list[str]], settled=None) -> list[tuple]:
+        """
+        Jobs asking OpenAlex about the DOIs in ``work`` (``doi_key -> [tags]``).
+
+        Each answer is written to ``observations.jsonl``, and each count to
+        ``counts.jsonl``. ``settled(tag, record)`` says whether an answer
+        settles its reference, for the ``done`` counter; by default any answer
+        does.
+        """
+        batchable = [k for k in work if sources.can_batch(k)]
+        batches = [batchable[i:i + sources.OPENALEX_BATCH] for i in range(0, len(batchable), sources.OPENALEX_BATCH)]
+        singles = [[k] for k in work if not sources.can_batch(k)]
+
+        def ask(keys, batch):
+            if batch:
+                found = sources.openalex_works_by_doi(self.client, keys)
+            else:
+                record = sources.openalex_work(self.client, f"doi:{keys[0]}")
+                found = {keys[0]: record} if record else {}
+            self._record_openalex(work, keys, found, settled=settled)
+
+        return [(lambda keys=keys, batch=batch: ask(keys, batch),
+                 lambda message, keys=keys: self._record_openalex(work, keys, {}, error=message))
+                for keys, batch in [(b, True) for b in batches] + [(s, False) for s in singles]]
+
+    def _record_openalex(self, work, keys, found, error: str = "", settled=None) -> None:
+        """Append the journal lines for the DOIs of one OpenAlex request, and count them."""
+        observations, counts = [], []
+        tally = {"found": 0, "not_found": 0, "errors": 0, "done": 0}
+        for key in keys:
+            record = found.get(key)
+            for tag in work[key]:
+                base = {"run_id": self.run_id, "tag": tag, "source": "openalex", "query_kind": "doi", "query": key}
+                if error:
+                    observations.append({**base, "status": journal.ERROR, "error": error})
+                    tally["errors"] += 1
+                    tally["done"] += 1
+                    continue
+                if record is None:
+                    observations.append({**base, "status": journal.NOT_FOUND})
+                    tally["not_found"] += 1
+                else:
+                    observations.append({**base, "status": journal.OK, **record})
+                    counts.append({"tag": tag, "source": "openalex", "source_id": record["source_id"],
+                                   "doi": key, "count": record["cited_by_count"]})
+                    tally["found"] += 1
+                self._answered(observations[-1])
+                if settled is None or settled(tag, record):
+                    tally["done"] += 1
+        journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
+        journal.append_lines(self.library_path, journal.COUNTS, counts)
+        self.tally(requests=1, **tally)
+
+    def _answered(self, observation: dict) -> None:
+        """Hook: an answer has arrived. A run that plans later phases from earlier answers keeps it."""
+
+
+class CountsRun(Run):
+    """
+    A citation-count run: OpenAlex is asked about each DOI in the plan.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder.
+    plan : CountsPlan
+        From :func:`plan_counts`.
+    mode : str
+        ``egress.SPEEDY`` or ``egress.POLITE``.
+    client, on_progress
+        As for :class:`Run`.
+    """
+
+    action = "counts"
+
+    def __init__(self, library_path: Path, plan: CountsPlan, mode: str, *,
+                 client: egress.Egress | None = None, on_progress=None):
+        self.plan = plan
+        super().__init__(library_path, mode, total=plan.tags, requests_planned=plan.requests,
+                         client=client, on_progress=on_progress)
+
+    def phases(self):
+        yield "OpenAlex", self._openalex_jobs(self.plan.work)
+
+
+class CheckRun(Run):
+    """
+    A DOI check: each DOI is asked about until it is settled.
+
+    The phases follow :func:`next_stage`. OpenAlex first, in batches, which
+    also collects the citation counts. Then Crossref, one DOI a request, for
+    the DOIs OpenAlex does not verify. Then ``doi.org``, for the DOIs neither
+    has. Each phase is planned from the answers of the one before.
+
+    Parameters
+    ----------
+    library_path : Path
+        The library folder.
+    plan : CheckPlan
+        From :func:`plan_check`.
+    mode : str
+        ``egress.SPEEDY`` or ``egress.POLITE``.
+    client, on_progress
+        As for :class:`Run`.
+    """
+
+    action = "check"
+
+    def __init__(self, library_path: Path, plan: CheckPlan, mode: str, *,
+                 client: egress.Egress | None = None, on_progress=None):
+        self.plan = plan
+        # answers so far, kept in memory so later phases are planned without re-reading the journal
+        self.latest = dict(journal.latest_observations(library_path))
+        self._latest_lock = threading.Lock()
+        super().__init__(library_path, mode, total=plan.tags, requests_planned=plan.requests,
+                         client=client, on_progress=on_progress)
+
+    def _answered(self, observation: dict) -> None:
+        stamped = {"at": journal.now_utc(), **observation}
+        with self._latest_lock:
+            self.latest[(stamped["tag"], stamped["source"], stamped["query_kind"], stamped["query"])] = stamped
+
+    def _stage(self, tag: str) -> str | None:
+        reference = self.plan.references[tag]
+        with self._latest_lock:
+            return next_stage(reference, reference["key"], self.latest, self.plan.refresh_days)
+
+    def _keys_at(self, stage: str) -> dict[str, list[str]]:
+        work: dict[str, list[str]] = {}
+        for tag, reference in self.plan.references.items():
+            if self._stage(tag) == stage:
+                work.setdefault(reference["key"], []).append(tag)
+        return work
+
+    def _single_jobs(self, source: str, work: dict[str, list[str]], ask_source) -> list[tuple]:
+        """Jobs asking ``source`` about one DOI each; ``ask_source(key)`` returns a record, or ``None`` for not found."""
+        def record(key, answer, error=""):
+            observations = []
+            for tag in work[key]:
+                base = {"run_id": self.run_id, "tag": tag, "source": source, "query_kind": "doi", "query": key}
+                if error:
+                    observations.append({**base, "status": journal.ERROR, "error": error})
+                    continue
+                observations.append({**base, "status": journal.OK, **answer} if answer is not None
+                                    else {**base, "status": journal.NOT_FOUND})
+                self._answered(observations[-1])
+            journal.append_lines(self.library_path, journal.OBSERVATIONS, observations)
+            tags = work[key]
+            settled = len(tags) if error else sum(self._stage(tag) is None for tag in tags)
+            self.tally(requests=1, done=settled, errors=len(tags) if error else 0,
+                       found=0 if error or answer is None else len(tags),
+                       not_found=len(tags) if not error and answer is None else 0)
+
+        return [(lambda key=key: record(key, ask_source(key)), lambda message, key=key: record(key, None, error=message))
+                for key in work]
+
+    def phases(self):
+        yield "OpenAlex", self._openalex_jobs(
+            self.plan.keys_at(OPENALEX_STAGE), settled=lambda tag, record: self._stage(tag) is None)
+        yield "Crossref", self._single_jobs(
+            "crossref", self._keys_at(CROSSREF_STAGE), lambda key: sources.crossref_work(self.client, key))
+        yield "doi.org", self._single_jobs(
+            "doi.org", self._keys_at(DOI_ORG_STAGE),
+            lambda key: {"exists": True} if sources.doi_exists(self.client, key) else None)
 
 
 def format_duration(seconds: float) -> str:

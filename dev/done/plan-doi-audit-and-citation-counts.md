@@ -670,3 +670,43 @@ if the OpenAlex counts prove sufficient.
   [back-restores-page].
 - The user's go-ahead for the last four steps was given with these tweaks (2026-11-17).
 - Gate: `.venv\Scripts\python -m pytest -q`, 303 passed, 26 skipped.
+
+### 2.16.0a10 [DOI check] (2026-11-17)
+
+- **Divergence: the sources are asked in stages, not all three for every DOI.** OpenAlex
+  first (100 DOIs a request). Crossref only for a DOI the OpenAlex record does not verify.
+  `doi.org` only for a DOI neither has, since a record from either shows the DOI exists. The
+  plan asked all three for each of 3,037 DOIs, about 6,100 single requests; this way most DOIs
+  cost a hundredth of a request. `runner.next_stage` is the rule, and the run is resumable at
+  any stage.
+- **Divergence: a class the draft's table lacked, `weak match`**, for a title similarity from
+  0.6 to 0.9 with the first author agreeing. The draft's `verified` and `mismatch` left that
+  range unclassed. Also `not compared` (the DOI exists at `doi.org` but no source has a record:
+  the DataCite case) and `not checked`.
+- **Divergence: `shared` is shown beside the match class, not instead of it.** A reference
+  sharing a DOI still has a verified or mismatched record; the Shared list is every row whose
+  DOI is on another tag.
+- **Divergence: when both sources have a record the better title match is used.**
+- **Divergence: a missing first author on either side is not a difference.**
+- **The match score** is rapidfuzz's normalized indel similarity on folded titles
+  (`rapidfuzz` is already a dependency), not `difflib`.
+- **Divergence: the runner became a base `Run` with phases**, `CountsRun` and `CheckRun` on top;
+  a later phase is planned from the answers of the earlier one, kept in memory.
+- **Divergence: `/audit/counts-plan` became `/audit/plan?action=`**, one confirmation for both
+  runs. The default mode follows the most requests the run could need.
+- **Reject** on a checked row means "this DOI is right as it stands"; it is stored with an
+  empty proposal and the row is not listed again.
+- Journal files are parsed once and kept until the file changes, since one page draw reads
+  them several times.
+- **Thresholds** stay at 0.9 and 0.6, provisional. `archivum doi-audit-status` prints the
+  class counts and the title similarity in seven bands; the first full run on the real library
+  is the user's, and the thresholds are confirmed or moved from its output.
+- **Measured on the real library** (read only, 3,037 DOIs, test client): the Audit body draws
+  in about 200 ms, the check confirmation in about 345 ms. Idle check repeated after the runner
+  change: 0.000 CPU s in 60 s, no child processes.
+- Browser check on a temp library with fake sources: plan, run, results appearing at the end,
+  class pills, a replacement DOI committed; no console errors, no overflow at 390 px.
+- Tests: `tests/test_doi_audit_check.py` (35). Gate: `.venv\Scripts\python -m pytest -q`,
+  338 passed, 26 skipped.
+- **Left for the user:** Check DOIs on the real library, then `archivum doi-audit-status` for
+  the distribution.

@@ -15,41 +15,68 @@
 {% include "components/audit_summary.html" %}
 
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="audit-actions">
-    <button class="btn btn-primary btn-sm px-3 fw-bold shadow-sm"
-            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "malformed"}' hx-include="#audit-search" hx-target="#audit-body">
-        Normalize DOIs
-    </button>
-    <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
-            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "attention"}' hx-include="#audit-search" hx-target="#audit-body">
-        Show DOIs needing attention
-    </button>
-    <button class="btn btn-primary btn-sm px-3 fw-bold shadow-sm"
-            hx-get="{{ url_for('main.audit_counts_plan') }}" hx-include="#audit-search" hx-target="#audit-body">
-        Fetch citation counts&hellip;
-    </button>
-    <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
-            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
-        Show citation counts
-    </button>
+    <div class="btn-group shadow-sm">
+        <button class="btn btn-primary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "malformed"}' hx-include="#audit-search" hx-target="#audit-body">
+            Normalize DOIs
+        </button>
+        <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "attention"}' hx-include="#audit-search" hx-target="#audit-body">
+            Show DOIs needing attention
+        </button>
+    </div>
+    <div class="btn-group shadow-sm">
+        <button class="btn btn-primary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "check"}' hx-include="#audit-search" hx-target="#audit-body">
+            Check DOIs&hellip;
+        </button>
+        <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "check"}' hx-include="#audit-search" hx-target="#audit-body">
+            Show DOI check results
+        </button>
+    </div>
+    <div class="btn-group shadow-sm">
+        <button class="btn btn-primary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_plan') }}" hx-vals='{"action": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
+            Fetch citation counts&hellip;
+        </button>
+        <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+                hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "counts"}' hx-include="#audit-search" hx-target="#audit-body">
+            Show citation counts
+        </button>
+    </div>
 </div>
 
 {% if plan %}
 {% set p = plan.plan %}
+{% set checking = plan.action == 'check' %}
 <form id="audit-plan-form" class="card shadow-sm border-0 mb-4">
     {{ state() }}
+    <input type="hidden" name="action" value="{{ plan.action }}">
     <div class="card-header bg-white">
-        <h6 class="fw-bold small text-uppercase mb-0">Fetch citation counts from OpenAlex</h6>
+        <h6 class="fw-bold small text-uppercase mb-0">{{ 'Check DOIs against OpenAlex, Crossref and doi.org' if checking else 'Fetch citation counts from OpenAlex' }}</h6>
     </div>
     <div class="card-body small">
         <p class="mb-2">
             Of {{ '{:,}'.format(p.subset) }} references in the subset,
-            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be asked about, in
-            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }} to <code>api.openalex.org</code>.
+            <strong>{{ '{:,}'.format(p.tags) }}</strong> would be {{ 'checked' if checking else 'asked about' }}, in
+            {% if plan.requests_most > p.requests %}
+            <strong>{{ '{:,}'.format(p.requests) }} to {{ '{:,}'.format(plan.requests_most) }}</strong> requests.
+            {% else %}
+            <strong>{{ '{:,}'.format(p.requests) }}</strong> {{ 'request' if p.requests == 1 else 'requests' }}{{ '' if checking else ' to <code>api.openalex.org</code>'|safe }}.
+            {% endif %}
             Skipped: {{ '{:,}'.format(p.no_doi) }} with no DOI, {{ '{:,}'.format(p.unusable) }} whose DOI needs attention,
-            {{ '{:,}'.format(p.fresh) }} with a result under {{ refresh_days }} days old.
+            {{ '{:,}'.format(p.fresh) }} {{ 'already checked' if checking else 'with a result' }} under {{ refresh_days }} days ago.
         </p>
+        {% if checking %}
         <p class="mb-2 text-muted">
-            Only DOIs are sent. Cost: about {{ p.requests }} of the 10,000 credits a free OpenAlex key allows each day.
+            OpenAlex is asked first, 100 DOIs a request; that also collects the citation counts. Crossref is then asked, one DOI a request,
+            about each DOI OpenAlex does not confirm, and <code>doi.org</code> about each DOI neither has. How many go on is not known until
+            OpenAlex has answered, hence the range.
+        </p>
+        {% endif %}
+        <p class="mb-2 text-muted">
+            Only DOIs are sent. Cost: about {{ p.openalex_requests if checking else p.requests }} of the 10,000 credits a free OpenAlex key allows each day; Crossref and <code>doi.org</code> are free.
             {% if not plan.has_key %}<span class="text-danger">No <code>OPENALEX_API_KEY</code> is set in this server's environment, so the daily allowance is a tenth of that.</span>{% endif %}
             Results go to <code>doi-audit/</code> in the library folder; the references are not changed.
         </p>
@@ -65,9 +92,9 @@
                     hx-post="{{ url_for('main.audit_run') }}" hx-include="#audit-plan-form" hx-target="#audit-body">Start run</button>
             {% if plan.active %}<span class="text-muted">A run is active.</span>{% endif %}
         </div>
-        <div class="text-muted mt-2">Speedy sends up to 3 requests at once; polite sends one a second. Speedy is the default up to 500 requests.</div>
+        <div class="text-muted mt-2">Speedy sends up to 3 requests at once; polite sends one a second. Speedy is the default when the run needs at most 500 requests.</div>
         {% else %}
-        <div class="text-muted">Nothing to fetch.</div>
+        <div class="text-muted">Nothing to ask.</div>
         {% endif %}
     </div>
 </form>
@@ -122,7 +149,17 @@
 <form id="audit-review-form" class="card shadow-sm border-0 mb-4">
     {{ state() }}
     <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
-        <h6 class="fw-bold small text-uppercase mb-0">{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
+        <div>
+            <h6 class="fw-bold small text-uppercase mb-0">{{ 'DOI check, ' if review.kind == 'check' }}{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
+            {% if review.pills %}
+            <div class="d-flex flex-wrap gap-1 mt-2" id="audit-check-classes">
+                {% for cls, label, count in review.pills %}
+                <button type="button" class="btn btn-sm py-0 {{ 'btn-secondary' if cls == review.cls else 'btn-outline-secondary' }}" {{ 'disabled' if not count }}
+                        hx-get="{{ url_for('main.audit_review', q=q, cls=cls) }}" hx-target="#audit-body">{{ label }} {{ '{:,}'.format(count) }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
         {% if review.rows and review.can_commit %}
         <div class="d-flex gap-2">
             <button type="button" class="btn btn-success btn-sm fw-bold"
@@ -133,7 +170,48 @@
         </div>
         {% endif %}
     </div>
-    {% if review.rows %}
+    {% if review.rows and review.kind == 'check' %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    {% if review.can_commit %}<th class="ps-3" style="width: 2rem;"></th>{% endif %}
+                    <th class="{{ '' if review.can_commit else 'ps-3' }}">Tag</th>
+                    <th>DOI</th>
+                    {% if review.can_commit %}<th style="min-width: 14rem;">Replacement DOI</th>{% endif %}
+                    <th>In the library</th>
+                    <th>At the source</th>
+                    <th class="text-end">Title match</th>
+                    <th class="pe-3">Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.rows %}
+                {% set p = row.p %}
+                <tr>
+                    {% if review.can_commit %}
+                    <td class="ps-3">
+                        <input class="form-check-input" type="checkbox" name="row" value="{{ p.key }}" aria-label="Tick {{ p.tag }}">
+                        <input type="hidden" name="old::{{ p.key }}" value="{{ row.old_json }}">
+                        <input type="hidden" name="proposed::{{ p.key }}" value="">
+                    </td>
+                    {% endif %}
+                    <td class="{{ '' if review.can_commit else 'ps-3' }}"><a href="{{ url_for('main.editor_page', tag=p.tag) }}">{{ p.tag }}</a></td>
+                    <td class="font-monospace text-break"><a href="https://doi.org/{{ p.current }}" target="_blank" rel="noopener">{{ p.current }}</a></td>
+                    {% if review.can_commit %}
+                    <td><input type="text" class="form-control form-control-sm font-monospace" name="new::{{ p.key }}" value=""
+                               placeholder="empty clears the DOI" autocomplete="off" spellcheck="false" aria-label="Replacement DOI for {{ p.tag }}"></td>
+                    {% endif %}
+                    <td>{{ p.library.title|replace('{', '')|replace('}', '') }}<div class="text-muted">{{ p.library.author|replace('{', '')|replace('}', '')|truncate(60) }}, {{ p.library.year }}</div></td>
+                    <td>{% if p.record %}{{ p.record.title }}<div class="text-muted">{{ p.record.author }}, {{ p.record.year }}{% if p.record.container %}, <i>{{ p.record.container }}</i>{% endif %} ({{ p.source }})</div>{% else %}<span class="text-muted">{{ p.source }}</span>{% endif %}</td>
+                    <td class="text-end">{{ '%.2f'|format(p.score) if p.score is not none else '' }}</td>
+                    <td class="text-muted pe-3">{{ p.note }}{% if p.shared_with %}<div>Same DOI as {% for other in p.shared_with %}<a href="{{ url_for('main.editor_page', tag=other) }}">{{ other }}</a>{{ ', ' if not loop.last }}{% endfor %}; merge duplicates in Edit.</div>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif review.rows %}
     <div class="table-responsive">
         <table class="table table-hover table-sm align-middle mb-0 small">
             <thead class="table-light">

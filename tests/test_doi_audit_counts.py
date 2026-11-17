@@ -322,14 +322,14 @@ def _wait_for_run(lib):
 
 
 @pytest.mark.parametrize("method, path", [
-    ("get", "/audit/counts-plan"), ("get", "/audit/run-status"), ("post", "/audit/run"), ("post", "/audit/stop"),
+    ("get", "/audit/plan"), ("get", "/audit/run-status"), ("post", "/audit/run"), ("post", "/audit/stop"),
 ])
 def test_a_visitor_from_the_bridge_is_refused(client, method, path):
     assert getattr(client, method)(path, environ_overrides={"REMOTE_ADDR": "10.8.0.1"}).status_code == 403
 
 
 def test_the_plan_is_shown_before_anything_is_sent(client, fake_openalex):
-    html = client.get("/audit/counts-plan").get_data(as_text=True)
+    html = client.get("/audit/plan").get_data(as_text=True)
     assert "<strong>5</strong> would be asked about" in html and "<strong>2</strong> requests" in html
     assert "1 with no DOI, 1 whose DOI needs attention" in html
     assert 'value="speedy" checked' in html and "Start run" in html
@@ -343,8 +343,8 @@ def test_start_runs_in_the_background_and_the_counts_table_follows(client, lib, 
 
     response = client.get("/audit/run-status")
     status = response.get_data(as_text=True)
-    assert response.headers["HX-Trigger"] == "audit-run-ended"
-    assert "Last run finished" in status and "Found 4, not at OpenAlex 1" in status
+    assert json.loads(response.headers["HX-Trigger"]) == {"audit-run-ended": {"cls": "counts"}}
+    assert "Last count run finished" in status and "Found 4, not at OpenAlex 1" in status
     assert "every 5s" not in status and "credits left today: 9,000 of 10,000" in status
     assert 'id="audit-summary" hx-swap-oob="true"' in status
 
@@ -353,7 +353,7 @@ def test_start_runs_in_the_background_and_the_counts_table_follows(client, lib, 
     assert table.index("Wang2020") < table.index("Wang2019") < table.index("Odd2014")
     assert "Growth" not in table and 'text-nowrap pe-3">As of' in table
     summary = client.get("/audit/subset?q=author ~ /Wang/").get_data(as_text=True)
-    assert "With a count" in summary and "Last run finished" in summary
+    assert "With a count" in summary and "Last count run finished" in summary
 
 
 def test_the_status_line_polls_only_while_a_run_is_active(client, lib, monkeypatch):
@@ -375,7 +375,7 @@ def test_the_status_line_polls_only_while_a_run_is_active(client, lib, monkeypat
     finally:
         gate.set()
     _wait_for_run(lib)
-    assert "Last run stopped" in client.get("/audit/run-status").get_data(as_text=True)
+    assert "Last count run stopped" in client.get("/audit/run-status").get_data(as_text=True)
     assert "No run is active." in client.post("/audit/stop", data={"q": ""}).get_data(as_text=True)
 
 
@@ -385,7 +385,7 @@ def test_start_with_nothing_to_fetch_or_no_mode(client, lib, fake_openalex):
     _wait_for_run(lib)
     calls = len(fake_openalex.calls)
     html = client.post("/audit/run", data={"q": "", "mode": "speedy"}).get_data(as_text=True)
-    assert "Nothing to fetch" in html and len(fake_openalex.calls) == calls
+    assert "Nothing to ask" in html and len(fake_openalex.calls) == calls
 
 
 # ---- the commands ----

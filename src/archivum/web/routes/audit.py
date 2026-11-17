@@ -13,9 +13,12 @@ from ... import egress
 from ...cli import LibraryContext
 from ...doi_audit import changesets as cs
 from ...doi_audit import journal, runner
-from ...doi_audit.doi import MALFORMED
+from ...doi_audit.doi import MALFORMED, NOT_CHECKED
+from ...doi_audit.proposals import (
+    CHECK_CLASSES, CHECK_COMMIT_CLASSES, LOCAL_CLASSES, check_counts, check_rows, checked_dois, local_proposals,
+    subset_rows, summarize,
+)
 from ...utilities import clean_latex
-from ...doi_audit.proposals import LOCAL_CLASSES, local_proposals, subset_rows, summarize
 from ...search.universe import resolve_universe_tags
 from ..decorators import admin_required
 from ..services.search_history import note_search
@@ -26,6 +29,8 @@ logger = logging.getLogger(__name__)
 PAGE_ROWS = 50
 CHANGESETS_SHOWN = 20
 COUNTS_CLASS = "counts"
+CHECK_CLASS = "check"
+COUNTS_ACTION, CHECK_ACTION = "counts", "check"
 
 
 def _subset(lib, raw_query: str):
@@ -92,20 +97,63 @@ def _counts_table(lib, rows, page: int) -> dict:
     }
 
 
-def _plan_view(lib, rows) -> dict:
-    """The confirmation shown before a citation-count run: what it would ask, how long, and at what cost."""
-    plan = runner.plan_counts(lib.config_path, rows, lib.config.doi_audit_refresh_days)
-    default_mode = egress.choose_mode(plan.requests)
+def _plan_view(lib, rows, action: str) -> dict:
+    """
+    The confirmation shown before a run: what it would ask, how long, and at what cost.
+
+    Parameters
+    ----------
+    lib : Library
+        The open library.
+    rows : pandas.DataFrame
+        The references of the subset.
+    action : str
+        ``counts`` or ``check``.
+    """
+    days = lib.config.doi_audit_refresh_days
+    if action == CHECK_ACTION:
+        plan = runner.plan_check(lib.config_path, rows, days)
+        most = plan.requests_most
+        durations = {mode: (plan.seconds(mode), plan.seconds(mode, most)) for mode in egress.MODES}
+    else:
+        plan = runner.plan_counts(lib.config_path, rows, days)
+        most = plan.requests
+        durations = {mode: (plan.seconds(mode), plan.seconds(mode)) for mode in egress.MODES}
+
+    def span(low, high):
+        low, high = runner.format_duration(low), runner.format_duration(high)
+        return low if low == high else f"{low} to {high}"
+
     return {
+        "action": action,
         "plan": plan,
-        "default_mode": default_mode,
-        "modes": [
-            (mode, label, runner.format_duration(plan.seconds(mode)))
-            for mode, label in ((egress.SPEEDY, "Speedy"), (egress.POLITE, "Polite"))
-        ],
+        "requests_most": most,
+        # the default follows the most the run could need, so a long check is polite
+        "default_mode": egress.choose_mode(most),
+        "modes": [(mode, label, span(*durations[mode])) for mode, label in ((egress.SPEEDY, "Speedy"), (egress.POLITE, "Polite"))],
         "has_key": bool(os.environ.get("OPENALEX_API_KEY")),
         "active": runner.lock_holder(lib.config_path) is not None,
     }
+
+
+def _checked(lib, rows) -> list:
+    """Every usable DOI of the subset with its class from the journal, rejected rows left out."""
+    return checked_dois(rows, lib.ref_df, journal.latest_observations(lib.config_path),
+                        journal.rejected_proposals(lib.config_path))
+
+
+def _summary(lib, rows, checked=None) -> dict:
+    """The counts of the summary strip: the local ones, the citation counts, and the DOIs checked."""
+    checked = _checked(lib, rows) if checked is None else checked
+    return {**summarize(rows), **_counts_summary(lib, rows),
+            "checked": sum(1 for p in checked if p.cls != NOT_CHECKED)}
+
+
+def _page_of(found: list, page: int) -> tuple[list, int, int]:
+    """Return one page of ``found``, the page number within range, and the number of pages."""
+    pages = max(1, -(-len(found) // PAGE_ROWS))
+    page = min(max(page, 1), pages)
+    return found[(page - 1) * PAGE_ROWS: page * PAGE_ROWS], page, pages
 
 
 def _changeset_view(lib, name: str) -> dict | None:
@@ -126,7 +174,7 @@ def _changeset_view(lib, name: str) -> dict | None:
 
 
 def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str = "", level: str = "success",
-                 show_plan: bool = False, view_changeset: str = ""):
+                 show_plan: str = "", view_changeset: str = ""):
     """
     Render everything under the query box.
 
@@ -142,28 +190,43 @@ def _render_body(lib, raw_query: str, cls: str = "", page: int = 1, message: str
         The page of the review table, from 1.
     message, level : str, optional
         A status line and its Bootstrap level.
+    show_plan : str, optional
+        ``counts`` or ``check`` to show the confirmation for that run.
+    view_changeset : str, optional
+        The changeset whose rows are listed.
     """
     try:
         rows = _subset(lib, raw_query)
     except ValueError as e:
         return render_template("components/alert.html", level="danger", message=f"Query not understood: {e}")
 
+    checked = _checked(lib, rows)
     review = None
     if cls in LOCAL_CLASSES:
         found = local_proposals(rows, cls, journal.rejected_proposals(lib.config_path))
-        pages = max(1, -(-len(found) // PAGE_ROWS))
-        page = min(max(page, 1), pages)
-        shown = found[(page - 1) * PAGE_ROWS: page * PAGE_ROWS]
+        shown, page, pages = _page_of(found, page)
         review = {
-            "cls": cls, "label": LOCAL_CLASSES[cls], "total": len(found), "page": page, "pages": pages,
+            "kind": "local", "cls": cls, "label": LOCAL_CLASSES[cls], "total": len(found), "page": page, "pages": pages,
             "rows": [{"p": p, "old_json": json.dumps(p.current)} for p in shown],
             "can_commit": cls == MALFORMED,
         }
+    elif cls == CHECK_CLASS or cls in CHECK_CLASSES:
+        counts = check_counts(checked)
+        if cls == CHECK_CLASS:
+            # open on the first class with something in it
+            cls = next((c for c in CHECK_CLASSES if counts[c]), next(iter(CHECK_CLASSES)))
+        shown, page, pages = _page_of(check_rows(checked, cls), page)
+        review = {
+            "kind": "check", "cls": cls, "label": CHECK_CLASSES[cls], "total": counts[cls], "page": page, "pages": pages,
+            "rows": [{"p": p, "old_json": json.dumps(p.current)} for p in shown],
+            "can_commit": cls in CHECK_COMMIT_CLASSES,
+            "pills": [(c, label, counts[c]) for c, label in CHECK_CLASSES.items()],
+        }
     return render_template(
         "components/audit_body.html",
-        q=raw_query, summary={**summarize(rows), **_counts_summary(lib, rows)}, review=review, classes=LOCAL_CLASSES,
+        q=raw_query, summary=_summary(lib, rows, checked), review=review,
         counts=_counts_table(lib, rows, page) if cls == COUNTS_CLASS else None,
-        plan=_plan_view(lib, rows) if show_plan else None, run=_run_view(lib),
+        plan=_plan_view(lib, rows, show_plan) if show_plan else None, run=_run_view(lib),
         refresh_days=lib.config.doi_audit_refresh_days,
         changesets=_changeset_rows(lib), changeset_view=_changeset_view(lib, view_changeset) if view_changeset else None,
         message=message, level=level,
@@ -235,7 +298,7 @@ def audit_commit():
 
     changes = [
         {"tag": r["tag"], "field": r["field"], "old": r["old"], "new": r["new"],
-         "evidence": {"class": cls, "source": "local", "proposed": r["proposed"]}}
+         "evidence": {"class": cls, "proposed": r["proposed"]}}
         for r in ticked
     ]
     try:
@@ -307,38 +370,52 @@ def audit_revert():
     return _render_body(lib, raw_query, cls, page, message, "warning" if skipped else "success")
 
 
-@bp.route('/audit/counts-plan')
+def _action() -> str:
+    """The run a request is about: ``check``, or ``counts`` by default."""
+    return CHECK_ACTION if request.values.get("action") == CHECK_ACTION else COUNTS_ACTION
+
+
+@bp.route('/audit/plan')
 @admin_required
-def audit_counts_plan():
-    """Show what a citation-count run over the subset would ask, before anything is sent."""
+def audit_plan():
+    """Show what a run over the subset would ask, before anything is sent."""
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
     raw_query, cls, page = _form_state()
-    return _render_body(lib, raw_query, cls, page, show_plan=True)
+    return _render_body(lib, raw_query, cls, page, show_plan=_action())
 
 
 @bp.route('/audit/run', methods=['POST'])
 @admin_required
 def audit_run():
-    """Start the citation-count run for the subset, in a thread of this process."""
+    """Start a citation-count run or a DOI check for the subset, in a thread of this process."""
     lib = LibraryContext.get()
     if lib.is_empty: abort(404)
     raw_query, cls, page = _form_state()
-    mode = request.form.get("mode", "")
+    action, mode = _action(), request.form.get("mode", "")
     if mode not in egress.MODES:
-        return _render_body(lib, raw_query, cls, page, "Choose speedy or polite.", "warning", show_plan=True)
+        return _render_body(lib, raw_query, cls, page, "Choose speedy or polite.", "warning", show_plan=action)
+    days = lib.config.doi_audit_refresh_days
     try:
-        plan = runner.plan_counts(lib.config_path, _subset(lib, raw_query), lib.config.doi_audit_refresh_days)
+        rows = _subset(lib, raw_query)
     except ValueError as e:
         return _render_body(lib, raw_query, cls, page, f"Query not understood: {e}", "danger")
+    if action == CHECK_ACTION:
+        plan = runner.plan_check(lib.config_path, rows, days)
+        make, what = runner.CheckRun, "DOI check"
+    else:
+        plan = runner.plan_counts(lib.config_path, rows, days)
+        make, what = runner.CountsRun, "Run"
     if not plan.requests:
-        return _render_body(lib, raw_query, cls, page, "Nothing to fetch: every DOI in the subset has a fresh result.", "info")
+        return _render_body(lib, raw_query, cls, page, "Nothing to ask: every DOI in the subset has a fresh result.", "info")
     try:
-        runner.CountsRun(lib.config_path, plan, mode).start()
+        make(lib.config_path, plan, mode).start()
     except runner.RunActive as e:
         return _render_body(lib, raw_query, cls, page, f"Not started. {e}", "warning")
     return _render_body(lib, raw_query, cls, page,
-                        f"Run started: {plan.tags:,} references in {plan.requests:,} requests, {mode}.")
+                        f"{what} started: {plan.tags:,} references, {plan.requests:,} requests or more, {mode}."
+                        if action == CHECK_ACTION else
+                        f"{what} started: {plan.tags:,} references in {plan.requests:,} requests, {mode}.")
 
 
 @bp.route('/audit/stop', methods=['POST'])
@@ -376,10 +453,12 @@ def audit_run_status():
             return html
         html += render_template(
             "components/audit_summary.html", oob=True, refresh_days=lib.config.doi_audit_refresh_days,
-            summary={**summarize(rows), **_counts_summary(lib, rows)})
+            summary=_summary(lib, rows))
     response = make_response(html)
     if not view["active"]:
-        response.headers["HX-Trigger"] = "audit-run-ended"
+        # the page then shows what the run produced: the counts table, or the check results
+        action = (view["state"] or {}).get("action", COUNTS_ACTION)
+        response.headers["HX-Trigger"] = json.dumps({"audit-run-ended": {"cls": CHECK_CLASS if action == CHECK_ACTION else COUNTS_CLASS}})
     return response
 
 

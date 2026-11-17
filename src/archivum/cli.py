@@ -732,6 +732,7 @@ def doi_audit_revert(changeset, execute):
 @entry.command()
 @click.argument("query", type=str, default="")
 @click.option("--counts", is_flag=True, help="Fetch citation counts from OpenAlex for references with a DOI.")
+@click.option("--dois", is_flag=True, help="Check each DOI against OpenAlex, Crossref and doi.org; collects the counts too.")
 @click.option(
     "--mode",
     type=click.Choice(["auto", "speedy", "polite"]),
@@ -746,7 +747,7 @@ def doi_audit_revert(changeset, execute):
     show_default=True,
     help="Actually send the requests; otherwise, show what the run would do.",
 )
-def doi_audit_run(query, counts, mode, execute):
+def doi_audit_run(query, counts, dois, mode, execute):
     """
     Collect from the public sources for a subset of the library.
 
@@ -768,8 +769,8 @@ def doi_audit_run(query, counts, mode, execute):
     if lib.is_empty:
         click.echo("No library open. Returning")
         return
-    if not counts:
-        click.secho("Choose what to collect: --counts.", fg="yellow")
+    if not counts and not dois:
+        click.secho("Choose what to collect: --counts or --dois.", fg="yellow")
         return
 
     try:
@@ -777,15 +778,28 @@ def doi_audit_run(query, counts, mode, execute):
     except ValueError as e:
         click.secho(f"Query not understood: {e}", fg="red")
         return
-    plan = runner.plan_counts(lib.config_path, subset_rows(lib.ref_df, tags), lib.config.doi_audit_refresh_days)
+    rows, days = subset_rows(lib.ref_df, tags), lib.config.doi_audit_refresh_days
+    # a DOI check asks OpenAlex first and so collects the counts as well
+    if dois:
+        plan, make = runner.plan_check(lib.config_path, rows, days), runner.CheckRun
+        most = plan.requests_most
+    else:
+        plan, make = runner.plan_counts(lib.config_path, rows, days), runner.CountsRun
+        most = plan.requests
     if mode == "auto":
-        mode = egress.choose_mode(plan.requests)
+        mode = egress.choose_mode(most)
 
     click.echo(f"Subset:        {plan.subset:,} references")
-    click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org")
+    if dois:
+        click.echo(f"To check:      {plan.tags:,} references in {plan.requests:,} to {most:,} requests "
+                   "(OpenAlex, then Crossref and doi.org for the DOIs not confirmed)")
+        duration = f"{runner.format_duration(plan.seconds(mode))} to {runner.format_duration(plan.seconds(mode, most))}"
+    else:
+        click.echo(f"To ask about:  {plan.tags:,} references in {plan.requests:,} requests to api.openalex.org")
+        duration = runner.format_duration(plan.seconds(mode))
     click.echo(f"Skipped:       {plan.no_doi:,} with no DOI, {plan.unusable:,} whose DOI needs attention, "
-               f"{plan.fresh:,} with a result under {lib.config.doi_audit_refresh_days} days old")
-    click.echo(f"Mode:          {mode}, about {runner.format_duration(plan.seconds(mode))}")
+               f"{plan.fresh:,} with a result under {days} days old")
+    click.echo(f"Mode:          {mode}, about {duration}")
     if not os.environ.get("OPENALEX_API_KEY"):
         click.secho("OPENALEX_API_KEY is not set: the daily allowance is a tenth of a keyed one.", fg="yellow")
     if not plan.requests:
@@ -800,7 +814,7 @@ def doi_audit_run(query, counts, mode, execute):
                    f"{state['requests']:,} of {state['requests_planned']:,} requests", nl=False)
 
     try:
-        run = runner.CountsRun(lib.config_path, plan, mode, on_progress=show)
+        run = make(lib.config_path, plan, mode, on_progress=show)
     except runner.RunActive as e:
         click.secho(f"Not started. {e}", fg="red")
         return
@@ -817,7 +831,10 @@ def _echo_run_state(state: dict) -> None:
     click.secho(f"Run {state['run_id']} {state['status']}: {state['done']:,} of {state['total']:,} references, "
                 f"{state['requests']:,} of {state['requests_planned']:,} requests, {state['mode']}, "
                 f"{runner.format_duration(runner.elapsed_seconds(state))}.", fg=color)
-    click.echo(f"Found {state['found']:,}, not at OpenAlex {state['not_found']:,}, errors {state['errors']:,}.")
+    if state.get("action") == "check":
+        click.echo(f"Errors {state['errors']:,}. See the classes with doi-audit-status.")
+    else:
+        click.echo(f"Found {state['found']:,}, not at OpenAlex {state['not_found']:,}, errors {state['errors']:,}.")
     for host, info in (state.get("hosts") or {}).items():
         line = f"{host}: {info['requests']:,} requests"
         if info.get("budget_limit"):
@@ -831,8 +848,15 @@ def _echo_run_state(state: dict) -> None:
 
 @entry.command()
 def doi_audit_status():
-    """Show the newest DOI audit run and how many references have a citation count."""
+    """
+    Show the newest DOI audit run, the citation counts held, and the DOI check so far.
+
+    The DOI check lines give the references in each class and how the title
+    similarity is spread, which is what the thresholds are judged against.
+    """
     from .doi_audit import journal, runner
+    from .doi_audit.doi import NOT_CHECKED, STRONG_TITLE, WEAK_TITLE
+    from .doi_audit.proposals import CHECK_CLASSES, check_counts, checked_dois
 
     lib = LibraryContext.get()
     if lib.is_empty:
@@ -849,6 +873,18 @@ def doi_audit_status():
                    f"to {cites['cites_asof'].max()}.")
     else:
         click.echo("Citation counts: none.")
+
+    checked = checked_dois(lib.ref_df, lib.ref_df, journal.latest_observations(lib.config_path))
+    counts = check_counts(checked)
+    if len(checked) == counts[NOT_CHECKED]:
+        click.echo("DOI check: none.")
+        return
+    click.echo("DOI check: " + ", ".join(f"{CHECK_CLASSES[c].lower()} {n:,}" for c, n in counts.items() if n) + ".")
+    scores = [p.score for p in checked if p.score is not None]
+    bands = [(0.0, WEAK_TITLE), (WEAK_TITLE, 0.7), (0.7, 0.8), (0.8, STRONG_TITLE), (STRONG_TITLE, 0.95), (0.95, 1.0)]
+    parts = [f"[{low:.2f}, {high:.2f}) {sum(low <= s < high for s in scores):,}" for low, high in bands]
+    parts.append(f"1.00 {sum(s >= 1.0 for s in scores):,}")
+    click.echo(f"Title similarity of {len(scores):,} compared (thresholds {WEAK_TITLE} and {STRONG_TITLE}): " + ", ".join(parts) + ".")
 
 
 # ========================================================================================
