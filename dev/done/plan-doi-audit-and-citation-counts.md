@@ -520,3 +520,32 @@ if the OpenAlex counts prove sufficient.
 - Tests: `tests/test_doi_audit_changesets.py` (24). Gate: `.venv\Scripts\python -m pytest -q`,
   183 passed, 26 skipped. `uv run` could not be used: the running `archivum serve` holds
   `archivum.exe`, and `uv` wants to rebuild it for the new version.
+
+### 2.16.0a4 [audit page and DOI normalization] (2026-11-17)
+
+- **Live library, read only, counts only:** 12 malformed, 18 needing attention, 131 sharing a
+  DOI (the draft counted 129 by exact text; the page compares normalized, without case).
+- **Divergence: "attention" is wider than the draft's "does not start `10.`".** It is any value
+  that is not `10.prefix/suffix` after normalization, so a value with no suffix or with
+  whitespace inside is listed too. It has its own button, Show DOIs needing attention, and no
+  tick boxes.
+- **Divergence: normalization repeats until stable** and also strips `www.doi.org`, so
+  `doi: https://doi.org/10.1/x.` is reduced in one pass.
+- **Divergence: two more modules**, `doi_audit/journal.py` (brought forward from [citation
+  counts collection] for `decisions.jsonl`) and `doi_audit/proposals.py` (the summary and the
+  review rows, kept out of the route).
+- **Divergence: the summary strip** has the six local counts. "Last checked", "with counts" and
+  "counts older than 30 days" arrive with the steps that produce them.
+- **R1:** the tables are plain Bootstrap tables in `components/audit_body.html`.
+- The Audit box shares the Network history (box `network`) and selects on Enter.
+- `routes/audit.py` imports by name, not `from .shared import *`.
+- `resolve_universe_tags` shares `_query_frame` with `_query_hashes`, which was split for it.
+  Checked on the live library: the hash universe is unchanged in size (7,223 for the empty
+  query), and the tag universe has all 7,440.
+- Browser check on a temp library (headless Chromium, 1400 px and 390 px): select, Normalize,
+  tick, Commit, change subset, Revert; no console errors, no horizontal overflow at 390 px.
+- Tests: `tests/test_doi_audit_page.py` (47). Gate: `.venv\Scripts\python -m pytest -q`, 230
+  passed, 26 skipped. The slow web tests were not run: they can write to the production
+  `semantic-embeddings.feather`.
+- **Left for the user:** review and commit the 12 malformed DOIs on the real library, and
+  revert one as a trial.

@@ -70,7 +70,8 @@
                         [('main.cloud_page', 'Cloud', 'bi-cloud-haze2', false),
                          ('main.insights_page', 'Insights', 'bi-graph-up-arrow', false)],
                         [('main.status', 'Status', 'bi-cpu', true),
-                         ('main.health_page', 'Health', 'bi-shield-check', true)],
+                         ('main.health_page', 'Health', 'bi-shield-check', true),
+                         ('main.audit_page', 'Audit', 'bi-clipboard-check', true)],
                         [('main.about_page', 'About', 'bi-info-circle', false)],
                     ] %}
                     {% set more = namespace(active=false, shown=0) %}
@@ -139,7 +140,8 @@
         // --- Search History & Input Utilities ---
         // The server keeps the history, built from the searches each box sends
         // (services/search_history.py): one entry per burst of typing.
-        const SEARCH_BOXES = {'search-input': 'query', 'rg-input': 'ripgrep', 'network-search': 'network'};
+        // the Audit box selects a subset as the Network box does, and shares its history
+        const SEARCH_BOXES = {'search-input': 'query', 'rg-input': 'ripgrep', 'network-search': 'network', 'audit-search': 'network'};
 
         function initSearchInput(inputId) {
             const input = document.getElementById(inputId);
@@ -205,6 +207,7 @@
             initSearchInput('search-input');
             initSearchInput('rg-input');
             initSearchInput('network-search');
+            initSearchInput('audit-search');
         });
     </script>
 </body>

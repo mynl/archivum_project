@@ -5,6 +5,23 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a4 (2026-11-17)
+
+### Added
+
+- **More &rarr; Audit**, admin only. A query box as on Network selects a subset
+  of references (empty is the whole library); a summary strip counts DOIs
+  present, missing, malformed, needing attention and shared.
+- **Normalize DOIs** lists each DOI stored with a `doi.org` address, a `doi:`
+  prefix, URL-encoding or trailing punctuation beside its bare form. Nothing
+  is ticked for you; **Commit ticked** writes only the ticked rows, and the
+  proposed value can be edited first. Capitals are kept.
+- **Reject ticked** records a proposal as rejected so it is not shown again.
+- The page lists changesets with a **Revert** button for each.
+- **Show DOIs needing attention** lists values that are not DOIs at all; these
+  are fixed in Edit.
+- No network calls yet: everything on the page is computed from the library.
+
 ## 2.16.0a3 (2026-11-17)
 
 ### Added

@@ -1,0 +1,159 @@
+{# Everything under the Audit query box: summary, actions, review table, changesets. #}
+{% macro state() %}
+<input type="hidden" name="q" value="{{ q }}">
+<input type="hidden" name="cls" value="{{ review.cls if review else '' }}">
+<input type="hidden" name="page" value="{{ review.page if review else 1 }}">
+{% endmacro %}
+
+{% if message %}
+<div class="alert alert-{{ level }} py-2 small mb-3" id="audit-message">{{ message }}</div>
+{% endif %}
+
+<div class="row g-2 mb-3" id="audit-summary">
+    {% for label, value, warn in [
+        ('References', summary.references, false),
+        ('With a DOI', summary.with_doi, false),
+        ('Without a DOI', summary.without_doi, false),
+        ('Malformed', summary.malformed, summary.malformed),
+        ('Needs attention', summary.attention, summary.attention),
+        ('Sharing a DOI', summary.shared, summary.shared),
+    ] %}
+    <div class="col-6 col-md-2">
+        <div class="card shadow-sm border-0 text-center py-2 {{ 'bg-warning-subtle' if warn else 'bg-white' }}">
+            <div class="fw-bold fs-5">{{ '{:,}'.format(value) }}</div>
+            <div class="small fw-bold text-uppercase text-muted" style="font-size: 0.65rem;">{{ label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3" id="audit-actions">
+    <button class="btn btn-primary btn-sm px-3 fw-bold shadow-sm"
+            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "malformed"}' hx-include="#audit-search" hx-target="#audit-body">
+        Normalize DOIs
+    </button>
+    <button class="btn btn-outline-secondary btn-sm px-3 fw-bold"
+            hx-get="{{ url_for('main.audit_review') }}" hx-vals='{"cls": "attention"}' hx-include="#audit-search" hx-target="#audit-body">
+        Show DOIs needing attention
+    </button>
+    <span class="text-muted small">Both are computed from the library; nothing is sent anywhere.</span>
+</div>
+
+{% if review %}
+<form id="audit-review-form" class="card shadow-sm border-0 mb-4">
+    {{ state() }}
+    <div class="card-header bg-white d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <h6 class="fw-bold small text-uppercase mb-0">{{ review.label }}: {{ '{:,}'.format(review.total) }} {{ 'row' if review.total == 1 else 'rows' }}</h6>
+        {% if review.rows and review.can_commit %}
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-success btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_commit') }}" hx-include="#audit-review-form" hx-target="#audit-body"
+                    hx-confirm="Write the ticked rows to the library?">Commit ticked</button>
+            <button type="button" class="btn btn-outline-danger btn-sm fw-bold"
+                    hx-post="{{ url_for('main.audit_reject') }}" hx-include="#audit-review-form" hx-target="#audit-body">Reject ticked</button>
+        </div>
+        {% endif %}
+    </div>
+    {% if review.rows %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    {% if review.can_commit %}<th class="ps-3" style="width: 2rem;"></th>{% endif %}
+                    <th class="{{ '' if review.can_commit else 'ps-3' }}">Tag</th>
+                    <th>Field</th>
+                    <th>Current value</th>
+                    {% if review.can_commit %}<th style="min-width: 22rem;">Proposed value</th>{% endif %}
+                    <th>Source</th>
+                    <th>Note</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in review.rows %}
+                {% set p = row.p %}
+                <tr>
+                    {% if review.can_commit %}
+                    <td class="ps-3">
+                        <input class="form-check-input" type="checkbox" name="row" value="{{ p.key }}" aria-label="Tick {{ p.tag }}">
+                        <input type="hidden" name="old::{{ p.key }}" value="{{ row.old_json }}">
+                        <input type="hidden" name="proposed::{{ p.key }}" value="{{ p.proposed }}">
+                    </td>
+                    {% endif %}
+                    <td class="{{ '' if review.can_commit else 'ps-3' }}"><a href="{{ url_for('main.editor_page', tag=p.tag) }}">{{ p.tag }}</a></td>
+                    <td>{{ p.field }}</td>
+                    <td class="font-monospace text-break">{{ p.current }}</td>
+                    {% if review.can_commit %}
+                    <td><input type="text" class="form-control form-control-sm font-monospace" name="new::{{ p.key }}" value="{{ p.proposed }}"
+                               autocomplete="off" spellcheck="false" aria-label="Proposed value for {{ p.tag }}"></td>
+                    {% endif %}
+                    <td>{{ p.source }}</td>
+                    <td class="text-muted">{{ p.note }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% if review.pages > 1 %}
+    <div class="card-footer bg-white d-flex justify-content-between align-items-center small">
+        <span class="text-muted">Page {{ review.page }} of {{ review.pages }}. Ticks apply to this page only.</span>
+        <div class="btn-group">
+            <button type="button" class="btn btn-outline-secondary btn-sm" {{ 'disabled' if review.page <= 1 }}
+                    hx-get="{{ url_for('main.audit_review', q=q, cls=review.cls, page=review.page - 1) }}" hx-target="#audit-body">Previous page</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" {{ 'disabled' if review.page >= review.pages }}
+                    hx-get="{{ url_for('main.audit_review', q=q, cls=review.cls, page=review.page + 1) }}" hx-target="#audit-body">Next page</button>
+        </div>
+    </div>
+    {% endif %}
+    {% else %}
+    <div class="card-body text-muted small">Nothing to review in this subset.</div>
+    {% endif %}
+</form>
+{% endif %}
+
+<div class="card shadow-sm border-0" id="audit-changesets">
+    <div class="card-header bg-white">
+        <h6 class="fw-bold small text-uppercase mb-0">Changesets</h6>
+    </div>
+    {% if changesets %}
+    <div class="table-responsive">
+        <table class="table table-hover table-sm align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    <th class="ps-3">Changeset</th>
+                    <th class="text-center">Created (UTC)</th>
+                    <th>Outcome</th>
+                    <th class="text-end">Rows</th>
+                    <th class="text-end">Applied</th>
+                    <th>Reverts</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in changesets %}
+                <tr>
+                    <td class="ps-3 font-monospace">{{ c.stem }}</td>
+                    <td class="text-center">{{ c.created }}</td>
+                    <td>{{ c.outcome }}{% if c.reverted %}, reverted{% endif %}</td>
+                    <td class="text-end">{{ '{:,}'.format(c.rows) }}</td>
+                    <td class="text-end">{{ '{:,}'.format(c.applied) }}</td>
+                    <td class="font-monospace">{{ c.reverts }}</td>
+                    <td class="text-end pe-3">
+                        {% if c.can_revert %}
+                        <form class="d-inline">
+                            {{ state() }}
+                            <input type="hidden" name="changeset" value="{{ c.stem }}">
+                            <button type="button" class="btn btn-outline-danger btn-sm py-0"
+                                    hx-post="{{ url_for('main.audit_revert') }}" hx-include="closest form" hx-target="#audit-body"
+                                    hx-confirm="Revert {{ c.stem }}? Cells edited since are left alone.">Revert</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="card-body text-muted small">No changesets yet. Each Commit writes one to <code>doi-audit/changesets/</code> in the library folder.</div>
+    {% endif %}
+</div>

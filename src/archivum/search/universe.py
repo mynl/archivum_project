@@ -70,8 +70,13 @@ def split_universe_query(raw_query: str) -> tuple[str, str]:
 
 
 def _query_hashes(lib, df: pd.DataFrame, querex_part: str) -> set[str]:
+    return set(_query_frame(df, querex_part)["hash"].dropna().astype(str))
+
+
+def _query_frame(df: pd.DataFrame, querex_part: str) -> pd.DataFrame:
+    """Return the rows of ``df`` a querex expression selects, with ``tag`` and ``hash``; all rows for no expression."""
     if not querex_part:
-        return set(df["hash"].dropna().astype(str))
+        return df
 
     q_expr = querex_part
     if "select" not in q_expr.lower():
@@ -85,7 +90,7 @@ def _query_hashes(lib, df: pd.DataFrame, querex_part: str) -> set[str]:
     q_result = df.querex(q_expr)
     if not isinstance(q_result, pd.DataFrame):
         raise ValueError(f"Querex error: {q_result}")
-    return set(q_result["hash"].dropna().astype(str))
+    return q_result
 
 
 def _ripgrep_args(ripgrep_part: str, *, case_sensitive: bool = False) -> tuple[str, list[str]]:
@@ -168,3 +173,42 @@ def resolve_universe_details(lib, raw_query: str, *, case_sensitive: bool = Fals
 def resolve_universe(lib, raw_query: str, *, case_sensitive: bool = False) -> set[str]:
     """Resolve a combined querex/ripgrep query to full document hashes."""
     return resolve_universe_details(lib, raw_query, case_sensitive=case_sensitive).hashes
+
+
+def resolve_universe_tags(lib, raw_query: str, *, case_sensitive: bool = False) -> list[str]:
+    """
+    Resolve a combined querex/ripgrep query to reference tags.
+
+    The hash resolvers above drop a reference that has no document, since it
+    has no hash. This one keeps it, for work that is about references.
+
+    Parameters
+    ----------
+    lib : Library
+        The library to search.
+    raw_query : str
+        The query, in the forms :func:`split_universe_query` accepts. Empty
+        selects every reference.
+    case_sensitive : bool, optional
+        Whether a ripgrep part matches case.
+
+    Returns
+    -------
+    list of str
+        Tags in database order, each once. The querex part selects from
+        ``lib.database``, references without a document included. A ripgrep
+        part then keeps only the tags whose primary document matched, so it
+        drops every reference without a document.
+
+    Raises
+    ------
+    ValueError
+        If the querex part does not parse.
+    """
+    querex_part, ripgrep_part = split_universe_query(raw_query)
+    rows = _query_frame(lib.database, querex_part)[["tag", "hash"]]
+    if ripgrep_part:
+        prefixes, _hit = _ripgrep_hash_prefixes(lib, ripgrep_part, case_sensitive=case_sensitive)
+        hashes = rows["hash"].astype("string").str[:10].str.upper()
+        rows = rows[hashes.isin(prefixes)]
+    return list(dict.fromkeys(rows["tag"].astype(str)))

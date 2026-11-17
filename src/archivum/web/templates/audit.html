@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="search-container row g-2 mb-3">
+        <div class="col">
+            <div class="search-wrapper shadow-sm">
+                <input type="text"
+                       id="audit-search"
+                       name="q"
+                       placeholder="Subset to audit: e.g., q author ~ /Wang/ rg risk. Empty is the whole library. Enter to select."
+                       hx-get="{{ url_for('main.audit_subset') }}"
+                       hx-trigger="keyup[key=='Enter'], load"
+                       hx-target="#audit-body"
+                       autocapitalize="none"
+                       autocomplete="off"
+                       autocorrect="off"
+                       spellcheck="false"
+                       autofocus>
+                <i class="bi bi-x-circle clear-input"></i>
+            </div>
+        </div>
+    </div>
+
+    {# stable height, so the swap does not move the page #}
+    <div id="audit-body" style="min-height: 60vh;">
+        <div class="text-muted small">Loading&hellip;</div>
+    </div>
+</div>
+{% endblock %}

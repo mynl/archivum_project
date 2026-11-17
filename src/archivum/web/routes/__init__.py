@@ -10,3 +10,4 @@ from . import edit  # noqa: F401
 from . import reports  # noqa: F401
 from . import network  # noqa: F401
 from . import qmd  # noqa: F401
+from . import audit  # noqa: F401
