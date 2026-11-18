@@ -1,6 +1,6 @@
 # Ingest: DOI check before a reference is added, and its citation count after
 
-Drafted 2026-11-18. Not started. Version assigned at execution (the series is at 2.16.0a17).
+Drafted 2026-11-18. Executed 2026-11-18 as 2.16.0a18; see Execution notes at the foot.
 
 ## Goal
 
@@ -210,3 +210,29 @@ DOI, one Google Scholar paste with none.
    "full" is the Audit page's rule, title similarity 0.9 or more after folding case, accents,
    LaTeX and punctuation, with the same first author; it is not similarity of exactly 1.
 4. **Both commits**: a document with its entry, and a reference with no document.
+
+## Execution notes
+
+### 2.16.0a18 (2026-11-18)
+
+- Built as planned, at Steve's "go ahead on ingest plan". The query-triggered count lookup he
+  raised beside it was dropped at his word: the library's DOIs already have their counts.
+- **Divergence: the duplicate test runs only for an entry with a `doi` field.** An entry with
+  none goes straight to the import as before, with no extra importer pass, since there is
+  nothing to send and the import reports a duplicate itself.
+- **Divergence: a confirmed DOI's count is stored too**, as a Check DOIs run stores the count
+  of a mismatch. The banner says "for that DOI".
+- **`result_sentence` is in `ingest_check.py`**, with the check, so the text is tested without
+  Flask.
+- **Measured.** `derive_cites` on a copy of the real `counts.jsonl`, 2,940 rows: 22 ms. Two
+  real checks at OpenAlex through `egress.default()`: 486 ms for the first request (Artzner
+  et al., verified, title match 1.00, 10,722 citations) and 156 ms for the second (the junk
+  DOI `10.1017/CBO9781107415324.004` on the same entry: mismatch, 0.33).
+- **The bar is the Audit page's Verified class**, title similarity 0.9 or more. Steve was told
+  of this reading and did not change it. One consequence seen in testing: "Coherent measures of
+  risk II" scores 0.94 against "Coherent Measures of Risk" and would pass. Raising the bar for
+  Ingest alone is a one-line change (`STRONG_TITLE` is shared with the Audit page).
+- Tests: `tests/test_ingest_doi_check.py`, 24, on a temporary library with a fake transport.
+  Gate: `uv run --no-sync pytest -q`, 438 passed, 26 skipped.
+- Not done by me: the three checks by hand on the running app (a right DOI, a wrong one, a
+  Google Scholar paste with none).

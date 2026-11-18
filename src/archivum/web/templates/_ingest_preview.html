@@ -6,6 +6,50 @@
         {% endif %}
     </div>
     <div class="card-body p-0">
+        {% if doi_warning %}
+            {# The commit just made was held: the DOI of the entry does not fully
+               match the source's record of it. Shown only on the answer to a
+               commit; refreshing the preview asks no source and drops it. #}
+            <div class="alert alert-warning m-3 mb-0" role="alert" id="ingest-doi-warning">
+                <div>
+                    <strong>Check the DOI.</strong> {{ doi_warning.warning }}
+                    {% if doi_warning.status != 'not a doi' %}<a href="https://doi.org/{{ doi_warning.doi }}" target="_blank" rel="noopener" class="font-monospace">{{ doi_warning.doi }}</a>{% else %}<span class="font-monospace">{{ doi_warning.doi }}</span>{% endif %}
+                </div>
+                {% if doi_warning.record %}
+                <table class="table table-sm table-borderless small mb-0 mt-2" style="--bs-table-bg: transparent;">
+                    <tbody>
+                        <tr>
+                            <th class="text-nowrap pe-3">This entry</th>
+                            <td>{{ (doi_warning.entry.title or '')|replace('{', '')|replace('}', '') }}<div class="text-muted">{{ (doi_warning.entry.author or '')|replace('{', '')|replace('}', '')|truncate(60) }}, {{ doi_warning.entry.year }}</div></td>
+                        </tr>
+                        <tr>
+                            <th class="text-nowrap pe-3">{{ doi_warning.source_name }}</th>
+                            <td>{{ doi_warning.record.title }}<div class="text-muted">{{ doi_warning.record.author }}, {{ doi_warning.record.year }}{% if doi_warning.record.container %}, <i>{{ doi_warning.record.container }}</i>{% endif %}{% if doi_warning.score is not none %} &middot; title match {{ '%.2f'|format(doi_warning.score) }}{% endif %}</div></td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% endif %}
+                <div class="small mt-2">To change it, correct or delete the <code>doi</code> line in the BibTeX and import again.</div>
+                <div class="d-flex flex-wrap gap-2 mt-3 align-items-start">
+                    <form hx-post="{{ url_for('main.ingest_reference_commit') if reference_only else url_for('main.ingest_commit') }}"
+                          hx-target="#ingest-workbench"
+                          hx-include="#workbench-bibtex"
+                          hx-indicator="#doi-confirm-indicator-{{ idx }}">
+                        {% if not reference_only %}
+                        <input type="hidden" name="batch_id" value="{{ batch_id }}">
+                        <input type="hidden" name="idx" value="{{ idx }}">
+                        <input type="hidden" name="hash" value="{{ known_hash }}">
+                        {% endif %}
+                        {% if import_anyway %}<input type="hidden" name="import_anyway" value="on">{% endif %}
+                        <input type="hidden" name="doi_confirmed" value="{{ doi_warning.doi }}">
+                        <button type="submit" class="btn btn-sm btn-warning fw-bold">
+                            <span id="doi-confirm-indicator-{{ idx }}" class="htmx-indicator spinner-border spinner-border-sm me-1"></span>
+                            The DOI is right, import{% if preview_tag %} as {{ preview_tag }}{% endif %}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
         {% if conflict %}
             {# A file, DOI, or title match with the library. Nothing is refused:
                the import waits for Import anyway, red for the same file, amber

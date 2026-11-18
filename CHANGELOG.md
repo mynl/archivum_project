@@ -5,6 +5,23 @@ Notable changes to Archivum. Versions follow `project.version` in `pyproject.tom
 This file starts at 2.3.0. For earlier history see the `Version-*` git tags and
 the session notes in `codex.md` and `GEMINI.md`.
 
+## 2.16.0a18 (2026-11-18)
+
+### Added
+
+- Ingest checks the DOI of the entry being committed, for a document and for a
+  reference with no document. OpenAlex is asked, then Crossref, then
+  `doi.org`; only the DOI is sent, each request once with a 10 s timeout.
+- A full match (title 0.9 or more alike, same first author, years within one)
+  is imported with no extra step. Anything else writes nothing: the preview
+  shows the entry beside the source's record, with **The DOI is right,
+  import**. A changed DOI is checked afresh.
+- The citation count comes with the OpenAlex answer and is stored for the new
+  reference at once. The result banner reports the DOI and the count.
+- A duplicate is still reported first, before anything is sent. An entry with
+  no DOI is not checked. If the sources cannot be reached the import goes
+  ahead and the banner says so.
+
 ## 2.16.0a17 (2026-11-17)
 
 ### Added

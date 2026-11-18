@@ -124,7 +124,7 @@ Three Feather DataFrames per library, plus one BibTeX file kept in sync:
 | `web/` | the Flask app — see below |
 | `configurations/` | packaged YAML for logging and querexfuzz DataFrame configs, shipped via `setuptools.package-data` |
 | `egress.py` | the one outbound HTTP point for public reference data: host allow-list (OpenAlex, Crossref, doi.org, arXiv, Semantic Scholar), per-host pacing, backoff. `crossref.py` and the DOI audit go through it; `requests` is used nowhere else except Ingest's download of a typed URL. A test enforces both. |
-| `doi_audit/` | the Audit page's engine: DOI rules and the match score (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`), the sources (`sources.py`), and the runner (`runner.py`: one run per library by `run.lock`, started only by a person, writing only inside `doi-audit/`). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
+| `doi_audit/` | the Audit page's engine: DOI rules and the match score (`doi.py`), review rows (`proposals.py`), changeset files (`changesets.py`), the JSONL journal (`journal.py`), the sources (`sources.py`), and the runner (`runner.py`: one run per library by `run.lock`, started only by a person, writing only inside `doi-audit/`), and Ingest's DOI check (`ingest_check.py`: one to three requests when a person commits an entry with a DOI, each tried once). Stores everything in `<library>/doi-audit/`; the only write to `ref.feather` is `Library.apply_field_changes`. |
 | `quarto.py`, `rg_tools.py`, `definitive_loader.py`, `gui.py` | Quarto/QMD parsing, ripgrep wrappers, full-store loader, Tkinter metadata editor |
 
 ### The web app
@@ -175,6 +175,13 @@ The admin Ingest page stages a file, lets the user edit BibTeX, previews via
 `write_audit=False`), then commits via `Library.import_staged_document(...)`, which reruns the
 importer with `write_audit=True`, saves through `update_library(save=True)`, shards the
 document, writes audit files, and extracts text for new PDFs.
+
+Both commit routes check the entry's DOI first (`doi_audit/ingest_check.py`): the DOI in the
+BibTeX being committed, never the suggestion's. Only a full match (the Audit page's Verified
+class) is imported without a question; anything else writes nothing and waits for the preview's
+**The DOI is right, import**, which sends `doi_confirmed=<that DOI>`. A library match is
+reported first and sends nothing. After the import the answers and the OpenAlex count are
+stored under the new tag. An entry with no DOI is not checked.
 
 Previewed tags are **advisory**: `map_tags()` resets the allocator at commit time, so the
 committed tag can differ if the library moved in between. Do not reintroduce the old ad hoc

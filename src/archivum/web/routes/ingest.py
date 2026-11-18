@@ -17,6 +17,9 @@ from ..services.ingest_batch import (
     start_prefetch,
 )
 
+from ... import egress
+from ...doi_audit import ingest_check
+
 # suffixes the browser can render inline in the workbench iframe
 VIEWABLE_SUFFIXES = {".pdf"}
 
@@ -122,7 +125,16 @@ def _normalize_pasted_bibtex(bibtex: str) -> str:
 
 # ---------------------------------------------------------------- rendering
 
-def _render_ingest_preview(lib, bibtex, temp_path, known_hash, batch_id, idx):
+def _render_ingest_preview(lib, bibtex, temp_path, known_hash, batch_id, idx, doi_warning=None,
+                           import_anyway=False):
+    """
+    Render the import preview.
+
+    ``doi_warning`` is the :class:`ingest_check.IngestDoiCheck` a commit was
+    just held for; the preview then shows it with its confirm button, which
+    carries ``import_anyway`` on when the held commit had it. A refresh of the
+    preview passes neither, and sends nothing to any source.
+    """
     try:
         preview = lib.preview_staged_document_import(
             bibtex,
@@ -153,6 +165,8 @@ def _render_ingest_preview(lib, bibtex, temp_path, known_hash, batch_id, idx):
         preview_blocked=preview["blocked"],
         preview_message=preview["blocked_message"],
         conflict=preview.get("conflict"),
+        doi_warning=doi_warning,
+        import_anyway=import_anyway,
         reference_only=temp_path is None,
         batch_id=batch_id,
         idx=idx,
@@ -161,7 +175,7 @@ def _render_ingest_preview(lib, bibtex, temp_path, known_hash, batch_id, idx):
     )
 
 
-def _render_workbench(lib, state, idx, bibtex_override=None):
+def _render_workbench(lib, state, idx, bibtex_override=None, doi_warning=None, import_anyway=False):
     """Render the workbench for one document of a batch."""
     it = item(state, idx)
     path = item_path(state, idx)
@@ -183,7 +197,7 @@ def _render_workbench(lib, state, idx, bibtex_override=None):
         duplicate_tag = match_tags[0] if match_tags else "Unknown"
 
     preview_html = _render_ingest_preview(
-        lib, bibtex, path, doc_hash, state["batch_id"], idx
+        lib, bibtex, path, doc_hash, state["batch_id"], idx, doi_warning=doi_warning, import_anyway=import_anyway
     )
 
     return render_template(
@@ -226,6 +240,54 @@ def _advance(lib, batch_id, after_idx):
     c = counts(state)
     discard_batch(batch_id)
     return render_template('_ingest_start.html', lib=lib, summary=c)
+
+
+def _check_doi_before_import(lib, bibtex, path, known_hash, import_anyway):
+    """
+    Check the DOI of the entry about to be committed.
+
+    Returns
+    -------
+    tuple
+        ``(check, held)``. ``check`` is ``None`` when nothing was asked: the
+        entry has no ``doi`` field, or the library has a match the user has
+        not yet answered, which is reported first and sends nothing. ``held``
+        is True when the DOI needs the user's confirmation and the form does
+        not confirm this very DOI; the caller then writes nothing.
+
+    Notes
+    -----
+    ``doi_confirmed`` holds the DOI that was confirmed, never just ``on``, so
+    a DOI edited after the warning is checked again.
+    """
+    if not str(ingest_check.entry_fields(bibtex).get("doi") or "").strip():
+        return None, False
+    if not import_anyway:
+        try:
+            preview = lib.preview_staged_document_import(bibtex, path, known_hash=known_hash,
+                                                         source_label="web-ingest-preview")
+        except Exception:
+            # an entry the importer cannot read; the import reports it
+            return None, False
+        if preview.get("conflict"):
+            return None, False
+    check = ingest_check.check_entry_doi(bibtex, egress.default())
+    held = check.needs_confirmation and request.form.get('doi_confirmed', '') != check.doi
+    return check, held
+
+
+def _doi_result(lib, tag, check):
+    """Store the check under the new tag and return its sentence for the banner, HTML-escaped with a leading space."""
+    if check is None:
+        return ""
+    sentence = ingest_check.result_sentence(check)
+    try:
+        ingest_check.record_ingest_check(lib.config_path, tag, check)
+    except Exception as e:
+        # the reference is added; only the audit journal is behind
+        logger.error("Ingest DOI check for %s not recorded: %s", tag, e, exc_info=True)
+        sentence += f" The DOI check could not be recorded: {e}"
+    return f" {html.escape(sentence)}" if sentence else ""
 
 
 # ---------------------------------------------------------------- routes
@@ -316,6 +378,14 @@ def ingest_commit():
     except BatchError as e:
         return str(e), 400
 
+    check, held = _check_doi_before_import(lib, bibtex, path, h, import_anyway)
+    if held:
+        # nothing is written; the preview shows the two records and the confirm button
+        return _render_workbench(lib, state, int(idx), bibtex_override=bibtex, doi_warning=check,
+                                 import_anyway=import_anyway) + _banner(
+            'warning', message=f"{name}: not imported. {check.warning}"
+        )
+
     try:
         importer = lib.import_staged_document(
             bibtex, path, known_hash=h, source_label="web-ingest",
@@ -329,6 +399,7 @@ def ingest_commit():
                 f'<strong>{html.escape(name)}</strong> archived as '
                 f'<strong>{html.escape(tag)}</strong> '
                 f'<a href="/view/{html.escape(tag, quote=True)}" target="_blank">View</a>'
+                f'{_doi_result(lib, tag, check)}'
             ),
         )
     except LibraryImportBlocked as e:
@@ -400,9 +471,10 @@ def ingest_replace():
 
 # ---------------------------------------------------------------- reference only
 
-def _render_reference_workbench(lib, bibtex):
+def _render_reference_workbench(lib, bibtex, doi_warning=None, import_anyway=False):
     """The workbench with no document: BibTeX, preview, and commit only."""
-    preview_html = _render_ingest_preview(lib, bibtex, None, None, "", 0) if bibtex.strip() else ""
+    preview_html = _render_ingest_preview(lib, bibtex, None, None, "", 0, doi_warning=doi_warning,
+                                          import_anyway=import_anyway) if bibtex.strip() else ""
     return render_template(
         '_ingest_reference.html',
         bibtex=bibtex,
@@ -439,6 +511,11 @@ def ingest_reference_commit():
     lib = LibraryContext.get()
     bibtex = request.form.get('bibtex', '')
     import_anyway = request.form.get('import_anyway') == 'on'
+    check, held = _check_doi_before_import(lib, bibtex, None, None, import_anyway)
+    if held:
+        return _render_reference_workbench(lib, bibtex, doi_warning=check, import_anyway=import_anyway) + _banner(
+            'warning', message=f"Not added. {check.warning}"
+        )
     try:
         importer = lib.import_staged_document(bibtex, None, source_label="web-ingest-reference",
                                               allow_duplicate=import_anyway)
@@ -456,6 +533,7 @@ def ingest_reference_commit():
         html_message=(
             f'<strong>{html.escape(tag)}</strong> added as a reference with no document '
             f'<a href="{url_for("main.editor_page", tag=tag)}">Edit</a>'
+            f'{_doi_result(lib, tag, check)}'
         ),
     )
     return render_template('_ingest_start.html', lib=lib, summary=None) + banner
