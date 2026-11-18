@@ -75,11 +75,14 @@ Steps, stopping at the first that settles it:
 
 | status | at commit |
 |---|---|
-| `verified`, `year differs` | go ahead |
-| `no doi` | go ahead, nothing to check |
-| `not compared` | go ahead; the DOI exists but there is nothing to compare |
-| `not checked` | go ahead; the banner gives the reason (see question 2) |
-| `weak match`, `mismatch`, `unresolved`, `not a doi` | stop and ask |
+| `verified` | go ahead |
+| `no doi` | go ahead, nothing to check and no count |
+| `not checked` | go ahead; the banner gives the reason. Not expected to occur |
+| `year differs`, `weak match`, `mismatch`, `unresolved`, `not compared`, `not a doi` | stop and ask |
+
+Only a full match passes without a question (Steve, 2026-11-18). `year differs` and `not
+compared` stop too: in the first the entry's year may be the error, and the warning is the
+moment to correct it; in the second there is no record to match.
 
 The `sources` functions call `client.get` with the run's defaults, which retry with backoff for
 minutes. An interactive check must not: the module wraps the client so that every `get` is
@@ -130,9 +133,8 @@ the reference is already added and stays added.
 |---|---|
 | verified, with count | DOI verified at OpenAlex. Cited 1,234 times. |
 | verified at Crossref | DOI verified at Crossref. OpenAlex has no record, so no citation count. |
-| year differs | DOI verified; the years differ (2019 here, 2021 at OpenAlex). Cited 12 times. |
 | confirmed by hand | DOI kept at your word (mismatch). Cited 24,747 times at OpenAlex, for that DOI. |
-| not compared | The DOI exists, but no source has a record to compare. No citation count. |
+| confirmed by hand, no record | DOI kept at your word (exists, not compared). No citation count. |
 | not checked | DOI not checked: `<error>`. Check DOIs on the Audit page will pick it up. |
 | no doi | No DOI, so no citation count. |
 
@@ -144,8 +146,8 @@ rendered to HTML and PDF, as the last step.
 
 ## Not in this plan
 
-- **Finding a DOI for an entry that has none.** A Google Scholar entry has no DOI, so for
-  those entries this plan checks nothing and attaches no count. See question 1.
+- **Finding a DOI for an entry that has none.** No DOI, no check, no count (Steve,
+  2026-11-18): Ingest's discovery has already asked Crossref for one.
 - `POST /ingest/replace` with "update metadata", the Edit page, the CLI `import-bibtex`, and
   the Audit page's Import as a new reference (already checked against Crossref).
 - A deny-list of known junk DOIs. The check makes one unnecessary at Ingest.
@@ -198,20 +200,13 @@ Tests, none touching the network or the production library:
 By hand, on the running app: one real paper with its right DOI, one with a deliberately wrong
 DOI, one Google Scholar paste with none.
 
-## Questions for Steve
+## Decisions (Steve, 2026-11-18)
 
-1. **An entry with no DOI.** Google Scholar's BibTeX has none, so for your usual paste there
-   is nothing to check and no count. Options: (a) as planned, do nothing, and leave it to
-   **Find missing DOIs** on Audit; (b) when the committed entry has no DOI but the suggested
-   entry had one, check that DOI against the committed title and author and, if verified, add
-   it to the entry; (c) search Crossref by title and author at commit (one more request,
-   about a second) and add an exact match's DOI. Recommendation: (b), then (c) later if (b)
-   leaves too many without one. (b) sends nothing new and reuses the same check.
-2. **Sources unreachable.** Planned: import anyway and say "not checked" in the banner, so
-   Ingest works offline. The alternative is to stop and ask. Recommendation: as planned.
-3. **Weak match** (title similarity 0.6 to 0.9, same first author). Planned: stop and ask,
-   since you asked for a go-ahead only when title and first author match. Subtitles and
-   truncated Google Scholar titles will land here at times. Say if weak should pass with a
-   note instead.
-4. **"The add reference route".** Planned for both commits, a document with its entry and a
-   reference with no document. Say if you meant only one.
+1. **An entry with no DOI**: do nothing. No DOI, no check, no count. Ingest's discovery has
+   already asked Crossref for one.
+2. **Sources unreachable**: import, and say "not checked" in the banner. It should not occur.
+3. **Only a full match passes.** A weak match stops and asks. Read here as the `verified`
+   class and nothing else, so `year differs` and `not compared` also stop. To be confirmed:
+   "full" is the Audit page's rule, title similarity 0.9 or more after folding case, accents,
+   LaTeX and punctuation, with the same first author; it is not similarity of exactly 1.
+4. **Both commits**: a document with its entry, and a reference with no document.
